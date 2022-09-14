@@ -57,7 +57,6 @@ add_needs_realized_inputs(
         aten.bmm,
         aten.convolution,
         aten.convolution_backward,
-        aten.grid_sampler_2d,
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
@@ -1737,113 +1736,6 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
         dtype=x.get_dtype(),
         inner_fn=fn,
         ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
-    )
-
-
-@register_lowering([aten.grid_sampler_2d])
-def grid_sampler_2d(
-    image, optical, interpolation_mode=0, padding_mode=0, align_corners=False
-):
-    image.realize_hint()  # reuse
-    optical.realize_hint()
-    image_loader = image.make_loader()
-    optical_loader = optical.make_loader()
-
-    assert interpolation_mode == 0
-    assert padding_mode in (0, 1)
-
-    N, C, IH, IW = image.get_size()
-    _, H, W, _ = optical.get_size()
-
-    def clamp(v, min, max):
-        if isinstance(min, (int, sympy.Expr)):
-            min = ops.index_expr(min, torch.float32)
-        if isinstance(max, (int, sympy.Expr)):
-            max = ops.index_expr(max, torch.float32)
-        return ops.maximum(min, ops.minimum(max, v))
-
-    def findex(v):
-        # indirect indexing via a float value
-        return ops.indirect_indexing(ops.to_dtype(v, torch.int64))
-
-    def fn(index):
-        n, c, y, x = index
-        ix = optical_loader([n, y, x, sympy.Integer(0)])
-        iy = optical_loader([n, y, x, sympy.Integer(1)])
-        zero = ops.constant(0.0, torch.float32)
-        one = ops.constant(1.0, torch.float32)
-        two = ops.constant(2.0, torch.float32)
-
-        def grid_sampler_compute_source_index(coord, size):
-            size = ops.index_expr(size, torch.float32)
-            if align_corners:
-                # unnormalize coord from [-1, 1] to [0, size - 1]
-                coord = ops.mul(ops.div(ops.add(coord, one), two), ops.sub(size, one))
-            else:
-                # unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
-                coord = ops.div(ops.sub(ops.mul(ops.add(coord, one), size), one), two)
-
-            if padding_mode == 0:  # GridSamplerPadding::Zeros
-                return coord
-            elif padding_mode == 1:  # GridSamplerPadding::Border
-                return clamp(coord, zero, ops.sub(size, one))
-            else:
-                raise NotImplementedError("reflection padding")
-
-        ix = grid_sampler_compute_source_index(ix, IW)
-        iy = grid_sampler_compute_source_index(iy, IH)
-
-        ix_nw = ops.floor(ix)
-        iy_nw = ops.floor(iy)
-
-        ix_ne = ops.add(ix_nw, one)
-        iy_ne = iy_nw
-
-        ix_sw = ix_nw
-        iy_sw = ops.add(iy_nw, one)
-
-        ix_se = ops.add(ix_nw, one)
-        iy_se = ops.add(iy_nw, one)
-
-        nw = ops.mul(ops.sub(ix_se, ix), ops.sub(iy_se, iy))
-        ne = ops.mul(ops.sub(ix, ix_sw), ops.sub(iy_sw, iy))
-        sw = ops.mul(ops.sub(ix_ne, ix), ops.sub(iy, iy_ne))
-        se = ops.mul(ops.sub(ix, ix_nw), ops.sub(iy, iy_nw))
-
-        # TODO(jansel): here we are missing the mask required
-        # for GridSamplerPadding::Zeros and instead always doing
-        # GridSamplerPadding::Border.  It does not seem to matter for
-        # correctness in the one model using this: SuperSlowMo.
-
-        ix_nw = clamp(ix_nw, 0, IW - 1)
-        iy_nw = clamp(iy_nw, 0, IH - 1)
-        ix_ne = clamp(ix_ne, 0, IW - 1)
-        iy_ne = clamp(iy_ne, 0, IH - 1)
-        ix_sw = clamp(ix_sw, 0, IW - 1)
-        iy_sw = clamp(iy_sw, 0, IH - 1)
-        ix_se = clamp(ix_se, 0, IW - 1)
-        iy_se = clamp(iy_se, 0, IH - 1)
-
-        nw_val = image_loader([n, c, findex(iy_nw), findex(ix_nw)])
-        ne_val = image_loader([n, c, findex(iy_ne), findex(ix_ne)])
-        sw_val = image_loader([n, c, findex(iy_sw), findex(ix_sw)])
-        se_val = image_loader([n, c, findex(iy_se), findex(ix_se)])
-
-        return functools.reduce(
-            ops.add,
-            [
-                ops.mul(nw_val, nw),
-                ops.mul(ne_val, ne),
-                ops.mul(sw_val, sw),
-                ops.mul(se_val, se),
-            ],
-        )
-
-    return Pointwise.create(
-        device=image.get_device(),
-        dtype=image.get_dtype(),
-        inner_fn=fn,
-        ranges=[N, C, H, W],
     )
 
 
