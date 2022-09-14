@@ -7,7 +7,7 @@ from types import ModuleType
 
 import torch
 
-import torchdynamo.logging
+import torchdynamo.utils
 
 try:
     import torch._prims
@@ -136,7 +136,7 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            torchdynamo.logging.set_loggers_level(value)
+            torchdynamo.utils.set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 
