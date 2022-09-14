@@ -4,7 +4,6 @@ import json
 import logging
 import os.path
 import time
-from enum import Enum
 from typing import List
 
 import triton
@@ -16,6 +15,7 @@ from triton.ops.matmul import get_configs_io_bound
 from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
 
 from torchinductor import config
+from torchinductor.ir import ReductionHint
 from torchinductor.triton_ops.mm_perf_model import estimate_matmul_time
 from torchinductor.utils import conditional_product
 
@@ -305,13 +305,6 @@ def pointwise_heuristics(size_hints, filename=None):
             filename=filename,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
-
-
-class ReductionHint(Enum):
-    INNER = 0
-    OUTER = 1
-    OUTER_TINY = 2
-    DEFAULT = 3
 
 
 def reduction_heuristics(size_hints, reduction_hint=False, filename=None):

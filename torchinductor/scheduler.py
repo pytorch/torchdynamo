@@ -35,6 +35,9 @@ log = logging.getLogger(__name__)
 
 
 def pformat(obj):
+    if isinstance(obj, set):
+        # pformat has trouble with sets of sympy exprs
+        obj = sorted(obj, key=str)
     result = pprint.pformat(obj, indent=4)
     if "\n" in result:
         return f"\n{textwrap.indent(result, ' '*4)}"
@@ -701,7 +704,7 @@ class Scheduler:
         def visit(n):
             if n not in seen:
                 seen.add(n)
-                for dep in n.unmet_dependencies:
+                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
                     visit(name_to_node[dep.name])
                 result.append(n)
 

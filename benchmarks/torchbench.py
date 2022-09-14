@@ -323,7 +323,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 1e-3
             elif name in REQUIRE_EVEN_HIGHER_TOLERANCE:
-                tolerance = 8 * 1e-3
+                tolerance = 8 * 1e-2
         return tolerance, cosine
 
     def compute_loss(self, pred):

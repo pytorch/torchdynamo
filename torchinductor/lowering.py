@@ -767,11 +767,12 @@ def fallback_handler(kernel):
     return handler
 
 
+# https://github.com/pytorch/torchdynamo/issues/1215 to remove native_batch_norm
 def make_fallback(kernel):
     assert (
-        kernel not in decompositions
+        kernel not in decompositions or kernel is aten.native_batch_norm.default
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.native_batch_norm.default:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
@@ -812,6 +813,16 @@ def _foobar(_):
     assert False
 
 
+@functools.lru_cache(1)
+def _warn_triton_random(salt):
+    log.warning("using triton random, expect difference from eager")
+
+
+def warn_triton_random():
+    # only warn once per graph
+    _warn_triton_random(V.graph.creation_time)
+
+
 def make_rand(fn_name):
     def rand_or_randn(
         *size,
@@ -821,7 +832,7 @@ def make_rand(fn_name):
         pin_memory=False,
         memory_format=None,
     ):
-        log.warning("using triton random, expect difference from eager")
+        warn_triton_random()
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
@@ -887,7 +898,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    log.warning("using triton random, expect difference from eager")
+    warn_triton_random()
     return V.graph.random_seed_buffer(x.get_device())
 
 
@@ -2052,13 +2063,13 @@ def max_pool2d_with_indices_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2115,6 +2126,7 @@ def max_pool2d_with_indices_backward(
                         check,
                     )
                     gradient = ops.where(mask, ops.add(gradient, grad_part), gradient)
+        assert gradient is not None
         return gradient
 
     return Pointwise.create(
