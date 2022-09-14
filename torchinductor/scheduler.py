@@ -198,6 +198,7 @@ class BaseSchedulerNode:
                 # These are boring and samey
                 continue
 
+            out_lines.append("")
             # TODO(voz): Should the pragma be constant somewhere?
             out_lines.append("#pragma CMT ORIGIN:")
             out_lines.append(f"#pragma CMT {o.op} {o.target}")
@@ -207,6 +208,8 @@ class BaseSchedulerNode:
                 out_lines.append(
                     "#pragma CMT " + line.replace("{", "{{").replace("}", "}}")
                 )
+            out_lines.append("#pragma CMT END ORIGIN")
+            out_lines.append("")
 
         if len(out_lines) == 0:
             return
