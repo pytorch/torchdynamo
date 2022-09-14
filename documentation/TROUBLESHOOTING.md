@@ -270,7 +270,7 @@ The other difference from the procedure in [TorhInductor Errors](#torchinductor-
 
 # Performance Profiling
 
-## Understanding Coarse-Grained Compile Times
+## Accessing TorchDynamo Profiler
 TorchDynamo has a builtin stats function for collecting and displaying the time spent in each compilation phase. These stats can be accessed by calling `torchdynamo.utils.compile_times()` after executing TorchDynamo. By default, this returns a string representation of the compile times spent in each TorchDynamo function by name. 
 
 
