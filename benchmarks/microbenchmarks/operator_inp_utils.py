@@ -12,10 +12,10 @@ from typing import Iterable
 from typing import Tuple
 
 import torch
+from torch.testing import make_tensor
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_map
-from torch.testing import make_tensor
 
 log = logging.getLogger(__name__)
 
@@ -95,7 +95,8 @@ def deserialize_tensor(size, dtype, stride=None):
         out = torch.empty(size, dtype=dtype)
     try:
         out.copy_(make_tensor(size, dtype=dtype, device="cpu"))
-    except:
+    except Exception as e:
+        print(e)
         return out
     return out
 
