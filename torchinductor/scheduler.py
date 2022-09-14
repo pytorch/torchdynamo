@@ -191,14 +191,25 @@ class BaseSchedulerNode:
         if only_once and self.written:
             return
         origins = self.node.origins 
-        origin = []
+        out_lines = []
 
         for o in origins:
-            origin.append({str(o) : (str((o.op, o.target, o.meta)))})
+            if o.op == 'output':
+                # These are kinda boring and samey
+                continue
+
+            out_line = "#pragma CMT ORIGIN: \n"
+            out_line += f"#pragma CMT {o.op} {o.target} \n"
+            out_line_meta = f"#pragma CMT {o.meta}".replace("\\", "\n").replace("{", "{{").replace("}", "}}")
+            out_line += out_line_meta
+            out_lines.append(out_line)
         
-        origin_str = str(origin)
-        origin_str = origin_str.replace("{", "{{").replace("}", "}}")
-        buffer.writeline(f"#pragma CMT {self} : {origin_str}")
+        if len(out_lines) == 0:
+            return
+            
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        buffer.writelines(out_lines)
         self.written = True
         
 
