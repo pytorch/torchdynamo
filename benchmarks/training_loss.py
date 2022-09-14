@@ -1,7 +1,8 @@
 import argparse
-import math
 import os
 import sys
+import time
+from datetime import timedelta
 
 import torch
 from datasets import load_dataset
@@ -94,13 +95,11 @@ def model_training_evaluation(
 def check_loss(ref_loss, res_loss):
     assert len(ref_loss) == len(res_loss)
     length = len(ref_loss)
-    for i in range(math.ceil(length / 10)):
-        end = i + 10 if i + 10 <= length else length
-        x = sum(ref_loss[i:end]) / 10
-        y = sum(res_loss[i:end]) / 10
-        if not math.isclose(x, y, rel_tol=1e-1):
-            return False
-    return True
+    x = min(length, 10)
+    if sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 1e-1:
+        return True
+    else:
+        return False
 
 
 def parse_args():
@@ -150,18 +149,28 @@ def main():
     )
     optimizer_cls = getattr(sys.modules["torch.optim"], args.optimizer)
     optimizer = optimizer_cls(model.parameters(), lr=args.lr)
+    native_start = time.time()
     ref_loss, _ = model_training_evaluation(
         None, train_dataloader, eval_dataloader, model, optimizer, args.epochs
     )
+    native_end = time.time()
     res_loss, _ = model_training_evaluation(
         args.backend, train_dataloader, eval_dataloader, model, optimizer, args.epochs
     )
+    dynamo_end = time.time()
     if check_loss(ref_loss, res_loss):
-        print("[PASSED] TorchDynamo end to end training passed!")
+        print(
+            "[PASSED] TorchDynamo end to end training loss is less than or equal to native PyTorch"
+        )
     else:
         print(
-            "[FAILED] TorchDynamo end to end training failed due to loss not close to native Pytorch"
+            "[FAILED] TorchDynamo end to end training loss is greater than native Pytorch"
         )
+    native_elapsed = native_end - native_start
+    dynamo_elapsed = dynamo_end - native_end
+    print(f"Train model on {args.epochs} epochs:")
+    print(f"PyTorch spent {timedelta(seconds=native_elapsed)}")
+    print(f"TorchDynamo spent {timedelta(seconds=dynamo_elapsed)}")
 
 
 if __name__ == "__main__":
