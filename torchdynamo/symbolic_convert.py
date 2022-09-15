@@ -32,7 +32,8 @@ from torchdynamo.variables.builder import VariableBuilder
 from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
-from .allowed_functions import is_builtin
+from .allowed_functions import is_builtin_callable
+from .allowed_functions import is_builtin_constant
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import cleaned_instructions
@@ -530,8 +531,13 @@ class InstructionTranslatorBase(object):
     def load_builtin(self, inst):
         assert inst.argval in self.f_builtins
         val = self.f_builtins[inst.argval]
-        assert is_builtin(val)
-        self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
+
+        if callable(val):
+            assert is_builtin_callable(val)
+            self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
+        else:
+            assert is_builtin_constant(val)
+            self.push(ConstantVariable(value=val))
 
     def jump(self, inst):
         self.instruction_pointer = self.indexof[id(inst.target)]

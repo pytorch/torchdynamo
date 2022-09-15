@@ -1604,6 +1604,32 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_ellipsis(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lnorm = torch.nn.LayerNorm(
+                    (256,), eps=1e-06, elementwise_affine=True
+                )
+                self.linear = torch.nn.Linear(
+                    in_features=256, out_features=256, bias=True
+                )
+
+            def forward(self, cat_10):
+                lnorm = self.lnorm(cat_10)
+                getitem_64 = lnorm[
+                    (slice(None, None, None), slice(0, 1, None), Ellipsis)
+                ]
+                linear = self.linear(getitem_64)
+                return (linear,)
+
+        args = [torch.randn(2, 197, 256)]
+
+        mod = Repro()
+        opt_mod = torchdynamo.optimize("eager", nopython=True)(mod)
+
+        self.assertTrue(same(mod(*args), opt_mod(*args)))
+
 
 if __name__ == "__main__":
     unittest.main()
