@@ -502,6 +502,6 @@ class OutputGraph(fx.Tracer):
 
         # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
         nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
-        rv.node.stack_trace = nn_module_stack_str + "".join(msgs)
+        rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
 
         return rv

@@ -205,14 +205,17 @@ class BaseSchedulerNode:
             # TODO(voz): Should the pragma be constant somewhere?
             out_lines.append("#pragma CMT ORIGIN:")
             out_lines.append(f"#pragma CMT {o.op} {o.target}")
-            out_line_meta = f"{o.meta}"
-            out_lines_meta = out_line_meta.split("\\n")
-            for line in out_lines_meta:
+            if "stack_trace" in o.meta:
+                stack_trace = f"{o.meta['stack_trace']}"
+                stack_trace_last_line = stack_trace.split("|")[-1]
                 out_lines.append(
-                    "#pragma CMT " + line.replace("{", "{{").replace("}", "}}")
+                    "#pragma CMT "
+                    + stack_trace_last_line.replace("{", "{{")
+                    .replace("}", "}}")
+                    .replace("\n", "\\")
                 )
-            out_lines.append("#pragma CMT END ORIGIN")
-            out_lines.append("")
+                out_lines.append("#pragma CMT END ORIGIN")
+                out_lines.append("")
 
         if len(out_lines) == 0:
             return
