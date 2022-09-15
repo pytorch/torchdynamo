@@ -43,6 +43,7 @@ from .codegen import PyCodegen
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardBuilder
+from .output_graph import GraphCompileReason
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
@@ -117,9 +118,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            user_stack = self.format_frame_summary()
             self.output.compile_subgraph(
-                self, msg=f"generic_jump {typestr(value)}\n{user_stack}"
+                self,
+                reason=GraphCompileReason(
+                    f"generic_jump {typestr(value)}", [self.frame_summary()]
+                ),
             )
             self.pop()
 
@@ -152,23 +155,26 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
-            msg = None
+            reason = None
             try:
                 return inner_fn(self, inst)
             except Unsupported as exc:
                 if not self.should_compile_partial_graph():
                     raise
-                user_stack = self.format_frame_summary(exc.real_stack)
+                user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
+                user_stack_formatted = "".join(traceback.format_list(user_stack))
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if not explain:
-                    log.warning(f"Graph break: {exc} from user code at {user_stack}")
+                    log.warning(
+                        f"Graph break: {exc} from user code at {user_stack_formatted}"
+                    )
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
-                msg = f"{exc.msg}\n{user_stack}"
+                reason = GraphCompileReason(exc.msg, user_stack)
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self, msg=msg)
+            self.output.compile_subgraph(self, reason=reason)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
@@ -777,8 +783,9 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(prior)
 
         # break the graph
-        user_stack = self.format_frame_summary()
-        self.output.compile_subgraph(self, f"store_attr\n{user_stack}")
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
+        )
         self.output.add_output_instructions([inst])
         self.popn(2)
         self.output.add_output_instructions(

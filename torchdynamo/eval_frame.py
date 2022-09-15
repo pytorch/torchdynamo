@@ -5,6 +5,7 @@ import inspect
 import logging
 import os
 import threading
+import traceback
 import types
 import warnings
 from unittest.mock import patch
@@ -393,9 +394,18 @@ def explain(f, *args, **kwargs):
 
     graph_count = len(graphs)
 
+    # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
+    deduped_reasons = {}
+    for reason in break_reasons:
+        innermost_frame = reason.user_stack[-1]
+        # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
+        deduped_reasons[repr(innermost_frame)] = reason
+
     formatted_list = ""
-    for idx in range(0, len(break_reasons)):
-        formatted_list += f"{idx + 1}. {break_reasons[idx]} \n"
+    for idx, break_reason in enumerate(deduped_reasons.values()):
+        formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
+        msg = f"{break_reason.reason}\n{formatted_stack}"
+        formatted_list += f"{idx + 1}. {msg} \n"
 
     explanation = f"Dynamo produced {graph_count} graphs"
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
@@ -405,7 +415,7 @@ def explain(f, *args, **kwargs):
 
     # TODO(voz): Do we want a decorator for this?
     torchdynamo.reset()
-    return explanation, out_guards, graphs, ops_per_graph
+    return explanation, out_guards, graphs, ops_per_graph, break_reasons
 
 
 def export(f, *args, aten_graph=False, **kwargs):
