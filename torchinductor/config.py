@@ -49,7 +49,7 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
-comment_origin = True
+comment_origin = False
 
 # config specific to codegen/cpp.pp
 class cpp:
