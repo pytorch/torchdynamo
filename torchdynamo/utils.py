@@ -117,16 +117,22 @@ def compile_times(repr="str", aggregate=False):
 
 
 class DuplicateWarningChecker(object):
-    def __init__(self):
+    def __init__(self, maxsize=4096):
+        self.maxsize = maxsize
         self.reset()
 
     def reset(self):
-        self.set = set()
+        self.set = collections.OrderedDict()
 
     def add(self, key):
-        if not config.verbose and key in self.set:
-            return False
-        self.set.add(key)
+        if key in self.set:
+            self.set.move_to_end(key, last=True)
+            if not config.verbose:
+                return False
+        else:
+            self.set[key] = None
+            while len(self.set) > self.maxsize:
+                self.set.popitem(last=False)
         return True
 
 
