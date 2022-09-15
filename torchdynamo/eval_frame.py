@@ -666,10 +666,10 @@ class TorchPatcher:
 
         return inner_fn
 
-def specialize(fn=None):
-    """Decorator and context manager to disable TorchDynamo"""
-    if fn is not None:
-        print("FN is", fn)
-        # assert callable(fn)
-        return SpecializeContext()
-    return SpecializeContext()
+def specialize():
+    # if fn is not None:
+    #     print("FN is", fn)
+    #     # assert callable(fn)
+    #     return SpecializeContext()
+    # return SpecializeContext()
+    return optimize(backend="specializer", nopython=True)
