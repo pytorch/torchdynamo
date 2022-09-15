@@ -116,6 +116,10 @@ FILENAME_ALLOWLIST |= set(
 
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
+def lazy_allowlist():
+    import torchdynamo
+    return {torchdynamo.eval_frame.__file__}
+
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
         torch._prims.__file__,
@@ -153,6 +157,8 @@ def check(filename, allow_torch=False):
     if filename is None:
         return True
     if filename in FILENAME_ALLOWLIST:
+        return False
+    if filename in lazy_allowlist():
         return False
     if allow_torch and is_torch(filename):
         return False

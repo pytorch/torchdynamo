@@ -409,6 +409,8 @@ class TensorVariable(VariableTracker):
         from . import ConstantVariable
         from . import TupleVariable
 
+        print("call method on tensor", self.value)
+
         kwargs = dict(kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())

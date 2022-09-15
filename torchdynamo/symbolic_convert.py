@@ -75,6 +75,7 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
+from .eval_frame import Specializer
 
 log = logging.getLogger(__name__)
 
@@ -558,7 +559,8 @@ class InstructionTranslatorBase(object):
     def SETUP_WITH(self, inst):
         ctx = self.pop()
         if not isinstance(ctx, ContextManagerVariable):
-            unimplemented(f"SETUP_WITH {ctx}")
+            if not isinstance(ctx.value, Specializer):
+                unimplemented(f"SETUP_WITH {ctx}")
         self.output.guards.update(ctx.guards)
 
         if isinstance(self, InstructionTranslator):

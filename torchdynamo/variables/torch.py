@@ -100,6 +100,11 @@ class TorchVariable(VariableTracker):
         from . import GradModeVariable
         from . import TensorVariable
 
+        print("Call function time")
+        import torchdynamo
+        if torchdynamo.eval_frame.specializing:
+            print("WE ARE SPECIALIZING OH FUCK")
+
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -255,6 +260,7 @@ class TorchVariable(VariableTracker):
             torch.unique,
             torch.unique_consecutive,
         ) or self.value.__name__ in ("nms",):
+            print("is dynamic")
             return True
 
         if self.value is torch.where and len(args) + len(kwargs) == 1:

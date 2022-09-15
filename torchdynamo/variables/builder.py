@@ -390,6 +390,7 @@ class VariableBuilder:
                 ),
             )
         else:
+            print("Making user defiend object variable", value)
             result = UserDefinedObjectVariable(
                 value,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),

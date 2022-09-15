@@ -51,6 +51,7 @@ null_context = contextlib.nullcontext
 unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
+most_recent_context = None
 
 
 def remove_from_cache(f):
@@ -201,6 +202,8 @@ class OptimizeContext(_TorchDynamoContext):
             ):
                 raise ResetRequired()
             most_recent_backend = compiler_fn
+            global most_recent_context
+            most_recent_context = backend_ctx_ctor
             install_generation_tagging_init()
         
         def on_exit():
@@ -229,26 +232,6 @@ class DisableContext(_TorchDynamoContext):
 
 
 specializing = False
-
-
-class SpecializeContext(OptimizeContext):
-# class SpecializeContext:
-    def __init__(self):
-        def on_enter():
-            global specializing
-            assert not specializing, "Torchdynamo specialization cannot be nested yet."
-            specializing = True
-
-        def on_exit():
-            global specializing
-            specializing = False
-            
-        super().__init__(
-            callback=callback,
-            backend_ctx_ctor=backend_ctx_ctor,
-            pre_on_enter=on_enter,
-        )
-        # specializing = prior
 
 
 def catch_errors_wrapper(callback):
@@ -676,10 +659,17 @@ class TorchPatcher:
 
         return inner_fn
 
+class Specializer:
+    def __enter__(self):
+        print("Enter")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        print("Exit")
+
 def specialize():
+    return Specializer()
     # if fn is not None:
     #     print("FN is", fn)
     #     # assert callable(fn)
-    #     return SpecializeContext()
+    # return optimize("eager")
     # return SpecializeContext()
-    return optimize(backend="specializer", nopython=True)

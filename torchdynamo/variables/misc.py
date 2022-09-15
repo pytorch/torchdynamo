@@ -292,6 +292,21 @@ class GradModeVariable(ContextWrappingVariable):
             return "no_grad"
 
 
+class SpecializingContextManager(ContextManagerVariable):
+    def __init__(self, **kwargs):
+        super(SpecializingContextManager, self).__init__(**kwargs)
+
+    def enter(self, tx):
+        print("Enter specializing")
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def exit(self, tx, *args):
+        print("exit specializing")
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def fn_name(self):
+        return "torchdynamo.eval_frame.specialize"
+
 class FakeContextWrappingVariable(ContextManagerVariable):
     def __init__(self, **kwargs):
         super(FakeContextWrappingVariable, self).__init__(**kwargs)
@@ -543,6 +558,7 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torchdynamo.disable() wrapped function {self.value}")
         else:
