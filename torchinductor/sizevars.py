@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import itertools
 import logging
 from typing import Callable
 from typing import Dict
@@ -54,6 +55,7 @@ class SizeVarAllocator(object):
         if not zero_one_const:
             self.val_to_var.clear()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
+        self._simplify_loops = self.make_simplify_loops_cache()
 
     def seed(self):
         """
@@ -89,6 +91,28 @@ class SizeVarAllocator(object):
             return result
 
         return simplify_with_ranges
+
+    def make_simplify_loops_cache(self):
+        """
+        self._simplify_with_ranges() can be expensive, cache its results
+        """
+        cache = dict()
+        replacement_count = len(self.replacements)
+
+        def simplify_loops(index_vars, sizes, index_formulas):
+            nonlocal replacement_count
+            if replacement_count != len(self.replacements):
+                # new replacements invalidates cached results
+                cache.clear()
+                replacement_count = len(self.replacements)
+            key = (*index_vars, *sizes, *index_formulas)
+            result = cache.get(key, None)
+            if result is None:
+                result = self._simplify_loops_impl(index_vars, sizes, index_formulas)
+                cache[key] = result
+            return result
+
+        return simplify_loops
 
     def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
         """
@@ -147,6 +171,69 @@ class SizeVarAllocator(object):
         if expr != original_expr:
             return self._simplify_with_ranges(expr, var_ranges)
         return expr
+
+    def _simplify_loops_impl(self, index_vars, sizes, index_formulas):
+        """
+        Try to remove as many axis from loop iterations as possible, by:
+            1) removing size==1 dimensions
+            2) fuse contiguous dimensions into a single loop
+            If channel_last = True, we will prevent the last dim fused with other dims
+        """
+        sizes = list(map(self.simplify, sizes))
+
+        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
+        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+
+        for i in range(len(sizes)):
+            if sizes[i] == 1:
+                # remove dim
+                sizes[i] = None
+
+        def can_merge_dims(a, b):
+            for k in range(len(strides)):
+                if self.simplify(strides[k][a] * sizes[a]) == self.simplify(
+                    strides[k][b]
+                ):
+                    # approximate test passed, try sound version
+                    va = index_vars[a]
+                    vb = index_vars[b]
+                    v = sympy.Symbol("_merge_tester")
+                    expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
+                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
+                    if self.simplify(expr1) == self.simplify(expr2):
+                        continue
+                return False
+            return True
+
+        changed = True
+        while changed:
+            changed = False
+            for i, j in itertools.product(
+                reversed(range(len(sizes))), reversed(range(len(sizes)))
+            ):
+                if i == j or sizes[i] is None or sizes[j] is None:
+                    continue
+                if can_merge_dims(i, j):
+                    changed = True
+                    sizes[i] = sizes[i] * sizes[j]
+                    sizes[j] = None
+
+        def reindex(index):
+            it = list(reversed(index))
+            new_index = []
+            for size in sizes:
+                if size is None:
+                    new_index.append(sympy.Integer(0))
+                else:
+                    new_index.append(it.pop())
+            assert not it
+            return new_index
+
+        def prune(index):
+            assert len(index) == len(sizes)
+            return [i for i, s in zip(index, sizes) if s is not None]
+
+        return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
         left = sympy.expand(left)

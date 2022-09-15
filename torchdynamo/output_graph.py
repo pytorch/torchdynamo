@@ -5,10 +5,12 @@ import operator
 import re
 import sys
 import traceback
+from dataclasses import dataclass
 from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
+from typing import Optional
 
 import torch.nn
 from torch import fx
@@ -39,6 +41,14 @@ from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class GraphCompileReason:
+    """Stores why a given output graph was compiled; i.e. what caused the graph break."""
+
+    reason: str
+    user_stack: List[traceback.FrameSummary]
 
 
 def _get_gen_rand_values_fn(random_calls):
@@ -222,17 +232,15 @@ class OutputGraph(fx.Tracer):
 
         assert False
 
-    def compile_subgraph(self, tx, partial_convert=False, msg=None):
+    def compile_subgraph(
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+    ):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
         self.partial_convert = partial_convert
-        if msg is not None:
-            stack = tx.frame_summary()
-            msgs = reversed(traceback.StackSummary.from_list([stack]).format())
-            msg = f"{msg} \n {''.join(msgs)}"
-        self.compile_subgraph_reason = msg
+        self.compile_subgraph_reason = reason
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
@@ -494,6 +502,6 @@ class OutputGraph(fx.Tracer):
 
         # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
         nn_module_stack_str = f"Module stack: {nn_module_stack}\n"
-        rv.node.stack_trace = nn_module_stack_str + "".join(msgs)
+        rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
 
         return rv

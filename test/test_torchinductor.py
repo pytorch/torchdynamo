@@ -2807,6 +2807,31 @@ class CommonTemplate:
             ],
         )
 
+    # From https://github.com/pytorch/torchdynamo/issues/1200
+    def test_max_pool2d_with_indices_backward3(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [1, 1], [2, 2], [0, 0], [1, 1], False, c
+            )
+
+        x = torch.randn([32, 256, 37, 38])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [1, 1],
+            [2, 2],
+            0,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -2846,6 +2871,27 @@ class CommonTemplate:
             [
                 torch.randn([1, 1, 20, 15]),
                 torch.randn([1, 1, 20, 15]),
+            ],
+        )
+
+    def test_avg_pool2d_backward3(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [1, 1],
+                [2, 2],
+                [0, 0],
+                False,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2016, 11, 11]),
+                torch.randn([1, 2016, 21, 21]),
             ],
         )
 
@@ -3276,3 +3322,28 @@ if HAS_CUDA:
             mod = make_fx(forward)()
             compiled = compile_fx_inner(mod, ())
             assert compiled()[0].device.type == "cuda"
+
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_expanded_inputs_cudagraphs(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x, y):
+                return x + y
+
+            inputs = (
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+            )
+            self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        @patch.object(config, "size_asserts", False)
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_expanded_inputs_cudagraphs_no_size_asserts(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x, y):
+                return x + y
+
+            inputs = (
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+                rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
+            )
+            self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))

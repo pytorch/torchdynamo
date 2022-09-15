@@ -14,7 +14,6 @@ from typing import cast
 
 import sympy
 
-from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .utils import VarRanges
 from .utils import sympy_product
@@ -169,7 +168,7 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         # convert it to the simpliest form because of the interference from
         # different indexing formulas.
         index_vars = list(self._var_ranges.keys())
-        new_sizes, reindex, prune = _simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
             index_prevent_reordering([index], index_vars, sizes),

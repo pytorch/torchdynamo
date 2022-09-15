@@ -790,6 +790,7 @@ class ReproTests(torchdynamo.testing.TestCase):
             640,
             False,
         )
+
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
         # Graph break because of dynamic slicing
         self.assertEqual(
@@ -818,8 +819,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         # repeat_interleave is a dynamic shape operator we do not execute/
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
-        self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, ifdyn(5, 10))
+        self.assertEqual(cnt.frame_count, ifdyn(2, 4))
+        self.assertEqual(cnt.op_count, ifdyn(9, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1053,9 +1054,14 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = BatchNormAct2d(1).eval()
         correct = model(a)
         cnt = torchdynamo.testing.CompileCounter()
+        if not torchdynamo.config.specialize_int_float:
+            # _local_scalar_dense causes graph break w 0-dim tensor
+            opt_model = torchdynamo.optimize(cnt)(model)
+            self.assertTrue(same(opt_model(a), correct))
+            return
+
         opt_model = torchdynamo.optimize_assert(cnt)(model)
         self.assertTrue(same(opt_model(a), correct))
-
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 

@@ -16,7 +16,7 @@ import torchinductor
 
 from .. import config
 from .. import ir
-from ..triton_ops.autotune import ReductionHint
+from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
 from ..utils import sympy_product
@@ -627,7 +627,7 @@ class TritonKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = ir._simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -903,7 +903,7 @@ class TritonKernel(Kernel):
         ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
-            hint_import = "from torchinductor.triton_ops.autotune import ReductionHint"
+            hint_import = "from torchinductor.ir import ReductionHint"
         else:
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]
@@ -1176,6 +1176,9 @@ class TritonScheduling:
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
             src_code = src_code.format(kernel_name=subs_name)
+            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+            src_code = src_code.replace("#pragma CMT", "#")
             wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
