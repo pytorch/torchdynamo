@@ -16,7 +16,7 @@ import torchinductor
 
 from .. import config
 from .. import ir
-from ..triton_ops.autotune import ReductionHint
+from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
 from ..utils import sympy_product
@@ -627,7 +627,7 @@ class TritonKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = ir._simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -903,7 +903,7 @@ class TritonKernel(Kernel):
         ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
-            hint_import = "from torchinductor.triton_ops.autotune import ReductionHint"
+            hint_import = "from torchinductor.ir import ReductionHint"
         else:
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]

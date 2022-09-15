@@ -5,6 +5,7 @@ import inspect
 import logging
 import os
 import threading
+import traceback
 import types
 import warnings
 from unittest.mock import patch
@@ -393,9 +394,18 @@ def explain(f, *args, **kwargs):
 
     graph_count = len(graphs)
 
+    # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
+    deduped_reasons = {}
+    for reason in break_reasons:
+        innermost_frame = reason.user_stack[-1]
+        # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
+        deduped_reasons[repr(innermost_frame)] = reason
+
     formatted_list = ""
-    for idx in range(0, len(break_reasons)):
-        formatted_list += f"{idx + 1}. {break_reasons[idx]} \n"
+    for idx, break_reason in enumerate(deduped_reasons.values()):
+        formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
+        msg = f"{break_reason.reason}\n{formatted_stack}"
+        formatted_list += f"{idx + 1}. {msg} \n"
 
     explanation = f"Dynamo produced {graph_count} graphs"
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
@@ -405,7 +415,7 @@ def explain(f, *args, **kwargs):
 
     # TODO(voz): Do we want a decorator for this?
     torchdynamo.reset()
-    return explanation, out_guards, graphs, ops_per_graph
+    return explanation, out_guards, graphs, ops_per_graph, break_reasons
 
 
 def export(f, *args, aten_graph=False, **kwargs):
@@ -474,7 +484,9 @@ def export(f, *args, aten_graph=False, **kwargs):
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize_assert(
-            dynamo_normalization_capturing_compiler, guard_export_fn=guard_export_print
+            dynamo_normalization_capturing_compiler,
+            guard_export_fn=guard_export_print,
+            export=True,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -531,7 +543,7 @@ def export(f, *args, aten_graph=False, **kwargs):
     return (new_graph, out_guards)
 
 
-def optimize_assert(backend, *, guard_export_fn=None):
+def optimize_assert(backend, *, guard_export_fn=None, export=False):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`
     """
@@ -541,7 +553,8 @@ def optimize_assert(backend, *, guard_export_fn=None):
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, guard_export_fn), backend_ctx_ctor
+        convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
+        backend_ctx_ctor,
     )
 
 

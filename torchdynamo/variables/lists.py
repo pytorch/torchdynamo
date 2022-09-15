@@ -199,7 +199,10 @@ class ListVariable(BaseListVariable):
             assert not kwargs
             key, value = args
             items = list(self.items)
-            items[key.as_python_constant()] = value
+            if isinstance(key, SliceVariable):
+                items[key.as_python_constant()] = list(value.items)
+            else:
+                items[key.as_python_constant()] = value
             result = ListVariable(items, **options)
             return tx.replace_all(self, result)
         else:

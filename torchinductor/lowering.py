@@ -768,11 +768,12 @@ def fallback_handler(kernel):
     return handler
 
 
+# https://github.com/pytorch/torchdynamo/issues/1215 to remove native_batch_norm
 def make_fallback(kernel):
     assert (
-        kernel not in decompositions
+        kernel not in decompositions or kernel is aten.native_batch_norm.default
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.native_batch_norm.default:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
@@ -2170,13 +2171,13 @@ def max_pool2d_with_indices_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2233,6 +2234,7 @@ def max_pool2d_with_indices_backward(
                         check,
                     )
                     gradient = ops.where(mask, ops.add(gradient, grad_part), gradient)
+        assert gradient is not None
         return gradient
 
     return Pointwise.create(
@@ -2529,13 +2531,13 @@ def avg_pool2d_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2616,15 +2618,15 @@ def avg_pool2d_backward(
                     scale,
                 )
 
+                mask = ops.and_(
+                    ops.lt(ph, phend),
+                    ops.lt(pw, pwend),
+                )
                 if gradient is None:
-                    # don't need mask for 0, 0
-                    gradient = part
+                    gradient = ops.where(mask, part, ops.constant(0.0, torch.float32))
                 else:
-                    mask = ops.and_(
-                        ops.lt(ph, phend),
-                        ops.lt(pw, pwend),
-                    )
                     gradient = ops.where(mask, ops.add(gradient, part), gradient)
+        assert gradient is not None
         return gradient
 
     rv = Pointwise.create(

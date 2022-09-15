@@ -43,6 +43,7 @@ from .codegen import PyCodegen
 from .exc import Unsupported
 from .exc import unimplemented
 from .guards import GuardBuilder
+from .output_graph import GraphCompileReason
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
@@ -117,7 +118,12 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
-            self.output.compile_subgraph(self, msg="generic_jump")
+            self.output.compile_subgraph(
+                self,
+                reason=GraphCompileReason(
+                    f"generic_jump {typestr(value)}", [self.frame_summary()]
+                ),
+            )
             self.pop()
 
             if_next = self.create_call_resume_at(self.next_instruction)
@@ -149,28 +155,26 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
-            msg = None
+            reason = None
             try:
                 return inner_fn(self, inst)
             except Unsupported as exc:
                 if not self.should_compile_partial_graph():
                     raise
-                user_stack = "".join(
-                    traceback.format_list(
-                        [([self.frame_summary()] + list(reversed(exc.real_stack)))[-1]]
-                    )
-                ).strip()
-
+                user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
+                user_stack_formatted = "".join(traceback.format_list(user_stack))
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if not explain:
-                    log.warning(f"Graph break: {exc} from user code at {user_stack}")
+                    log.warning(
+                        f"Graph break: {exc} from user code at {user_stack_formatted}"
+                    )
 
                 exc.remove_from_stats()
                 exc.add_to_stats("graph_break")
-                msg = exc.msg
+                reason = GraphCompileReason(exc.msg, user_stack)
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self, msg=msg)
+            self.output.compile_subgraph(self, reason=reason)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
@@ -779,7 +783,9 @@ class InstructionTranslatorBase(object):
             self.restore_graphstate(prior)
 
         # break the graph
-        self.output.compile_subgraph(self, "store_attr")
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
+        )
         self.output.add_output_instructions([inst])
         self.popn(2)
         self.output.add_output_instructions(
@@ -1201,6 +1207,15 @@ class InstructionTranslatorBase(object):
                     return False
         return True
 
+    def format_frame_summary(self, additional_stack_frames=None):
+        if additional_stack_frames is None:
+            additional_stack_frames = []
+        return "".join(
+            traceback.format_list(
+                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+            )
+        )
+
     def frame_summary(self):
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
@@ -1261,7 +1276,9 @@ class InstructionTranslatorBase(object):
         self.nn_module_stack: Dict[str, str] = {}
 
         if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode() as fake_mode:
+            with torch._subclasses.FakeTensorMode(
+                throw_on_data_dependent_ops=True
+            ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
 
@@ -1291,6 +1308,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         code_options,
         compiler_fn,
         one_graph,
+        export,
     ):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
@@ -1304,6 +1322,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
         )
         self.one_graph: bool = one_graph
+        self.export = export
+        if self.export:
+            assert (
+                self.one_graph
+            ), "Export without one graph - something has gone wrong."
+
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
         self.symbolic_locals = collections.OrderedDict(
@@ -1408,7 +1432,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0:
+        if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame()
         self.instruction_pointer = None
         self.output.compile_subgraph(self)
