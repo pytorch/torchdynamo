@@ -14,7 +14,6 @@ from .utils import compilation_metrics
 from .utils import guard_failures
 from .utils import orig_code_map
 
-
 __all__ = [
     "optimize",
     "optimize_assert",
