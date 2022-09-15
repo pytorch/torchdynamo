@@ -72,6 +72,7 @@ class BaseSchedulerNode:
         self.min_order: Optional[int] = None
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
+        self.written = False
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -185,6 +186,44 @@ class BaseSchedulerNode:
             if isinstance(use.node, OutputNode):
                 return False
         return True
+
+    def codegen_originating_info(self, buffer, only_once=True):
+        if not config.comment_origin:
+            return
+
+        if only_once and self.written:
+            return
+        origins = self.node.origins
+        out_lines = []
+
+        for o in origins:
+            if o.op == "output":
+                # These are boring and samey
+                continue
+
+            out_lines.append("")
+            # TODO(voz): Should the pragma be constant somewhere?
+            out_lines.append("#pragma CMT ORIGIN:")
+            out_lines.append(f"#pragma CMT {o.op} {o.target}")
+            if "stack_trace" in o.meta:
+                stack_trace = f"{o.meta['stack_trace']}"
+                stack_trace_last_line = stack_trace.split("|")[-1]
+                out_lines.append(
+                    "#pragma CMT "
+                    + stack_trace_last_line.replace("{", "{{")
+                    .replace("}", "}}")
+                    .replace("\n", "\\")
+                )
+                out_lines.append("#pragma CMT END ORIGIN")
+                out_lines.append("")
+
+        if len(out_lines) == 0:
+            return
+
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        buffer.writelines(out_lines)
+        self.written = True
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
