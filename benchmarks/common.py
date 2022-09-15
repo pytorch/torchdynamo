@@ -56,9 +56,8 @@ output_filename = None
 
 CI_SKIP_INFERENCE = [
     # TorchBench
+    "DALLE2_pytorch",
     "detectron2",
-    "dlrm",
-    "fambench_dlrm",
     "fastNLP_Bert",
     "hf_Reformer",
     "moco",
@@ -66,7 +65,6 @@ CI_SKIP_INFERENCE = [
     "Super_SloMo",
     "tacotron2",
     "yolov3",
-    "DALLE2_pytorch",
     # Huggingface
     "AlbertForQuestionAnswering",
     "AllenaiLongformerBase",
@@ -81,10 +79,8 @@ CI_SKIP_INFERENCE = [
     "GPT2ForSequenceClassification",
     "GPTNeoForSequenceClassification",
     "LayoutLMForSequenceClassification",
-    "MBartForConditionalGeneration",
     "MegatronBertForQuestionAnswering",
     "MobileBertForQuestionAnswering",
-    "PLBartForConditionalGeneration",
     "RobertaForQuestionAnswering",
     # TIMM
     # Some of these happen intermittently on CI, not locally
@@ -103,22 +99,26 @@ CI_SKIP_INFERENCE = [
 CI_SKIP_TRAINING = [
     # TorchBench
     "attention_is_all_you_need_pytorch",
+    "drq",
     "hf_Albert",
     "hf_Bart",
     "hf_GPT2",
-    "mobilenet_",
+    "mobilenet_v3_large",
     "pytorch_struct",
-    "timm_regnet",
     "vgg16",
-    "drq",
-    "Background_Matting",  # from functionalization
     "speech_transformer",  # from functionalization
     "vision_maskrcnn",  # from functionalization
     "timm_efficientnet",  # from functionalization (only fails for inductor)
     "hf_Bert",
     "soft_actor_critic",
     # OOM
+    "Background_Matting",
+    "fastNLP_Bert",
+    "hf_BigBird",
+    "mobilenet_v2",
+    "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
+    "timm_regnet",
     # Huggingface
     "AlbertForMaskedLM",
     "BartForConditionalGeneration",
@@ -135,6 +135,8 @@ CI_SKIP_TRAINING = [
     "XGLMForCausalLM",
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
+    # OOM
+    "BigBird",
     # TIMM
     "dpn107",
     "convit_base",
@@ -142,9 +144,7 @@ CI_SKIP_TRAINING = [
     "convnext_base",
     "deit_base_distilled_patch16_224",
     "levit_128",
-    "nasnetalarge",
     "mobilevit_s",
-    "pnasnet5large",
     "rexnet_100",
     "twins_pcpvt_base",
     # https://github.com/pytorch/torchdynamo/issues/1135
