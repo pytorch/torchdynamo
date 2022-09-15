@@ -110,7 +110,7 @@ class AotNop(AotAutogradStrategy):
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, fw_compiler=nop)
 
 
-aot_nop = AotNop.compile_fn
+aot_eager = AotNop.compile_fn
 
 
 class AotTorchscript(AotAutogradStrategy):
@@ -414,10 +414,10 @@ def create_aot_backends():
     """
     Register aliases for the AOT backends
     """
-    # aot_nop uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-    BACKENDS["aot_nop"] = aot_nop
+    # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
+    BACKENDS["aot_eager"] = aot_eager
 
-    # aot_nop uses AOT Autograd backend with print compiler. It prints the
+    # aot_eager uses AOT Autograd backend with print compiler. It prints the
     # graphs and also saves the graph modules that are sent to AOT Autograd.
     # This is helpful for debugging.
     BACKENDS["aot_print"] = aot_print

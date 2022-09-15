@@ -197,7 +197,7 @@ class NormalizeIRTests(torchdynamo.testing.TestCase):
 
         ref = fn(a, b)
 
-        optimized_fn = torchdynamo.optimize("aot_nop")(fn)
+        optimized_fn = torchdynamo.optimize("aot_eager")(fn)
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
 

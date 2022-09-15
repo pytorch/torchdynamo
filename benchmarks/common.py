@@ -1766,9 +1766,9 @@ def main(runner, original_dir=None):
         args.float16 = True
         args.cosine = True
     elif args.accuracy_aot_nop:
-        optimize_ctx = torchdynamo.optimize("aot_nop", nopython=args.nopython)
+        optimize_ctx = torchdynamo.optimize("aot_eager", nopython=args.nopython)
         experiment = speedup_experiment
-        output_filename = "accuracy_aot_nop.csv"
+        output_filename = "accuracy_aot_eager.csv"
     elif args.accuracy_aot_ts:
         optimize_ctx = torchdynamo.optimize("aot_ts", nopython=args.nopython)
         experiment = speedup_experiment

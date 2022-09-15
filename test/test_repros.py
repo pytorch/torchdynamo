@@ -916,7 +916,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         x = torch.randn(10).to(dtype=torch.int64)
         y = torch.randn(10, 204)
         ref = fn(x, y)
-        opt_fn = torchdynamo.optimize("aot_nop")(fn)
+        opt_fn = torchdynamo.optimize("aot_eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
