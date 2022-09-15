@@ -27,7 +27,6 @@ from torch._prims_common import is_float_dtype
 
 from . import config
 from . import dependencies
-from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .dependencies import extract_read_writes
 from .dependencies import var_builder
@@ -1945,7 +1944,7 @@ class ComputedBuffer(Buffer):
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = _simplify_loops(
+            sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
                 x_vars,
                 sizes,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -2329,7 +2328,9 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, prune = _simplify_loops(index_vars, sizes, [index])
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+            index_vars, sizes, [index]
+        )
 
         # assign new variables each dimension to deal with numbering mismatches
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1

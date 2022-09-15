@@ -1,6 +1,5 @@
 import collections
 import contextlib
-import functools
 import itertools
 import logging
 import math
@@ -15,7 +14,6 @@ from sympy.printing.printer import Printer
 
 from .. import metrics
 from ..utils import free_symbol_startswith
-from ..utils import freeze_inputs
 from ..utils import sympy_dot
 from ..utils import sympy_subs
 from ..utils import unique
@@ -23,73 +21,6 @@ from ..virtualized import V
 from ..virtualized import ops
 
 log = logging.getLogger(__name__)
-
-
-@freeze_inputs
-@functools.lru_cache(256)
-def _simplify_loops(index_vars, sizes, index_formulas):
-    """
-    Try to remove as many axis from loop iterations as possible, by:
-        1) removing size==1 dimensions
-        2) fuse contiguous dimensions into a single loop
-        If channel_last = True, we will prevent the last dim fused with other dims
-    """
-    sizevars = V.graph.sizevars
-    sizes = list(map(V.graph.sizevars.simplify, sizes))
-
-    strides = [V.graph.sizevars.stride_vars(x, index_vars) for x in index_formulas]
-    assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
-
-    for i in range(len(sizes)):
-        if sizes[i] == 1:
-            # remove dim
-            sizes[i] = None
-
-    def can_merge_dims(a, b):
-        for k in range(len(strides)):
-            if sizevars.simplify(strides[k][a] * sizes[a]) == sizevars.simplify(
-                strides[k][b]
-            ):
-                # approximate test passed, try sound version
-                va = index_vars[a]
-                vb = index_vars[b]
-                v = sympy.Symbol("_merge_tester")
-                expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
-                expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
-                if V.graph.sizevars.simplify(expr1) == V.graph.sizevars.simplify(expr2):
-                    continue
-            return False
-        return True
-
-    changed = True
-    while changed:
-        changed = False
-        for i, j in itertools.product(
-            reversed(range(len(sizes))), reversed(range(len(sizes)))
-        ):
-            if i == j or sizes[i] is None or sizes[j] is None:
-                continue
-            if can_merge_dims(i, j):
-                changed = True
-                sizes[i] = sizes[i] * sizes[j]
-                sizes[j] = None
-
-    def reindex(index):
-        it = list(reversed(index))
-        new_index = []
-        for size in sizes:
-            if size is None:
-                new_index.append(sympy.Integer(0))
-            else:
-                new_index.append(it.pop())
-        assert not it
-        return new_index
-
-    def prune(index):
-        assert len(index) == len(sizes)
-        return [i for i, s in zip(index, sizes) if s is not None]
-
-    return [x for x in sizes if x is not None], reindex, prune
 
 
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
@@ -202,7 +133,9 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(self):
+    def getvalue(
+        self,
+    ):
         buf = StringIO()
         for line in self._lines:
             if isinstance(line, DeferredLine):
@@ -494,6 +427,7 @@ class CSE:
             var = self.newvar()
             self.cache[expr] = var
             if write:
+                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 

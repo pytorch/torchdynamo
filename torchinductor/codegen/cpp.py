@@ -2,7 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import multiprocessing
-import textwrap
+from pathlib import Path
 from typing import Dict
 from typing import List
 
@@ -71,9 +71,10 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     struct_name = f"IndexValue_{index_value_name_counter}"
     index_value_name_counter += 1
 
+    # A small annoyance, due to it being a little cumbersome to just throw {} into strings
     prefix = [
-        f"struct {struct_name} {{long index; {DTYPE_TO_CPP[src_dtype]} value;}};",
-        f"{struct_name} {tmpvar}(0, {reduction_init(reduction_type, src_dtype)});",
+        f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
+        f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
     if reduction_type == "argmax":
         prefix.extend(
@@ -98,46 +99,12 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
 
 @functools.lru_cache()
 def cpp_prefix():
-    _, filename = codecache.write(
-        textwrap.dedent(
-            """
-            #include <algorithm>
-            #include <atomic>
-            #include <cmath>
-            #include <cstdlib>
-            #include <limits>
-            #include <omp.h>
-
-            #include <ATen/core/PhiloxRNGEngine.h>
-            #include <c10/util/Half.h>
-
-            typedef at::Half half;
-
-            template<typename T>
-            inline T mod(T a, T b) { return a % b; }
-            template<>
-            inline float mod(float a, float b) { return std::fmod(a, b); }
-            template<>
-            inline double mod(double a, double b) { return std::fmod(a, b); }
-
-            constexpr float uint32_to_uniform_float(uint32_t value) {
-                // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
-                constexpr float scale = 4.6566127342e-10;
-                return static_cast<float>(value & 0x7FFFFFFF) * scale;
-            }
-
-            float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
-                return uint32_to_uniform_float(at::Philox4_32(seed, 0, offset)());
-            }
-
-            float randn_cpu(uint32_t seed, uint32_t offset) {
-                at::Philox4_32 engine(seed, 0, offset);
-                return engine.randn(10);
-            }
-            """
-        ),
-        "h",
-    )
+    path = Path(__file__).parent / "cpp_prefix.h"
+    with path.open() as f:
+        _, filename = codecache.write(
+            f.read(),
+            "h",
+        )
     return f'#include "{filename}"'
 
 
@@ -348,14 +315,7 @@ class CppKernel(Kernel):
             if config.cpp.threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
-                # Note atomic_ref requires C++20 and certain processor features
-                self.stores.writeline(
-                    name,
-                    "static_assert(std::atomic_ref<"
-                    + f"std::remove_pointer_t<decltype({var})>"
-                    + ">::is_always_lock_free);",
-                )
-                line = f"std::atomic_ref({var}[{cexpr(index)}]) += {value};"
+                line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
@@ -609,7 +569,11 @@ class KernelGroup:
         codecache_def.writeline("''').kernel")
 
         kernel_name = wrapper.next_kernel_name()
-        wrapper.define_kernel(kernel_name, codecache_def.getvalue())
+        codecache_str = codecache_def.getvalue()
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        codecache_str = codecache_str.replace("#pragma CMT", "//")
+        wrapper.define_kernel(kernel_name, codecache_str)
 
         # generate the code to call this
         wrapper.writeline(

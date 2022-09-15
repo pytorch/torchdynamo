@@ -627,7 +627,7 @@ class TritonKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = ir._simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -1176,6 +1176,9 @@ class TritonScheduling:
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
             src_code = src_code.format(kernel_name=subs_name)
+            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+            src_code = src_code.replace("#pragma CMT", "#")
             wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()

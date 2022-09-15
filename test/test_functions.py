@@ -636,6 +636,12 @@ class FunctionTests(torchdynamo.testing.TestCase):
         elif tensor.is_contiguous(memory_format=torch.contiguous_format):
             return tensor + 1
 
+    @make_test
+    def test_list_slice_assignment(x):
+        m = [1, 2, 3, 4]
+        m[1:] = [6] * (len(m) - 1)
+        return x + 1
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+

@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import dis
 import enum
+import logging
 import math
 import os
 import sys
@@ -2329,6 +2330,21 @@ class MiscTests(torchdynamo.testing.TestCase):
 
             f3(torch.ones(6))
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_config_log_level(self):
+        @torchdynamo.optimize("eager")
+        def fn(a, b):
+            return a + b
+
+        with self.assertLogs(logger="torchdynamo", level=logging.DEBUG) as log:
+            torchdynamo.config.log_level = logging.DEBUG
+            fn(torch.randn(10), torch.randn(10))
+            cur_len = len(log)
+            self.assertGreater(cur_len, 0)
+
+            torchdynamo.config.log_level = logging.WARNING
+            fn(torch.randn(10), torch.randn(10))
+            self.assertEqual(cur_len, len(log))
 
 
 class TestTracer(JitTestCase):
