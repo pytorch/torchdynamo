@@ -52,11 +52,7 @@ class GraphLowering(torch.fx.Interpreter):
             }
             # iterate over unbound strides in sorted order
             val_list = sorted(
-                [
-                    (ex.stride()[i], i)
-                    for i in range(len(stride))
-                    if stride[i] is None
-                ]
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
             )
             for _, i in val_list:
                 if stride[i] is None and ex.stride()[i] in candidates:

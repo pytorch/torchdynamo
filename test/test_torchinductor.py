@@ -424,14 +424,10 @@ class CommonTemplate:
         def fn(x, y):
             return x.add_(y)
 
-        x=torch.ones([2, 12, 13, 17]).transpose(1,2)
-        y=torch.randn([2, 13, 1, 17])
+        x = torch.ones([2, 12, 13, 17]).transpose(1, 2)
+        y = torch.randn([2, 13, 1, 17])
 
-        self.common(fn, (x,y))
-
-
-
-
+        self.common(fn, (x, y))
 
     def test_abs(self):
         def fn(a):
