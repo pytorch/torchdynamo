@@ -2,7 +2,6 @@ import logging
 import operator
 import os
 import time
-from itertools import chain
 
 import sympy
 import torch
@@ -44,14 +43,17 @@ class GraphLowering(torch.fx.Interpreter):
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = Integer(val)
-
         while any(x is None for x in stride):
             candidates = {
                 ex.size(i) * ex.stride()[i]: size[i] * stride[i]
                 for i in range(len(size))
                 if stride[i] is not None and ex.stride()[i] >= 0
             }
-            for i in chain(reversed(range(len(stride))), range(len(stride))):
+            # iterate over unbound strides in sorted order
+            val_list = sorted(
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+            )
+            for _, i in val_list:
                 if stride[i] is None and ex.stride()[i] in candidates:
                     stride[i] = candidates[ex.stride()[i]]
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
