@@ -2723,6 +2723,12 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
+    if isinstance(changed_data, ir.StorageBox):
+        # Fast path, just swing the data pointer
+        val.realize()
+        changed_data.data = val.data
+        return changed
+
     ir.MutationLayout.realize_into(val, changed_data)
     return changed
 
@@ -2888,6 +2894,7 @@ def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promote=False)
     def fn(*args, **kwargs):
         result = outplace_op(*args, **kwargs)
+        result = to_dtype(result, args[0].get_dtype())
         return mutate_to(args[0], result)
 
     return fn
