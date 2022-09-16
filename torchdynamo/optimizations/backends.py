@@ -103,7 +103,7 @@ def nvfuser_ofi(subgraph):
 
 
 @create_backend
-def onednn_graph(subgraph):
+def onednn(subgraph):
     with torch.jit.fuser("fuser3"):
         return reload_jit_model(subgraph)
 
