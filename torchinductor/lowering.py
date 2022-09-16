@@ -2723,12 +2723,6 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox):
-        # Fast path, just swing the data pointer
-        val.realize()
-        changed_data.data = val.data
-        return changed
-
     ir.MutationLayout.realize_into(val, changed_data)
     return changed
 

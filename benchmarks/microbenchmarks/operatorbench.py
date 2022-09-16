@@ -27,9 +27,10 @@ def compute_speedups(
             # change to assert later
             try:
                 same(actual, expected, cos_similarity=True, equal_nan=True)
-            except AssertionError:
+            except AssertionError as e:
+                print(e)
                 print(f"Accuracy check failed: {operator}")
-                print(expected[0] - actual[0])
+                print((expected[0] - actual[0]).abs().max())
 
     timings = np.zeros((repeats, len(models)), np.float64)
     for rep in range(repeats):
