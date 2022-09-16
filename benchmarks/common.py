@@ -69,34 +69,12 @@ CI_SKIP_INFERENCE = [
     "pytorch_unet",
     "yolov3",
     # Huggingface
-    "AlbertForQuestionAnswering",
     "AllenaiLongformerBase",
     "BartForCausalLM",
     "BertForQuestionAnswering",
     "BartForConditionalGeneration",  # OOM
     "BigBird",
-    "BlenderbotSmallForConditionalGeneration",
-    "DebertaForQuestionAnswering",
-    "DebertaV2ForQuestionAnswering",
-    "DistilBertForQuestionAnswering",
-    "ElectraForQuestionAnswering",
-    "GPT2ForSequenceClassification",
-    "GPTNeoForSequenceClassification",
-    "LayoutLMForSequenceClassification",
-    "MegatronBertForQuestionAnswering",
-    "MobileBertForQuestionAnswering",
-    "RobertaForQuestionAnswering",
     # TIMM
-    # Some of these happen intermittently on CI, not locally
-    "cait_m36_384",
-    "convit_base",
-    "dla102",
-    "ghostnet_100",
-    "hrnet_w18",
-    "inception_v3",
-    "swin_base_patch4_window7_224",
-    "visformer_small",
-    "volo_d1_224",
     "tnt_s_patch16_224",
 ]
 
@@ -127,6 +105,7 @@ CI_SKIP_TRAINING = [
     "AlbertForMaskedLM",
     "BartForConditionalGeneration",
     "DebertaForMaskedLM",
+    "DebertaForQuestionAnswering",
     "DebertaV2ForMaskedLM",
     "GPTNeoForCausalLM",
     "M2M100ForConditionalGeneration",
@@ -142,12 +121,15 @@ CI_SKIP_TRAINING = [
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
+    "AlbertForQuestionAnswering",
     # TIMM
-    "dpn107",
+    "cait_m36_384",  # fp64_OOM
     "convit_base",
     "coat_lite_mini",
     "convnext_base",
     "deit_base_distilled_patch16_224",
+    "dla102",
+    "dpn107",
     "levit_128",
     "mobilevit_s",
     "rexnet_100",
@@ -160,6 +142,7 @@ CI_SKIP_TRAINING = [
     "jx_nest_base",
     "mixer_b16_224",
     "tnt_s_patch16_224",
+    "volo_d1_224",
     "xcit_large_24_p8_224",
 ]
 
