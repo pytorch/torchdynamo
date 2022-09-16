@@ -2,7 +2,6 @@ import logging
 import operator
 import os
 import time
-from itertools import chain
 
 import sympy
 import torch
