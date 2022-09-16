@@ -18,10 +18,10 @@ from ..guards import Guard
 from ..guards import GuardBuilder
 from ..guards import GuardSource
 from ..source import AttrSource
+from ..specialize import Specializer
 from ..utils import identity
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
-from ..specialize import Specializer
 
 
 class SuperVariable(VariableTracker):
@@ -298,15 +298,14 @@ class SpecializingContextManager(ContextManagerVariable):
         super(SpecializingContextManager, self).__init__(**kwargs)
 
     def enter(self, tx):
-        print("Enter specializing")
         return Specializer.enter()
 
     def exit(self, tx, *args):
-        print("exit specializing")
         return Specializer.exit()
 
     def fn_name(self):
         return "torchdynamo.eval_frame.specialize"
+
 
 class FakeContextWrappingVariable(ContextManagerVariable):
     def __init__(self, **kwargs):
@@ -559,7 +558,7 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torchdynamo.disable() wrapped function {self.value}")
         else:

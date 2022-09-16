@@ -47,6 +47,7 @@ from .output_graph import GraphCompileReason
 from .output_graph import OutputGraph
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
+from .specialize import Specializer
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import istype
@@ -75,7 +76,6 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
-from .specialize import Specializer
 
 log = logging.getLogger(__name__)
 

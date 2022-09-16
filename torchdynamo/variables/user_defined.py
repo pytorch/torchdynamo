@@ -104,8 +104,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # import pdb
             # pdb.set_trace()
             import torchdynamo
+
             if self.value == torchdynamo.specialize.Specializer:
                 from torchdynamo.variables.misc import SpecializingContextManager
+
                 return SpecializingContextManager()
 
             var = tx.output.side_effects.track_object_new(
@@ -133,6 +135,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super(UserDefinedObjectVariable, self).__init__(**kwargs)
         print("I am born")
         import pdb
+
         pdb.set_trace()
         self.value = value
         self.value_type = value_type or type(value)

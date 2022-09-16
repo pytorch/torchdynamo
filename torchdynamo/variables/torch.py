@@ -6,6 +6,7 @@ from typing import List
 
 import torch._C
 import torch.nn
+from torch.fx.experimental.proxy_tensor import make_fx
 
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import NNModuleSource
@@ -24,7 +25,6 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
-from torch.fx.experimental.proxy_tensor import make_fx
 
 log = logging.getLogger(__name__)
 
@@ -94,95 +94,72 @@ class TorchVariable(VariableTracker):
             return True
         return getattr(self.value, "__module__", None) == "math"
 
+    def _specialized_call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from torchdynamo.output_graph import FakeRootModule
+
+        from . import TensorVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        def unwrap_real(arg):
+            if isinstance(arg, TensorVariable):
+                return arg.as_proxy().node.meta["example_value"]
+            if isinstance(arg, UserFunctionVariable):
+                return arg.fn
+            if arg.has_unpack_var_sequence(tx):
+                return [
+                    unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
+                ]
+            return arg
+
+        u_args = [unwrap_real(arg) for arg in args]
+        real_value = self.value(*u_args)
+        tx.output.tensor_attrs = {}
+
+        tx.output.root = FakeRootModule(tx.output.nn_modules)
+        next_name = None
+        i = 0
+        while not next_name:
+            candidate = f"_tensor_constant{i}"
+            if hasattr(tx.output.root, candidate):
+                i += 1
+            else:
+                next_name = candidate
+
+        next_name = candidate
+
+        # tx.output.install_global(next_name, real_value)
+        node = tx.output.create_proxy(
+            "get_attr",
+            next_name,
+            (real_value,),
+            {},
+            current_tx=tx,
+        )
+
+        return TensorVariable.create(
+            tx=tx,
+            proxy=node,
+            example_value=real_value,
+            **options,
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from ..specialize import specializing
         from . import ConstantVariable
         from . import GradModeVariable
         from . import TensorVariable
 
-        print("Call function time")
+        if specializing:
+            return self._specialized_call_function(tx, args, kwargs)
+
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        import torchdynamo
-        if torchdynamo.specialize.specializing:
-            print("WE ARE SPECIALIZING OH FUCK")
-            def unwrap_real(arg):
-                if isinstance(arg, TensorVariable):
-                    return arg.as_proxy().node.meta["example_value"]
-                if isinstance(arg, UserFunctionVariable):
-                    return arg.fn
-                if arg.has_unpack_var_sequence(tx):
-                    return [
-                        unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
-                    ]
-                return arg
-
-            # Get values
-            u_args = [unwrap_real(arg) for arg in args]
-            real_value = self.value(*u_args)
-           
-
-            # def register_as_subgraph(fn, name, args):
-            #     import torchdynamo
-
-            #     # gm, guards = torchdynamo.export(fn, *args)
-            #     gm = make_fx(fn)(*args)
-
-            #     print("Made graph", gm.code)
-
-            #     next_name = None
-            #     i = 0
-            #     while not next_name:
-            #         candidate = f"name_{i}"
-            #         if candidate in tx.output.nn_modules:
-            #             i += 1
-            #         else:
-            #             next_name = candidate
-
-            #     gm.__name__ = next_name
-            #     src = NNModuleSource(GetItemSource(self.source, next_name))
-            #     gm.torchdynamo_force_dynamic = False
-            #     tx.output.add_submodule(gm, next_name, source=src)
-            #     return next_name, gm
-
-            name = "special"
-            tx.output.tensor_attrs = {}
-            from torchdynamo.output_graph import FakeRootModule
-            tx.output.root = FakeRootModule(tx.output.nn_modules)
-            print("Made root module:", id(tx.output.root))
-            tx.output.install_global(name, real_value)
-            def make_attr(name):
-                node = tx.output.create_proxy(
-                    "get_attr",
-                    "_tensor_constant0",
-                    tuple(real_value),
-                    {},
-                )
-                return node
-
-            # setattr(tx.output.root, "_tensor_constant0", real_value)
-            # setattr(tx.output.root, "_tensor_constant1", real_value)
-            # setattr(tx.output.root, "_tensor_constant2", real_value)
-            # def enshrine_constant():
-                # return real_value
-            # fxout = make_fx(enshrine_constant)()
-            # print("weird", fxout.code)
-
-
-            # name, true_graph = register_as_subgraph(
-            #     self.value, "wtf", u_args
-            # )
-            return TensorVariable.create(
-                tx=tx,
-                proxy=make_attr(name),
-                example_value=torch.tensor(real_value),
-                **options,
-            )
-        else:
-            print("WE ARE NOT SPECIALIZING OH FUCK")
-
 
         if self.value in config.constant_functions:
             assert not args and not kwargs

@@ -802,4 +802,3 @@ def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
             "FX2TRT conversion failed on the subgraph. Return GraphModule forward instead"
         )
         return gm.forward
-

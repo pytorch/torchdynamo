@@ -66,29 +66,18 @@ def dynamo_profiled(func):
 
     return profile_wrapper
 
-class DynamoTimed:
-    def __init__(self, f):
-        self._repr = repr
-        self.f = f
-
-    def __call__(self, *args, **kw):
-        def time_wrapper(*args, **kwargs):
-            print("Enter time")
-            key = self.f.__qualname__
-            if key not in compilation_metrics:
-                compilation_metrics[key] = []
-            t0 = time.time()
-            r = self.f(*args, **kwargs)
-            compilation_metrics[key].append(time.time() - t0)
-            print("exit time")
-            return r
-        return time_wrapper(*args, **kw)
-
-    def __repr__(self):
-        return f"{dynamo_timed} wrapping {self.f}"
 
 def dynamo_timed(func):
-    return DynamoTimed(func)
+    def time_wrapper(*args, **kwargs):
+        key = func.__qualname__
+        if key not in compilation_metrics:
+            compilation_metrics[key] = []
+        t0 = time.time()
+        r = func(*args, **kwargs)
+        compilation_metrics[key].append(time.time() - t0)
+        return r
+
+    return time_wrapper
 
 
 def compile_times(repr="str", aggregate=False):

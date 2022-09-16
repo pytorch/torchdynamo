@@ -192,7 +192,9 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor, pre_on_enter=nothing, post_on_exit=nothing):
+    def __init__(
+        self, callback, backend_ctx_ctor, pre_on_enter=nothing, post_on_exit=nothing
+    ):
         def on_enter():
             pre_on_enter()
             global most_recent_backend
@@ -205,13 +207,12 @@ class OptimizeContext(_TorchDynamoContext):
             global most_recent_context
             most_recent_context = backend_ctx_ctor
             install_generation_tagging_init()
-        
+
         def on_exit():
             # Could just pass post_on_exit through, but this reads much clearer
             post_on_exit()
 
         compiler_fn = innermost_fn(callback)
-        print("CALLBACK IS", callback)
         super().__init__(
             callback=callback,
             on_enter=on_enter,
@@ -229,6 +230,7 @@ class RunOnlyContext(_TorchDynamoContext):
 class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
+
 
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
@@ -654,4 +656,3 @@ class TorchPatcher:
             return fn(*args, **kwargs)
 
         return inner_fn
-
