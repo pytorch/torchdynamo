@@ -127,7 +127,7 @@ enforce_cond_guards_match = True
 
 
 # If True, raises exception if TorchDynamo is called with a context manager
-raise_on_ctx_manager_usage = False
+raise_on_ctx_manager_usage = True
 
 
 class _AccessLimitingConfig(ModuleType):
