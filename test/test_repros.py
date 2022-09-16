@@ -951,6 +951,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (36, 35, 29, 28))
 
+    # see: https://github.com/pytorch/pytorch/issues/80067
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
