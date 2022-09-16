@@ -297,7 +297,7 @@ class GraphLowering(torch.fx.Interpreter):
                 try:
                     ind = self.graph_outputs.index(value_storage_box)
                     self.graph_outputs[ind] = self.graph_inputs_original[name]
-                except:
+                except Exception:
                     pass
 
         self.finalize()
