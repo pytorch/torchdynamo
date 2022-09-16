@@ -420,6 +420,19 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(32),))
 
+    def test_add_inplace_permuted(self):
+        def fn(x, y):
+            return x.add_(y)
+
+        x=torch.ones([2, 12, 13, 17]).transpose(1,2)
+        y=torch.randn([2, 13, 1, 17])
+
+        self.common(fn, (x,y))
+
+
+
+
+
     def test_abs(self):
         def fn(a):
             return (a / (torch.abs(a) + 1),)
