@@ -62,7 +62,7 @@ def model_training_evaluation(
         # Run with native Pytorch
         opt_training_iter_fn = training_iter_fn
     else:
-        # Support backends: eager, aot_nop and aot_nvfuser
+        # Support backends: eager, aot_eager and aot_nvfuser
         opt_training_iter_fn = torchdynamo.optimize(backend)(training_iter_fn)
     for epoch in range(num_epochs):
         running_loss = 0.0
