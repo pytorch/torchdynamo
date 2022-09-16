@@ -230,10 +230,6 @@ class DisableContext(_TorchDynamoContext):
     def __init__(self):
         super().__init__(callback=None)
 
-
-specializing = False
-
-
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
@@ -659,17 +655,3 @@ class TorchPatcher:
 
         return inner_fn
 
-class Specializer:
-    def __enter__(self):
-        print("Enter")
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        print("Exit")
-
-def specialize():
-    return Specializer()
-    # if fn is not None:
-    #     print("FN is", fn)
-    #     # assert callable(fn)
-    # return optimize("eager")
-    # return SpecializeContext()

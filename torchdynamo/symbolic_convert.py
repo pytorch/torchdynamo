@@ -75,7 +75,7 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
-from .eval_frame import Specializer
+from .specialize import Specializer
 
 log = logging.getLogger(__name__)
 

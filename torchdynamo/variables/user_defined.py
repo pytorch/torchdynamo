@@ -104,7 +104,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # import pdb
             # pdb.set_trace()
             import torchdynamo
-            if self.value == torchdynamo.eval_frame.Specializer:
+            if self.value == torchdynamo.specialize.Specializer:
                 from torchdynamo.variables.misc import SpecializingContextManager
                 return SpecializingContextManager()
 

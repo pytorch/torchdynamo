@@ -250,7 +250,12 @@ class OutputGraph(fx.Tracer):
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
-        root = FakeRootModule(self.nn_modules)
+        print("Making root...")
+        root = self.root
+        if root is None:
+            root = FakeRootModule(self.nn_modules)
+
+        print("Made root", id(root), "do we already have one?", id(self.root))
 
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
@@ -350,7 +355,7 @@ class OutputGraph(fx.Tracer):
         call that generated code.
         """
         assert isinstance(rv, list)
-        assert isinstance(root, FakeRootModule)
+        assert isinstance(root, FakeRootModule), f"Got {type(root)} / {root} instead "
         for output in rv:
             self.guards.update(output.guards)
 
@@ -368,6 +373,8 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
 
+        print("root is?", id(root))
+        print("Do we have one already?", id(self.root))
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason

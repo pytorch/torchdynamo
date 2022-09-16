@@ -21,6 +21,7 @@ from ..source import AttrSource
 from ..utils import identity
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
+from ..specialize import Specializer
 
 
 class SuperVariable(VariableTracker):
@@ -298,11 +299,11 @@ class SpecializingContextManager(ContextManagerVariable):
 
     def enter(self, tx):
         print("Enter specializing")
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return Specializer.enter()
 
     def exit(self, tx, *args):
         print("exit specializing")
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return Specializer.exit()
 
     def fn_name(self):
         return "torchdynamo.eval_frame.specialize"
