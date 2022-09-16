@@ -951,6 +951,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (36, 35, 29, 28))
 
+    # see: https://github.com/pytorch/pytorch/issues/80067
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -966,7 +968,7 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, ifdyn(5, 4))
         # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (36, 35, 29, 28))
+        self.assertIn(cnt.op_count, (31, 36, 35, 29, 28))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1603,6 +1605,32 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_ellipsis(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lnorm = torch.nn.LayerNorm(
+                    (256,), eps=1e-06, elementwise_affine=True
+                )
+                self.linear = torch.nn.Linear(
+                    in_features=256, out_features=256, bias=True
+                )
+
+            def forward(self, cat_10):
+                lnorm = self.lnorm(cat_10)
+                getitem_64 = lnorm[
+                    (slice(None, None, None), slice(0, 1, None), Ellipsis)
+                ]
+                linear = self.linear(getitem_64)
+                return (linear,)
+
+        args = [torch.randn(2, 197, 256)]
+
+        mod = Repro()
+        opt_mod = torchdynamo.optimize("eager", nopython=True)(mod)
+
+        self.assertTrue(same(mod(*args), opt_mod(*args)))
 
 
 if __name__ == "__main__":
