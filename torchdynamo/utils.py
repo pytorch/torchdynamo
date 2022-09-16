@@ -117,6 +117,29 @@ def compile_times(repr="str", aggregate=False):
         return headers, values
 
 
+class DuplicateWarningChecker(object):
+    def __init__(self, maxsize=4096):
+        self.maxsize = maxsize
+        self.reset()
+
+    def reset(self):
+        self.set = collections.OrderedDict()
+
+    def add(self, key):
+        if key in self.set:
+            self.set.move_to_end(key, last=True)
+            if not config.verbose:
+                return False
+        else:
+            self.set[key] = None
+            while len(self.set) > self.maxsize:
+                self.set.popitem(last=False)
+        return True
+
+
+graph_break_dup_warning_checker = DuplicateWarningChecker()
+
+
 # Return all loggers that torchdynamo is responsible for
 def get_loggers():
     return [
@@ -171,6 +194,7 @@ def init_logging():
                 logger.addHandler(log_file)
 
     set_loggers_level(config.log_level)
+    graph_break_dup_warning_checker.reset()
 
 
 # filter out all frames after entering dynamo
