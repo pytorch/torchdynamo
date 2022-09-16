@@ -103,6 +103,12 @@ def nvfuser_ofi(subgraph):
 
 
 @create_backend
+def onednn(subgraph):
+    with torch.jit.fuser("fuser3"):
+        return reload_jit_model(subgraph)
+
+
+@create_backend
 def ofi(subgraph):
     return torch.jit.optimize_for_inference(subgraph.scripted)
 
