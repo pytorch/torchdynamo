@@ -125,6 +125,10 @@ capture_scalar_outputs = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
+# Automatically split model graph into pieces to match DDP bucket sizes
+# to allow DDP comm/compute overlap
+optimize_ddp = False
+
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = False
