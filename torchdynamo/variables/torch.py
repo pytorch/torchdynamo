@@ -312,7 +312,6 @@ class TorchVariable(VariableTracker):
             torch.unique,
             torch.unique_consecutive,
         ) or self.value.__name__ in ("nms",):
-            print("is dynamic")
             return True
 
         if self.value is torch.where and len(args) + len(kwargs) == 1:

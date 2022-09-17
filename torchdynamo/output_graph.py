@@ -356,7 +356,7 @@ class OutputGraph(fx.Tracer):
         call that generated code.
         """
         assert isinstance(rv, list)
-        assert isinstance(root, FakeRootModule), f"Got {type(root)} / {root} instead "
+        assert isinstance(root, FakeRootModule)
         for output in rv:
             self.guards.update(output.guards)
 

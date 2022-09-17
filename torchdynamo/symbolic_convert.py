@@ -559,8 +559,7 @@ class InstructionTranslatorBase(object):
     def SETUP_WITH(self, inst):
         ctx = self.pop()
         if not isinstance(ctx, ContextManagerVariable):
-            if not isinstance(ctx.value, Specializer):
-                unimplemented(f"SETUP_WITH {ctx}")
+            unimplemented(f"SETUP_WITH {ctx}")
         self.output.guards.update(ctx.guards)
 
         if isinstance(self, InstructionTranslator):

@@ -116,7 +116,8 @@ FILENAME_ALLOWLIST |= set(
 
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
-
+# Avoids import cycles for torchdynamo.
+# Please only put torchdynamo files in here.
 def lazy_allowlist():
     import torchdynamo
 

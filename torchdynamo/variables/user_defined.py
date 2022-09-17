@@ -101,8 +101,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            # import pdb
-            # pdb.set_trace()
             import torchdynamo
 
             if self.value == torchdynamo.specialize.Specializer:
@@ -133,10 +131,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __init__(self, value, value_type=None, **kwargs):
         super(UserDefinedObjectVariable, self).__init__(**kwargs)
-        print("I am born")
-        import pdb
-
-        pdb.set_trace()
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type

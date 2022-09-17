@@ -304,7 +304,7 @@ class SpecializingContextManager(ContextManagerVariable):
         return Specializer.exit()
 
     def fn_name(self):
-        return "torchdynamo.eval_frame.specialize"
+        return "torchdynamo.specialize.specialize"
 
 
 class FakeContextWrappingVariable(ContextManagerVariable):
