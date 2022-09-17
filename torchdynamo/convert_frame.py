@@ -36,7 +36,7 @@ from .utils import counters
 from .utils import dynamo_timed
 from .utils import filter_stack
 from .utils import format_bytecode
-from .utils import gen_record_filename
+from .utils import gen_record_file_name
 from .utils import guard_failures
 from .utils import init_logging
 from .utils import is_namedtuple
@@ -243,7 +243,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 def exception_handler(e, code, frame=None):
     record_filename = None
     if hasattr(e, "exec_record"):
-        record_filename = gen_record_filename(e)
+        record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
 
     log.error(format_error_msg(e, code, record_filename, frame))

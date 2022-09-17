@@ -183,8 +183,9 @@ def format_bytecode(prefix, name, filename, line_no, code):
  line {line_no} \n{dis.Bytecode(code).dis()}\n "
 
 
-def gen_record_filename(exc):
-    return f"{type(exc).__name__}_{uuid1()}.rec"
+def gen_record_file_name(exc, code):
+    return f"{config.replay_record_dir_name}/\
+{code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
 def write_record_to_file(filename, exec_record):
@@ -193,6 +194,7 @@ def write_record_to_file(filename, exec_record):
             f"Unable to write execution record {filename}; file already exists."
         )
     else:
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         with open(filename, "wb") as f:
             exec_record.dump(f)
 

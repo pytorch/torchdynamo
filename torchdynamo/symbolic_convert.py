@@ -383,6 +383,10 @@ class InstructionTranslatorBase(object):
 
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
+
+        if inst.argval in self.f_locals and config.replay_record_enabled:
+            self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
+
         if inst.argval not in self.symbolic_locals:
             unimplemented(f"undefined LOAD_DEREF {inst.argval}")
         self.push(self.symbolic_locals[inst.argval])

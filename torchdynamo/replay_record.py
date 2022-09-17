@@ -47,15 +47,18 @@ class ExecutionRecorder:
     name_to_modrec: dict[str, Any] = field(default_factory=dict)
 
     def add_local_var(self, name, var):
-        self.locals[name] = var
+        if isinstance(var, ModuleType):
+            if self._is_excl(var):
+                return
+            self.locals[name] = self._add_mod(var)
+        else:
+            self.locals[name] = var
 
     def add_global_var(self, name, var):
         if isinstance(var, ModuleType):
             if self._is_excl(var):
                 return
-            mod_rec = ModuleRecord(var)
-            self.name_to_modrec[var.__name__] = mod_rec
-            self.globals[name] = mod_rec
+            self.globals[name] = self._add_mod(var)
         else:
             self.globals[name] = var
 
@@ -69,12 +72,11 @@ class ExecutionRecorder:
     def record_module_access(self, mod, name, val):
         if self._is_excl(mod):
             return
-        # check local mods first
-        local_mod_name = self.LOCAL_MOD_PREFIX + mod.__name__
-        if local_mod_name in self.name_to_modrec:
-            self.name_to_modrec[local_mod_name].accessed_attrs[name] = val
-        else:
-            self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
+        if isinstance(val, ModuleType):
+            self.name_to_modrec[mod.__name__].accessed_attrs[name] = self._add_mod(val)
+            return
+
+        self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
 
     def get_record(self):
         return ExecutionRecord(
@@ -84,6 +86,12 @@ class ExecutionRecorder:
             self.builtins.copy(),
             self.code_options.copy(),
         )
+
+    def _add_mod(self, mod):
+        if mod.__name__ not in self.name_to_modrec:
+            self.name_to_modrec[mod.__name__] = ModuleRecord(mod)
+
+        return self.name_to_modrec[mod.__name__]
 
     @classmethod
     def _is_excl(cls, mod):
