@@ -513,7 +513,7 @@ class InstructionTranslatorBase(object):
         module_name = inst.argval
 
         # Are we replaying? if so, load recorded module
-        recorded_name = ExecutionRecorder.LOCAL_MOD_PREFIX + module_name
+        recorded_name = f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_{hash(self.f_code.co_filename)}_{self.lineno}"
         if recorded_name in self.f_globals:
             value = self.f_globals[recorded_name]
             source = GlobalSource(recorded_name)
@@ -541,7 +541,7 @@ class InstructionTranslatorBase(object):
                 source = self.import_source(module_name)
 
         if config.replay_record_enabled:
-            self.exec_recorder.add_local_mod(module_name, value)
+            self.exec_recorder.add_local_mod(recorded_name, value)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))

@@ -108,7 +108,6 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="TypeError")
 
-    @pytest.mark.skip(reason="Need to add handling for relative imports")
     def test_local_module(self):
         def test_fn(x):
             from . import mock_modules

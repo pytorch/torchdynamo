@@ -67,7 +67,7 @@ class ExecutionRecorder:
         if self._is_excl(mod):
             return
 
-        self.add_global_var(self.LOCAL_MOD_PREFIX + name, mod)
+        self.add_global_var(name, mod)
 
     def record_module_access(self, mod, name, val):
         if self._is_excl(mod):
