@@ -56,7 +56,7 @@ class TestDistributed(torchdynamo.testing.TestCase):
         )
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
-        dist.init_process_group("nccl", rank=cls.rank, world_size=1)
+        dist.init_process_group("gloo", rank=cls.rank, world_size=1)
 
     @classmethod
     def tearDownClass(cls):
@@ -109,6 +109,7 @@ class TestDistributed(torchdynamo.testing.TestCase):
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @pytest.mark.skipif(not hasattr(DDP, "_get_active_ddp_module"), reason="requires pytorch landing in parallel")
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
         """
@@ -130,6 +131,7 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
+    @pytest.mark.skipif(not hasattr(DDP, "_get_active_ddp_module"), reason="requires pytorch landing in parallel")
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
         """
@@ -150,6 +152,7 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertEqual(check_splits_compiler.compiler_called, 1)
 
     # TODO, debug this, regressed since initial development
+    @pytest.mark.skipif(not hasattr(DDP, "_get_active_ddp_module"), reason="requires pytorch landing in parallel")
     @pytest.mark.xfail
     @patch.object(config, "optimize_ddp", True)
     def test_aot_autograd(self):
