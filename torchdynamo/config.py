@@ -131,7 +131,7 @@ optimize_ddp = False
 
 
 # If True, raises exception if TorchDynamo is called with a context manager
-raise_on_ctx_manager_usage = False
+raise_on_ctx_manager_usage = True
 
 
 class _AccessLimitingConfig(ModuleType):
