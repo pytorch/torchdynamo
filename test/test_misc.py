@@ -2378,6 +2378,27 @@ class MiscTests(torchdynamo.testing.TestCase):
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
 
+    def test_inplace_param_update(self):
+        def fn(param, y):
+            prev_grad = torch.is_grad_enabled()
+            try:
+                torch.set_grad_enabled(False)
+                torch.set_grad_enabled(True)
+                torch.set_grad_enabled(False)
+                param.add_(y)
+            finally:
+                torch.set_grad_enabled(prev_grad)
+
+        y = torch.randn(4)
+        x = torch.nn.Parameter(torch.randn(4))
+        fn(x, y)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn(x, y)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
