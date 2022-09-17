@@ -1,22 +1,42 @@
 #!/usr/bin/env pytest
 import logging
 import re
-from test.mock_modules import mock_module2
+import shutil
+import unittest
 
-import pytest
 import torch
 
-import torchdynamo.exc as exc
 import torchdynamo.testing
 
 
 class ReplayRecordTests(torchdynamo.testing.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
+                torchdynamo.config, "replay_record_enabled", True
+            )
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
+                torchdynamo.config,
+                "replay_record_dir_name",
+                "/tmp/torchdynamo_error_records/",
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(torchdynamo.config.replay_record_dir_name, ignore_errors=True)
+        cls._exit_stack.close()
+
     def check_replay(self, fn, *args, exp_exc_name=None):
         fn_opt = torchdynamo.optimize("eager")(fn)
         with self.assertLogs(logger="torchdynamo", level=logging.ERROR) as log_orig:
             try:
                 fn_opt(*args)
-            except:
+            except Exception:
                 pass  # we'll check the logs for the raised exception
 
         with self.assertLogs(logger="torchdynamo", level=logging.ERROR) as log_replayed:
@@ -54,11 +74,11 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
 
         def level1():
             y = torch.ones(1, 1)
-            return level2()
+            return level2() + y
 
         def level0():
             x = torch.ones(1, 1)
-            level1()
+            return level1() + x
 
         self.check_replay(level0, exp_exc_name="AssertionError")
 
@@ -99,10 +119,10 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
     def test_nonlocal_module_class(self):
-        from . import mock_modules
+        from .mock_modules import mock_module2
 
         def test_fn():
-            z = mock_modules.mock_module2.Class1(1, 2)
+            z = mock_module2.Class1(1, 2)
             y = z.method2(torch.ones(3, 3))
             return y + torch.zeros(3, 5)
 
@@ -110,9 +130,9 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
 
     def test_local_module(self):
         def test_fn(x):
-            from . import mock_modules
+            from .mock_modules import mock_module3
 
-            z = mock_modules.mock_module3.method1([], torch.ones(5, 1))
+            z = mock_module3.method1([], torch.ones(5, 1))
             return torch.ones(2, 2) + x + z[0]
 
         self.check_replay(test_fn, torch.ones(1, 1), exp_exc_name="RuntimeError")

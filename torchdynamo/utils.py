@@ -21,7 +21,6 @@ import weakref
 from functools import lru_cache
 from typing import Any
 from typing import Dict
-from uuid import uuid1
 
 import numpy as np
 import tabulate
