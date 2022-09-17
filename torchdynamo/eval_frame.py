@@ -105,14 +105,10 @@ class _TorchDynamoContext:
 
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
-            raise RuntimeError("TorchDynamo is used with a context manager")
-        else:
-            log.warning(
-                (
-                    "Using TorchDynamo with a context manager will be deprecated soon."
-                    "Please read https://github.com/pytorch/torchdynamo#usage-example "
-                    "to use TorchDynamo using an annotation."
-                )
+            raise RuntimeError(
+                "torchdynamo.optimize(...) is used with a context manager. "
+                "Please refer to https://github.com/pytorch/torchdynamo#usage-example "
+                "to use torchdynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
