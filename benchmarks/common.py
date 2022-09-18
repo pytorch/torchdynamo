@@ -53,7 +53,71 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
-CI_SKIP_INFERENCE = [
+CI_SKIP_AOT_EAGER_INFERENCE = [
+    # TorchBench
+    "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "pyhpc_isoneutral_mixing",  # INCORRECT - Variation in Eager runs itself
+    "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    # Huggingface
+    "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
+    # TIMM
+    "coat_lite_mini",  # INCORRECT
+    "pit_b_224",  # INCORRECT
+]
+
+CI_SKIP_AOT_EAGER_TRAINING = [
+    *CI_SKIP_AOT_EAGER_INFERENCE,
+    # TorchBench
+    "Background_Matting",  # INCORRECT - Variation in Eager runs itself
+    "demucs",  # OOM
+    "dlrm",  # OOM
+    "fastNLP_Bert",  # INCORRECT
+    "hf_Albert",  # INCORRECT
+    "hf_BigBird",  # INCORRECT
+    "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "LearningToPaint",  # INCORRECT - Variation in Eager runs itself
+    "mobilenet_v2",  # INCORRECT - Variation in Eager runs itself
+    "mobilenet_v3_large",  # INCORRECT - Variation in Eager runs itself
+    "pytorch_CycleGAN_and_pix2pix",  # INCORRECT - Variation in Eager runs itself
+    "pytorch_unet",  # INCORRECT - Variation in Eager runs itself
+    "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "Super_SloMo",  # INCORRECT - Variation in Eager runs itself
+    "tacotron2",  # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation
+    "vision_maskrcnn",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "timm_efficientnet",  # INCORRECT
+    # Huggingface
+    "AlbertForMaskedLM",  # OOM
+    "AlbertForQuestionAnswering",  # OOM
+    "BartForConditionalGeneration",  # OOM
+    "BigBird",  # INCORRECT - Variation in Eager runs itself
+    "DebertaForMaskedLM",  # INCORRECT
+    "DebertaForQuestionAnswering",  # INCORRECT
+    "M2M100ForConditionalGeneration",  # OOM
+    "MBartForConditionalGeneration",  # OOM
+    "PegasusForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # OOM
+    "XLNetLMHeadModel",  # OOM
+    "YituTechConvBert",  # pandas.errors.ParserError: Error tokenizing data
+    # TIMM
+    "cait_m36_384",  # OOM
+    "convit_base",  # INCORRECT
+    "eca_botnext26ts_256",  # OOM
+    "eca_halonext26ts",  # OOM
+    "jx_nest_base",  # OOM
+    "levit_128",  # RuntimeError: Trying to backward through the graph a second time
+    "mixnet_l",  # INCORRECT
+    "mobilevit_s",  # INCORRECT
+    "nfnet_l0",  # INCORRECT
+    "rexnet_100",  # INCORRECT
+    "sebotnet33ts_256",  # INCORRECT
+    "tf_efficientnet_b0",  # INCORRECT
+    "tf_mixnet_l",  # INCORRECT
+    "tinynet_a",  # INCORRECT
+    "twins_pcpvt_base",  # INCORRECT
+]
+
+CI_SKIP_INDCUTOR_INFERENCE = [
+    *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "DALLE2_pytorch",
     "detectron2",
@@ -78,7 +142,9 @@ CI_SKIP_INFERENCE = [
     "tnt_s_patch16_224",
 ]
 
-CI_SKIP_TRAINING = [
+CI_SKIP_INDUCTOR_TRAINING = [
+    *CI_SKIP_AOT_EAGER_TRAINING,
+    *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     "attention_is_all_you_need_pytorch",
     "drq",
@@ -1612,9 +1678,19 @@ def main(runner, original_dir=None):
     if args.ci:
         # Only dump error on CI
         args.quiet = True
-        args.exclude += CI_SKIP_INFERENCE
-        if args.training:
-            args.exclude += CI_SKIP_TRAINING
+        args.repeat = 2
+        if args.accuracy_aot_nop:
+            args.exclude = (
+                CI_SKIP_AOT_EAGER_TRAINING
+                if args.training
+                else CI_SKIP_AOT_EAGER_INFERENCE
+            )
+        elif args.inductor:
+            args.exclude = (
+                CI_SKIP_INDUCTOR_TRAINING
+                if args.training
+                else CI_SKIP_INDCUTOR_INFERENCE
+            )
 
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test

@@ -84,27 +84,131 @@ jobs:
             source .circleci/setup_env.sh
             python .circleci/check_coverage.py
 
-  aot_eager:
+  aot_eager_torchbench_inference:
     machine:
-      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
       image: ubuntu-2004-cuda-11.4:202110-01
     resource_class: gpu.nvidia.large
     steps:
       - checkout
       - install_deps
       - run:
-          name: TorchBench AotAutograd Eager run
+          name: TorchBench AotAutograd Eager inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --accuracy --ci --skip-accuracy-check --training --backend=aot_eager -d cuda --output=aot_eager.csv
+            python benchmarks/torchbench.py --accuracy --ci --backend=aot_eager -d cuda --output=aot_eager_torchbench_inference.csv
       - store_artifacts:
-          path: aot_eager.csv
+          path: aot_eager_torchbench_inference.csv
       - run:
-          name: TorchBench AotAutograd Eager compiler accuracy
+          name: TorchBench AotAutograd Eager inference result check
           command: |
             source .circleci/setup_env.sh
-            python .circleci/check_csv.py -f aot_eager.csv
+            python .circleci/check_csv.py -f aot_eager_torchbench_inference.csv
+
+  aot_eager_hf_inference:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: HuggingFace AotAutograd Eager inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --accuracy --ci --backend=aot_eager -d cuda --output=aot_eager_hf_inference.csv
+      - store_artifacts:
+          path: aot_eager_hf_inference.csv
+      - run:
+          name: HuggingFace AotAutograd Eager inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f aot_eager_hf_inference.csv
+
+  aot_eager_timm_inference:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM AotAutograd Eager inference run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/timm_models.py --accuracy --ci --backend=aot_eager -d cuda --output=aot_eager_timm_inference.csv
+      - store_artifacts:
+          path: aot_eager_timm_inference.csv
+      - run:
+          name: TIMM AotAutograd Eager inference result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f aot_eager_timm_inference.csv
+
+  aot_eager_torchbench_training:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TorchBench AotAutograd Eager training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/torchbench.py --accuracy --ci --training --use-eval-mode --amp --backend=aot_eager -d cuda --output=aot_eager_torchbench_training.csv
+      - store_artifacts:
+          path: aot_eager_torchbench_training.csv
+      - run:
+          name: TorchBench AotAutograd Eager training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f aot_eager_torchbench_training.csv
+
+  aot_eager_hf_training:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: HuggingFace AotAutograd Eager training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/huggingface.py --accuracy --ci --training --use-eval-mode --amp --backend=aot_eager -d cuda --output=aot_eager_hf_training.csv
+      - store_artifacts:
+          path: aot_eager_hf_training.csv
+      - run:
+          name: HuggingFace AotAutograd Eager training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f aot_eager_hf_training.csv
+
+  aot_eager_timm_training:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: TIMM AotAutograd Eager training run
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            python benchmarks/timm_models.py --accuracy --ci --training --use-eval-mode --amp --backend=aot_eager -d cuda --output=aot_eager_timm_training.csv
+      - store_artifacts:
+          path: aot_eager_timm_training.csv
+      - run:
+          name: TIMM AotAutograd Eager training result check
+          command: |
+            source .circleci/setup_env.sh
+            python .circleci/check_csv.py -f aot_eager_timm_training.csv
 
   inductor_torchbench_inference:
     machine:
@@ -114,11 +218,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TorchBench inference run
+          name: TorchBench TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --output=inductor_torchbench_inference.csv
+            python benchmarks/torchbench.py --accuracy --ci -d cuda --inductor --float32 --output=inductor_torchbench_inference.csv
       - store_artifacts:
           path: inductor_torchbench_inference.csv
       - run:
@@ -135,7 +239,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TorchBench training run
+          name: TorchBench TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -157,7 +261,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TorchBench training run
+          name: TorchBench TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -179,11 +283,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: Huggingface inference run
+          name: Huggingface TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 2 --partition-id 0 --output=inductor_hf_inference_0.csv
       - store_artifacts:
           path: inductor_hf_inference_0.csv
@@ -201,11 +305,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: Huggingface inference run
+          name: Huggingface TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 2 --partition-id 1 --output=inductor_hf_inference_1.csv
       - store_artifacts:
           path: inductor_hf_inference_1.csv
@@ -223,7 +327,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: Huggingface training run
+          name: Huggingface TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -245,7 +349,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: Huggingface training run
+          name: Huggingface TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -267,7 +371,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: Huggingface training run
+          name: Huggingface TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -289,11 +393,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM inference run
+          name: TIMM TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 0 --output=inductor_timm_inference_0.csv
       - store_artifacts:
           path: inductor_timm_inference_0.csv
@@ -311,11 +415,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM inference run
+          name: TIMM TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 1 --output=inductor_timm_inference_1.csv
       - store_artifacts:
           path: inductor_timm_inference_1.csv
@@ -333,11 +437,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM inference run
+          name: TIMM TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 2 --output=inductor_timm_inference_2.csv
       - store_artifacts:
           path: inductor_timm_inference_2.csv
@@ -355,11 +459,11 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM inference run
+          name: TIMM TorchInductor inference run
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 3 --output=inductor_timm_inference_3.csv
       - store_artifacts:
           path: inductor_timm_inference_3.csv
@@ -377,7 +481,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM training run
+          name: TIMM TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -399,7 +503,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM training run
+          name: TIMM TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -421,7 +525,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM training run
+          name: TIMM TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -443,7 +547,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM training run
+          name: TIMM TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -466,7 +570,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM training run
+          name: TIMM TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -488,7 +592,7 @@ jobs:
       - checkout
       - install_deps
       - run:
-          name: TIMM training run
+          name: TIMM TorchInductor training run
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -506,7 +610,12 @@ workflows:
   gpu:
     jobs:
       - coverage
-      - aot_eager
+      - aot_eager_torchbench_inference
+      - aot_eager_hf_inference
+      - aot_eager_timm_inference
+      - aot_eager_torchbench_training
+      - aot_eager_hf_training
+      - aot_eager_timm_training
       - inductor_torchbench_inference
       - inductor_torchbench_training_0
       - inductor_torchbench_training_1
