@@ -54,7 +54,6 @@ BATCH_SIZE_DIVISORS = {
     "densenet121": 2,
     "dla102": 2,
     "dpn107": 2,
-    "ecaresnet101d": 2,
     "eca_botnext26ts_256": 2,
     "eca_halonext26ts": 2,
     "gluon_senet154": 2,
@@ -63,11 +62,9 @@ BATCH_SIZE_DIVISORS = {
     "gmlp_s16_224": 2,
     "hrnet_w18": 64,
     "jx_nest_base": 4,
-    "legacy_senet154": 2,
     "mixer_b16_224": 2,
     "mixnet_l": 2,
     "mobilevit_s": 4,
-    "nasnetalarge": 2,
     "nfnet_l0": 2,
     "pit_b_224": 2,
     "pnasnet5large": 2,
@@ -206,6 +203,7 @@ class TimmRunnner(BenchmarkRunner):
             drop_rate=0.0,
             drop_path_rate=None,
             drop_block_rate=None,
+            pretrained=True,
             # global_pool=kwargs.pop('gp', 'fast'),
             # num_classes=kwargs.pop('num_classes', None),
             # drop_rate=kwargs.pop('drop', 0.),
@@ -232,6 +230,7 @@ class TimmRunnner(BenchmarkRunner):
         # example_inputs = torch.randn(
         #     (batch_size,) + input_size, device=device, dtype=data_dtype
         # )
+        torch.manual_seed(1337)
         input_tensor = torch.randint(
             256, size=(batch_size,) + input_size, device=device
         ).to(dtype=torch.float32)
