@@ -115,11 +115,15 @@ class NNModuleVariable(VariableTracker):
 
         if name in base_dict:
             subobj = base_dict[name]
-        elif name in base_dict["_modules"] and name not in all_class_attribute_names:
+        elif (
+            "_modules" in base_dict
+            and name in base_dict["_modules"]
+            and name not in all_class_attribute_names
+        ):
             subobj = base_dict["_modules"][name]
-        elif name in base_dict["_parameters"]:
+        elif "_parameters" in base_dict and name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
-        elif name in base_dict["_buffers"]:
+        elif "_buffers" in base_dict and name in base_dict["_buffers"]:
             subobj = base_dict["_buffers"][name]
         else:
             subobj = inspect.getattr_static(base, name)
