@@ -61,6 +61,8 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # Huggingface
     "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
     # TIMM
+    "coat_lite_mini",  # INCORRECT
+    "pit_b_224",  # INCORRECT
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -69,6 +71,8 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "Background_Matting",  # INCORRECT - Variation in Eager runs itself
     "demucs",  # OOM
     "dlrm",  # OOM
+    "fastNLP_Bert",  # INCORRECT, can't be reproduced locally
+    "hf_Albert",  # INCORRECT, can't be reproduced locally
     "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     "LearningToPaint",  # INCORRECT - Variation in Eager runs itself
     "mobilenet_v2",  # INCORRECT - Variation in Eager runs itself
@@ -78,12 +82,15 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     "Super_SloMo",  # INCORRECT - Variation in Eager runs itself
     "tacotron2",  # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation
+    "timm_efficientnet",  # INCORRECT, can't be reproduced locally
     "vision_maskrcnn",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     # Huggingface
     "AlbertForMaskedLM",  # OOM
     "AlbertForQuestionAnswering",  # OOM
     "BartForConditionalGeneration",  # OOM
     "BigBird",  # INCORRECT - Variation in Eager runs itself
+    "DebertaForMaskedLM",  # INCORRECT, can't be reproduced locally
+    "DebertaForQuestionAnswering",  # INCORRECT
     "M2M100ForConditionalGeneration",  # OOM
     "MBartForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
@@ -92,10 +99,25 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "YituTechConvBert",  # pandas.errors.ParserError: Error tokenizing data
     # TIMM
     "cait_m36_384",  # OOM
+    "convit_base",  # INCORRECT
     "eca_botnext26ts_256",  # OOM
     "eca_halonext26ts",  # OOM
     "jx_nest_base",  # OOM
     "levit_128",  # RuntimeError: Trying to backward through the graph a second time
+    "dm_nfnet_f0",  # INCORRECT, can't be reproduced locally
+    "rexnet_100",  # INCORRECT, can't be reproduced locally
+    "sebotnet33ts_256",  # INCORRECT, can't be reproduced locally
+    "tf_mixnet_l",  # INCORRECT, can't be reproduced locally
+    "tf_efficientnet_b0",  # INCORRECT, can't be reproduced locally
+    "coat_lite_mini",  # INCORRECT
+    "convit_base",  # INCORRECT
+    "gmixer_24_224",  # INCORRECT
+    "mixnet_l",  # INCORRECT
+    "mobilevit_s",  # INCORRECT
+    "nfnet_l0",  # INCORRECT
+    "pit_b_224",  # INCORRECT
+    "tinynet_a",  # INCORRECT
+    "twins_pcpvt_base",  # INCORRECT
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
@@ -125,8 +147,9 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    *CI_SKIP_AOT_EAGER_TRAINING,
-    *CI_SKIP_INDCUTOR_INFERENCE,
+    # CI does not check accuracy for inductor training yet
+    # *CI_SKIP_AOT_EAGER_TRAINING,
+    # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     "attention_is_all_you_need_pytorch",
     "drq",
