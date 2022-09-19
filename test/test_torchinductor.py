@@ -2232,6 +2232,35 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 1, 1]),))
 
+    def test_inplace_add(self):
+        @torchdynamo.optimize("inductor")
+        def fn(x, y):
+            return x.add_(y)
+
+        inputs = (
+            rand_strided((4, 4), (4, 1), device=self.device),
+            rand_strided((4, 4), (4, 1), device=self.device),
+        )
+        inp_clone = inputs[0].clone()
+        out = fn(*inputs)
+        self.assertTrue(same(out, inp_clone + inputs[1]))
+        self.assertTrue(out is inputs[0])
+
+    def test_inplace_mixed_dtype_ops(self):
+        @torchdynamo.optimize("inductor")
+        def fn(x, y):
+            z = x + y.float()
+            w = z.add_(y)
+            return w.mul_(y)
+
+        inputs = (
+            rand_strided((4, 4), (4, 1), device=self.device, dtype=torch.float),
+            rand_strided((4, 4), (4, 1), device=self.device, dtype=torch.double),
+        )
+        out = fn(*inputs)
+        out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
+        self.assertTrue(same(out, out_eager))
+
     @patch.object(config.triton, "cudagraphs", True)
     def test_strided_inputs(self):
         @torchdynamo.optimize("inductor")
