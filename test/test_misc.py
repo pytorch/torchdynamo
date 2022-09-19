@@ -516,15 +516,15 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x
 
         with torch.no_grad():
-            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):

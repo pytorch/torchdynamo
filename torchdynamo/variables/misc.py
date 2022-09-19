@@ -277,8 +277,6 @@ class GradModeVariable(ContextWrappingVariable):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def _call_func(self, tx, value):
-        if self.target_value == self.initial_value:
-            return
         tx.output.graph.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),

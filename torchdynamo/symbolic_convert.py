@@ -1243,7 +1243,6 @@ class InstructionTranslatorBase(object):
         self.output.guards.add(
             GlobalWeakRefSource(name).create_guard(GuardBuilder.WEAKREF_ALIVE)
         )
-        # self.f_globals[name] = weakref.ref(value)
         if name not in self.output.root_globals:
             self.output.install_global(name, weakref.ref(value))
 
