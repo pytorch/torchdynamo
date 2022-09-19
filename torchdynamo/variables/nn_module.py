@@ -115,7 +115,11 @@ class NNModuleVariable(VariableTracker):
 
         if name in base_dict:
             subobj = base_dict[name]
-        elif "_modules" in base_dict and name in base_dict["_modules"] and name not in all_class_attribute_names:
+        elif (
+            "_modules" in base_dict
+            and name in base_dict["_modules"]
+            and name not in all_class_attribute_names
+        ):
             subobj = base_dict["_modules"][name]
         elif "_parameters" in base_dict and name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
