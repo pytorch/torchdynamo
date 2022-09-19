@@ -56,8 +56,8 @@ output_filename = None
 
 CI_SKIP_INFERENCE = [
     # TorchBench
-    "dlrm",
-    "fambench_dlrm",
+    "DALLE2_pytorch",
+    "detectron2",
     "fastNLP_Bert",
     "hf_Reformer",
     "moco",
@@ -79,14 +79,13 @@ CI_SKIP_INFERENCE = [
     "GPT2ForSequenceClassification",
     "GPTNeoForSequenceClassification",
     "LayoutLMForSequenceClassification",
-    "MBartForConditionalGeneration",
     "MegatronBertForQuestionAnswering",
     "MobileBertForQuestionAnswering",
-    "PLBartForConditionalGeneration",
     "RobertaForQuestionAnswering",
     # TIMM
     # Some of these happen intermittently on CI, not locally
     "cait_m36_384",
+    "convit_base",
     "dla102",
     "ghostnet_100",
     "hrnet_w18",
@@ -94,23 +93,32 @@ CI_SKIP_INFERENCE = [
     "swin_base_patch4_window7_224",
     "visformer_small",
     "volo_d1_224",
+    "tnt_s_patch16_224",
 ]
 
 CI_SKIP_TRAINING = [
     # TorchBench
     "attention_is_all_you_need_pytorch",
+    "drq",
     "hf_Albert",
     "hf_Bart",
     "hf_GPT2",
-    "mobilenet_",
+    "mobilenet_v3_large",
     "pytorch_struct",
     "vgg16",
-    "Background_Matting",  # from functionalization
-    "mobilenet_v2_quantized_qat",  # from functionalization
-    "resnet50_quantized_qat",  # from functionalization
     "speech_transformer",  # from functionalization
     "vision_maskrcnn",  # from functionalization
     "timm_efficientnet",  # from functionalization (only fails for inductor)
+    "hf_Bert",
+    "soft_actor_critic",
+    # OOM
+    "Background_Matting",
+    "fastNLP_Bert",
+    "hf_BigBird",
+    "mobilenet_v2",
+    "mobilenet_v2_quantized_qat",
+    "resnet50_quantized_qat",
+    "timm_regnet",
     # Huggingface
     "AlbertForMaskedLM",
     "BartForConditionalGeneration",
@@ -127,14 +135,16 @@ CI_SKIP_TRAINING = [
     "XGLMForCausalLM",
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
+    # OOM
+    "BigBird",
     # TIMM
+    "dpn107",
+    "convit_base",
     "coat_lite_mini",
     "convnext_base",
     "deit_base_distilled_patch16_224",
     "levit_128",
-    "nasnetalarge",
     "mobilevit_s",
-    "pnasnet5large",
     "rexnet_100",
     "twins_pcpvt_base",
     # https://github.com/pytorch/torchdynamo/issues/1135
@@ -793,7 +803,7 @@ def read_batch_size_from_file(args, filename, model_name):
             if model_name == cur_name:
                 batch_size = int(b)
     if batch_size is None:
-        warnings.warn("Could not find batch size for {}".format(model_name))
+        log.warning("Could not find batch size for {}".format(model_name))
     elif batch_size == -1:
         raise RuntimeError(
             f"Batch size is unset for {model_name} in {args.batch_size_file}"
@@ -1051,7 +1061,7 @@ class BenchmarkRunner:
                 batch_size=batch_size,
             )
         except NotImplementedError:
-            logging.warn(f"{model_name} failed to load")
+            log.warning(f"{model_name} failed to load")
 
         assert (
             device == "cuda"
@@ -1233,7 +1243,7 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(model_iter_fn)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
-                logging.exception("unhandled error")
+                log.exception("unhandled error")
                 print("ERROR")
                 print(e)
                 return sys.exit(-1)
@@ -1756,9 +1766,9 @@ def main(runner, original_dir=None):
         args.float16 = True
         args.cosine = True
     elif args.accuracy_aot_nop:
-        optimize_ctx = torchdynamo.optimize("aot_nop", nopython=args.nopython)
+        optimize_ctx = torchdynamo.optimize("aot_eager", nopython=args.nopython)
         experiment = speedup_experiment
-        output_filename = "accuracy_aot_nop.csv"
+        output_filename = "accuracy_aot_eager.csv"
     elif args.accuracy_aot_ts:
         optimize_ctx = torchdynamo.optimize("aot_ts", nopython=args.nopython)
         experiment = speedup_experiment
@@ -1855,7 +1865,7 @@ def main(runner, original_dir=None):
                     batch_size=batch_size,
                 )
             except NotImplementedError:
-                logging.warn(f"{args.only} failed to load")
+                log.warning(f"{args.only} failed to load")
                 continue  # bad benchmark implementation
 
             current_name = name

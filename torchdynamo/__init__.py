@@ -1,5 +1,3 @@
-# TODO: remove this config entirely
-
 from . import allowed_functions
 from . import convert_frame
 from . import eval_frame

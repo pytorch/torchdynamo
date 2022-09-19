@@ -14,10 +14,11 @@ from typing import cast
 
 import sympy
 
-from .codegen.common import _simplify_loops
 from .codegen.common import index_prevent_reordering
 from .utils import VarRanges
 from .utils import sympy_product
+from .utils import sympy_str
+from .utils import sympy_subs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -44,9 +45,9 @@ class MemoryDep(typing.NamedTuple):
         ):
             c = canonicalization_prefix()
             size = (self.size[1], self.size[0])
-            s0 = sympy.Symbol(c + "0", is_integer=True)
-            s1 = sympy.Symbol(c + "1", is_integer=True)
-            index = self.index.subs(s0, s1)
+            s0 = sympy.Symbol(c + "0")
+            s1 = sympy.Symbol(c + "1")
+            index = sympy_subs(self.index, {s0: s1})
             return MemoryDep(self.name, index, size)
         else:
             return self
@@ -83,14 +84,6 @@ class MemoryDep(typing.NamedTuple):
             sympy_product([s for s in self.size if s in vars])
         )
 
-    def is_simple(self) -> bool:
-        s = str(self.index)
-        if "indirect" in s:
-            return False
-        if "ModularIndexing" in s:
-            return False
-        return True
-
     def is_contiguous(self) -> bool:
         return isinstance(self.index, (sympy.Symbol, sympy.Integer))
 
@@ -106,9 +99,6 @@ class StarDep(typing.NamedTuple):
 
     def numel_hint(self):
         return 1
-
-    def is_simple(self) -> bool:
-        return False
 
     def is_contiguous(self) -> bool:
         return False
@@ -178,7 +168,7 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         # convert it to the simpliest form because of the interference from
         # different indexing formulas.
         index_vars = list(self._var_ranges.keys())
-        new_sizes, reindex, prune = _simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
             index_prevent_reordering([index], index_vars, sizes),
@@ -189,18 +179,18 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         _, add_var = var_builder(canonicalization_prefix())
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
 
-        index = sympy.expand(index).subs(replacement)
+        index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"load({name}, {index})"
+        return f"load({name}, {sympy_str(index)})"
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"store({name}, {index}, {value}, {mode})"
+        return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def reduction(
         self, name: str, dtype, src_dtype, reduction_type, index, value
@@ -210,7 +200,7 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
-        return f"index_expr({index}, {dtype})"
+        return f"index_expr({sympy_str(index)}, {dtype})"
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
@@ -218,7 +208,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     var_ranges: VarRanges = collections.OrderedDict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy.Symbol(f"{prefix}{next(cnt)}", is_integer=True)
+        v = sympy.Symbol(f"{prefix}{next(cnt)}")
         var_ranges[v] = length
         return v
 

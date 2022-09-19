@@ -70,7 +70,7 @@ TABLE = {
         "pytorch": "--training --profile-backend=pytorch",
         "eager": "--training --profile-backend=eager",
         "ts_nvfuser": "--training --profile-backend=nvfuser",
-        "aot_eager": "--training --profile-backend=aot_nop",
+        "aot_eager": "--training --profile-backend=aot_eager",
         "aot_nvfuser": "--training --profile-backend=aot_nvfuser",
         "inductor_cudagraphs": "--training --profile-backend=inductor",
     },

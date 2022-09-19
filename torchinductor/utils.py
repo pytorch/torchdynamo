@@ -165,3 +165,59 @@ def cache_on_self(fn):
         return getattr(self, key)
 
     return wrapper
+
+
+def sympy_str(expr: sympy.Expr):
+    """
+    Normal sympy str is very slow, this is a lot faster.  The result are
+    somewhat worse, as it doesn't do as much simplification.  So don't
+    use this for final codegen.
+    """
+    if isinstance(expr, sympy.Symbol):
+        return expr.name
+    if isinstance(expr, sympy.Add):
+        return " + ".join(map(sympy_str, expr.args))
+    if isinstance(expr, sympy.Mul):
+        return " * ".join(map(sympy_str, expr.args))
+
+    from .ir import CleanDiv
+    from .ir import IndexingDiv
+    from .ir import ModularIndexing
+
+    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+        return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
+    return str(expr)
+
+
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+    """
+    xreplace is faster than subs, but is way more picky
+    """
+
+    def promote_strings(key):
+        if isinstance(key, str):
+            return sympy.Symbol(key)
+        return key
+
+    return expr.xreplace(
+        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+    )
+
+
+def free_symbol_startswith(index: sympy.Expr, prefix: str):
+    return any(v.name.startswith(prefix) for v in index.free_symbols)
+
+
+def has_incompatible_cudagraph_ops(gm):
+    forbidden_list = set(
+        [
+            "aten._fused_moving_avg_obs_fq_helper.default",
+            "aten._fused_moving_avg_obs_fq_helper_functional.default",
+            "fbgemm.dense_to_jagged.default",
+            "fbgemm.jagged_to_padded_dense.default",
+        ]
+    )
+    for node in gm.graph.nodes:
+        if str(node.target) in forbidden_list:
+            return True
+    return False

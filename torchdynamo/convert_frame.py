@@ -249,7 +249,9 @@ def exception_handler(e, code, frame=None):
     log.error(format_error_msg(e, code, record_filename, frame))
 
 
-def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=True):
+def convert_frame_assert(
+    compiler_fn: Callable, guard_export_fn=None, one_graph=True, export=False
+):
     """Fully convert a frame into an FX graph"""
     init_logging()
 
@@ -321,6 +323,7 @@ def convert_frame_assert(compiler_fn: Callable, guard_export_fn=None, one_graph=
             frame.f_builtins,
             compiler_fn,
             one_graph,
+            export,
             guard_export_fn,
             frame,
         )
@@ -336,6 +339,7 @@ def _compile(
     builtins,
     compiler_fn,
     one_graph,
+    export,
     guard_export_fn=None,
     frame=None,
 ):
@@ -353,6 +357,7 @@ def _compile(
             code_options,
             compiler_fn,
             one_graph,
+            export,
         )
         tracer.run()
         output = tracer.output
@@ -454,7 +459,7 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
 
 # TODO mlazos: add support for same args, or record them
 def replay(filename):
-    from .optimizations.backends import eager  # Maybe record the backend?
+    from .optimizations.backends import eager
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False
@@ -470,9 +475,10 @@ def replay(filename):
             record.locals,
             record.builtins,
             eager,
-            False,  # one_graph, maybe we should record
+            False,  # one_graph
             None,  # export_fn
             None,  # frame
+            False,  # Export
         )
     except Exception:
         pass

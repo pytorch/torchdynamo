@@ -136,7 +136,7 @@ def call(primals_1, primals_2):
     return (buf1, )
 ```
 
-When torchinductor.config.triton.mm = "aten", Torchinductor will load the template [triton_mm.j2](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/codegen/triton_mm.j2) and generate code below. It will codegen only one kernel (kernel0) for mm+relu.
+When torchinductor.config.triton.mm = "triton", Torchinductor will load the template [triton_mm.j2](https://github.com/pytorch/torchdynamo/blob/main/torchinductor/codegen/triton_mm.j2) and generate code below. It will codegen only one kernel (kernel0) for mm+relu.
 ```py
 @mm_heuristics()
 @mm_autotune()

@@ -200,6 +200,19 @@ def _numpy_function_ids():
     return rv
 
 
+@make_function_id_set
+def _builtin_constant_ids():
+    """
+    Collects constant builtins by eliminating callable items.
+    """
+    rv = {
+        id(v): f"builtins.{k}"
+        for k, v in builtins.__dict__.items()
+        if not k.startswith("_") and not callable(v)
+    }
+    return rv
+
+
 def is_allowed(obj):
     """Is this safe to trace like torch.add ?"""
     # torch.ops is populated lazily so we don't necessarily have them in
@@ -216,8 +229,12 @@ def torch_get_name(obj, default):
     return _allowed_function_ids.get_name(id(obj), default)
 
 
-def is_builtin(obj):
+def is_builtin_callable(obj):
     return id(obj) in _builtin_function_ids
+
+
+def is_builtin_constant(obj):
+    return id(obj) in _builtin_constant_ids
 
 
 def is_numpy(obj):

@@ -12,9 +12,12 @@ from typing import Iterable
 from typing import Tuple
 
 import torch
+from torch.testing import make_tensor
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_map
+
+log = logging.getLogger(__name__)
 
 OP_INP_DIRECTORY = os.path.join(os.path.dirname(__file__), "operator_inp_logs")
 
@@ -87,9 +90,15 @@ def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
 
 def deserialize_tensor(size, dtype, stride=None):
     if stride is not None:
-        return torch.empty_strided(size, stride, dtype=dtype)
+        out = torch.empty_strided(size, stride, dtype=dtype)
     else:
-        return torch.empty(size, dtype=dtype)
+        out = torch.empty(size, dtype=dtype)
+    try:
+        out.copy_(make_tensor(size, dtype=dtype, device="cpu"))
+    except Exception as e:
+        print(e)
+        return out
+    return out
 
 
 def serialize_tensor(e):
@@ -256,7 +265,7 @@ class OperatorInputsLoader:
         ), f"Could not find {operator}, must provide overload"
 
         if "embedding" in str(operator):
-            logging.warn("Embedding inputs NYI, input data cannot be randomized")
+            log.warning("Embedding inputs NYI, input data cannot be randomized")
             yield
             return
 

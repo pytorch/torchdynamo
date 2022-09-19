@@ -1,7 +1,7 @@
 import logging
 import operator
 import os
-from itertools import chain
+import time
 
 import sympy
 import torch
@@ -43,14 +43,17 @@ class GraphLowering(torch.fx.Interpreter):
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = Integer(val)
-
         while any(x is None for x in stride):
             candidates = {
                 ex.size(i) * ex.stride()[i]: size[i] * stride[i]
                 for i in range(len(size))
                 if stride[i] is not None and ex.stride()[i] >= 0
             }
-            for i in chain(reversed(range(len(stride))), range(len(stride))):
+            # iterate over unbound strides in sorted order
+            val_list = sorted(
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+            )
+            for _, i in val_list:
                 if stride[i] is None and ex.stride()[i] in candidates:
                     stride[i] = candidates[ex.stride()[i]]
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
@@ -91,6 +94,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
+        self.creation_time = time.time()
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:
@@ -228,17 +232,22 @@ class GraphLowering(torch.fx.Interpreter):
             return super().call_function(target, args, kwargs)
 
         if target not in lowerings:
-            if get_decompositions([target]):
-                # There isn't a good way to dynamically patch this in
-                # since AOT Autograd already ran.  The error message tells
-                # the user how ot fix it.
-                raise MissingOperatorWithDecomp(target, args, kwargs)
-            elif config.implicit_fallbacks:
+            if config.implicit_fallbacks:
+                error = (
+                    MissingOperatorWithDecomp
+                    if get_decompositions([target])
+                    else MissingOperatorWithoutDecomp
+                )
                 log.warning(
                     "Creating implicit fallback for:\n%s",
-                    MissingOperatorWithoutDecomp.operator_str(target, args, kwargs),
+                    error.operator_str(target, args, kwargs),
                 )
                 make_fallback(target)
+            elif get_decompositions([target]):
+                # There isn't a good way to dynamically patch this in
+                # since AOT Autograd already ran.  The error message tells
+                # the user how to fix it.
+                raise MissingOperatorWithDecomp(target, args, kwargs)
             else:
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 

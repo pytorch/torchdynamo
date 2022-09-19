@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import itertools
 import logging
 from typing import Callable
 from typing import Dict
@@ -15,6 +16,7 @@ from sympy import Symbol
 from . import ir
 from .codegen.common import IndentedBuffer
 from .utils import VarRanges
+from .utils import sympy_subs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ class SizeVarAllocator(object):
         if not zero_one_const:
             self.val_to_var.clear()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
+        self._simplify_loops = self.make_simplify_loops_cache()
 
     def seed(self):
         """
@@ -65,7 +68,7 @@ class SizeVarAllocator(object):
         return sympy.Symbol("seed")
 
     def simplify(self, expr: Expr):
-        return sympy.expand(expr).subs(self.replacements)
+        return sympy.expand(expr).xreplace(self.replacements)
 
     def make_simplify_with_ranges_cache(self):
         """
@@ -88,6 +91,28 @@ class SizeVarAllocator(object):
             return result
 
         return simplify_with_ranges
+
+    def make_simplify_loops_cache(self):
+        """
+        self._simplify_with_ranges() can be expensive, cache its results
+        """
+        cache = dict()
+        replacement_count = len(self.replacements)
+
+        def simplify_loops(index_vars, sizes, index_formulas):
+            nonlocal replacement_count
+            if replacement_count != len(self.replacements):
+                # new replacements invalidates cached results
+                cache.clear()
+                replacement_count = len(self.replacements)
+            key = (*index_vars, *sizes, *index_formulas)
+            result = cache.get(key, None)
+            if result is None:
+                result = self._simplify_loops_impl(index_vars, sizes, index_formulas)
+                cache[key] = result
+            return result
+
+        return simplify_loops
 
     def _simplify_with_ranges(self, expr: Expr, var_ranges: VarRanges):
         """
@@ -119,12 +144,12 @@ class SizeVarAllocator(object):
             base = remove_zero_terms(base, divisor)
             # actual iteration range is to size-1
             iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
-            base_s = base.subs(iter_ranges)
+            base_s = sympy_subs(base, iter_ranges)
             if self.maybe_guard_lt(base_s, modulus * divisor):
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
-        if "ModularIndexing" in str(expr):
+        if expr.has(ModularIndexing):
             expr = expr.replace(
                 ModularIndexing(
                     sympy.Wild("base"),
@@ -134,7 +159,7 @@ class SizeVarAllocator(object):
                 visit_modular_indexing,
             )
 
-        if "IndexingDiv" in str(expr):
+        if expr.has(IndexingDiv):
             expr = expr.replace(
                 IndexingDiv(
                     sympy.Wild("base"),
@@ -146,6 +171,69 @@ class SizeVarAllocator(object):
         if expr != original_expr:
             return self._simplify_with_ranges(expr, var_ranges)
         return expr
+
+    def _simplify_loops_impl(self, index_vars, sizes, index_formulas):
+        """
+        Try to remove as many axis from loop iterations as possible, by:
+            1) removing size==1 dimensions
+            2) fuse contiguous dimensions into a single loop
+            If channel_last = True, we will prevent the last dim fused with other dims
+        """
+        sizes = list(map(self.simplify, sizes))
+
+        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
+        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+
+        for i in range(len(sizes)):
+            if sizes[i] == 1:
+                # remove dim
+                sizes[i] = None
+
+        def can_merge_dims(a, b):
+            for k in range(len(strides)):
+                if self.simplify(strides[k][a] * sizes[a]) == self.simplify(
+                    strides[k][b]
+                ):
+                    # approximate test passed, try sound version
+                    va = index_vars[a]
+                    vb = index_vars[b]
+                    v = sympy.Symbol("_merge_tester")
+                    expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
+                    expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
+                    if self.simplify(expr1) == self.simplify(expr2):
+                        continue
+                return False
+            return True
+
+        changed = True
+        while changed:
+            changed = False
+            for i, j in itertools.product(
+                reversed(range(len(sizes))), reversed(range(len(sizes)))
+            ):
+                if i == j or sizes[i] is None or sizes[j] is None:
+                    continue
+                if can_merge_dims(i, j):
+                    changed = True
+                    sizes[i] = sizes[i] * sizes[j]
+                    sizes[j] = None
+
+        def reindex(index):
+            it = list(reversed(index))
+            new_index = []
+            for size in sizes:
+                if size is None:
+                    new_index.append(sympy.Integer(0))
+                else:
+                    new_index.append(it.pop())
+            assert not it
+            return new_index
+
+        def prune(index):
+            assert len(index) == len(sizes)
+            return [i for i, s in zip(index, sizes) if s is not None]
+
+        return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
         left = sympy.expand(left)
@@ -181,6 +269,8 @@ class SizeVarAllocator(object):
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
+        if left == right:
+            return True
         if self.size_hint(left - right) == 0:
             self.guard_equals(left, right)
             return True
@@ -265,15 +355,13 @@ class SizeVarAllocator(object):
             return -self[-val]
         if val in self.val_to_var:
             return self.val_to_var[val]
-        var = Symbol(
-            f"{self.prefix}{len(self.var_to_val)}", positive=True, integer=True
-        )
+        var = Symbol(f"{self.prefix}{len(self.var_to_val)}")
         self.val_to_var[val] = var
         self.var_to_val[var] = val
         return var
 
     def size_hint(self, expr: Expr) -> int:
-        return int(sympy.expand(expr).subs(self.var_to_val))
+        return int(sympy_subs(sympy.expand(expr), self.var_to_val))
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -304,17 +392,18 @@ class SizeVarAllocator(object):
     def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
         """Convert an indexing expression back into strides"""
         strides = []
-        index = index.subs(self.replacements)
+        index = self.simplify(index)
         # remove any offset
-        index = index - index.subs({v: sympy.Integer(0) for v in vars if v != 0})
+        index = index - sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
         for i in range(len(vars)):
             # drop all the other dims
-            index_dim = index.subs(
+            index_dim = sympy_subs(
+                index,
                 {
                     vars[j]: sympy.Integer(0)
                     for j in range(len(vars))
                     if i != j and vars[j] != 0
-                }
+                },
             )
             v = vars[i]
             if v == 0:
@@ -322,20 +411,20 @@ class SizeVarAllocator(object):
             else:
                 # TODO(jansel): should we use sympy.diff here?
                 strides.append(
-                    index_dim.subs({v: sympy.Integer(1)})
-                    - index_dim.subs({v: sympy.Integer(0)})
+                    sympy_subs(index_dim, {v: sympy.Integer(1)})
+                    - sympy_subs(index_dim, {v: sympy.Integer(0)})
                 )
         return strides
 
     def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
-        index = index.subs(self.replacements)
-        return index.subs({v: sympy.Integer(0) for v in vars if v != 0})
+        index = self.simplify(index)
+        return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
 
     def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         for v in index.free_symbols:
-            if str(v).startswith("indirect"):
-                index = index.subs({v: 0})
+            if v.name.startswith("indirect"):  # type: ignore
+                index = sympy_subs(index, {v: 0})
         result = []
         for s in self.stride_vars(index, vars):
             try:
@@ -396,8 +485,7 @@ class SizeVarAllocator(object):
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr
 
-        x = sympy.expand(x)
-        return pexpr(x.subs(self.replacements))
+        return pexpr(self.simplify(x))
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -409,7 +497,9 @@ class SizeVarAllocator(object):
 
 
 def join_dimensions(expr: Expr) -> Expr:
-    if not isinstance(expr, sympy.Add) or "ModularIndexing" not in str(expr):
+    from .ir import ModularIndexing
+
+    if not isinstance(expr, sympy.Add) or not expr.has(ModularIndexing):
         return expr  # fast exit path
     return _join_dimensions_cached(expr)
 

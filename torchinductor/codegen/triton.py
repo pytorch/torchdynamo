@@ -16,8 +16,11 @@ import torchinductor
 
 from .. import config
 from .. import ir
+from ..ir import ReductionHint
+from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
 from ..utils import sympy_product
+from ..utils import sympy_subs
 from ..virtualized import V
 from ..virtualized import ops
 from .common import DeferredLine
@@ -161,6 +164,15 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def rsqrt(x):
         return f"tl.libdevice.rsqrt({x})"
+
+    @staticmethod
+    def signbit(x):
+        # XX: This is wrong for the value -0.0 in floating point
+        return f"tl.libdevice.signbitf({x}) if {x}.dtype is tl.float32 else {x} < 0"
+
+    @staticmethod
+    def fmod(a, b):
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
@@ -432,7 +444,7 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}, is_contiguous=False):
+    def __init__(self, *groups, pid_cache={}, reduction_hint=ReductionHint.DEFAULT):
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -445,7 +457,17 @@ class TritonKernel(Kernel):
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.initialize_range_tree(pid_cache)
-        self.is_contiguous = is_contiguous
+        self.reduction_hint = reduction_hint
+
+        # define this in a closure to make cache local to object
+        @functools.lru_cache(None)
+        def simplify_indexing(index: sympy.Expr):
+            index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
+            for tree in self.range_trees:
+                index = self.combine_contiguous_dims(index, tree)
+            return index
+
+        self.simplify_indexing = simplify_indexing
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -593,27 +615,25 @@ class TritonKernel(Kernel):
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     def is_indirect_indexing(self, index: sympy.Expr):
-        index_vars = set(index.free_symbols)
-        return any(
-            # tmpX  means indirect indexing
-            str(v).startswith("tmp")
-            for v in index_vars
-        )
+        # tmpX  means indirect indexing
+        return free_symbol_startswith(index, "tmp")
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
         """
+        if isinstance(index, (sympy.Integer, sympy.Symbol)):
+            return index
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = ir._simplify_loops(
+        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
             return index
         new_index_vars = tree.construct(new_sizes)
-        new_index = index.subs(dict(zip(index_vars, reindex(new_index_vars))))
+        new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
     def indexing(
@@ -625,12 +645,11 @@ class TritonKernel(Kernel):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
-        index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
-        for tree in self.range_trees:
-            index = self.combine_contiguous_dims(index, tree)
-        index_vars = set(index.free_symbols)
+        index = self.simplify_indexing(index)
+        index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
         indirect_indexing = self.is_indirect_indexing(index)
+
         need_dense = (
             config.triton.dense_indexing
             or dense_indexing
@@ -884,9 +903,11 @@ class TritonKernel(Kernel):
         ]
         if self.inside_reduction:
             heuristics = "reduction_heuristics"
+            hint_import = "from torchinductor.ir import ReductionHint"
         else:
             heuristics = "pointwise_heuristics"
             size_hints = size_hints[:-1]
+            hint_import = ""
 
         if name is None:
             code.splice(
@@ -894,15 +915,22 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from torchinductor.triton_ops.autotune import {heuristics}
+                    {hint_import}
                 """
             )
 
-        code.splice(
-            f"""
-                @{heuristics}(size_hints={size_hints!r}, contiguous={self.is_contiguous!r}, filename=__file__)
+        if self.inside_reduction:
+            reduction_hint = self.reduction_hint
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, reduction_hint={reduction_hint}, filename=__file__)
                 @triton.jit
             """
-        )
+        else:
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, filename=__file__)
+                @triton.jit
+            """
+        code.splice(heuristics_line)
 
         argdefs, _ = self.args.python_argdefs()
 
@@ -919,7 +947,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
-        code.writeline(f"def {name or 'kernel'}({', '.join(argdefs)}):")
+        code.writeline(f"def {name or '{kernel_name}'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
             for old, new in self.args.aliases():
@@ -932,7 +960,7 @@ class TritonKernel(Kernel):
         wrapper = IndentedBuffer()
         wrapper.writeline("TritonCodeCache.load('''")
         wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("''').kernel")
+        wrapper.writeline("''').{kernel_name}")
         return wrapper.getvalue()
 
     def reshape_size_str(self, i=None, x=None):
@@ -1102,20 +1130,34 @@ class TritonScheduling:
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
-    def is_contiguous(node):
-        if node in (EnableReduction, DisableReduction):
-            return True
-        return all(
+    def reduction_hint(node):
+        assert node.is_reduction()
+        if all(
             dep.is_contiguous()
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
-        )
+        ):
+            return ReductionHint.INNER
+        else:
+            return node.node.data.reduction_hint
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-
-        with TritonKernel(
-            *tiled_groups, is_contiguous=all(map(self.is_contiguous, node_schedule))
-        ) as kernel:
+        reductions = list(
+            filter(
+                lambda n: n not in (EnableReduction, DisableReduction)
+                and n.is_reduction(),
+                node_schedule,
+            )
+        )
+        if len(reductions) > 0:
+            hints = [self.reduction_hint(n) for n in reductions]
+            if hints.count(hints[0]) == len(hints):
+                reduction_hint_val = hints[0]
+            else:
+                reduction_hint_val = ReductionHint.DEFAULT
+        else:
+            reduction_hint_val = ReductionHint.DEFAULT
+        with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
                 if node is DisableReduction:
@@ -1131,9 +1173,13 @@ class TritonScheduling:
             kernel_name = wrapper.kernels[src_code]
         else:
             kernel_name = wrapper.next_kernel_name()
-            wrapper.define_kernel(kernel_name, src_code)
             wrapper.kernels[src_code] = kernel_name
-
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            src_code = src_code.format(kernel_name=subs_name)
+            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+            src_code = src_code.replace("#pragma CMT", "#")
+            wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 

@@ -37,6 +37,7 @@ class AotAutogradStrategy(object):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
+        functorch.compile.config.use_fake_tensor = True
 
         super(AotAutogradStrategy, self).__init__()
         counters["aot_autograd"]["total"] += 1
@@ -110,7 +111,7 @@ class AotNop(AotAutogradStrategy):
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, fw_compiler=nop)
 
 
-aot_nop = AotNop.compile_fn
+aot_eager = AotNop.compile_fn
 
 
 class AotTorchscript(AotAutogradStrategy):
@@ -329,13 +330,15 @@ class CudaGraphModule(Module):
 
 
 def find_input_mutations(g):
-    FK = "fake_result"
+    def meta_fk(meta):
+        return meta["val"] if "val" in meta else meta["fake_result"]
+
     inputs = defaultdict(set)
     input_idx = 0
     mutated_inputs = set()
     for n in g.nodes:
         if n.op == "placeholder":
-            inputs[StorageWeakRef(n.meta[FK].storage())].add(input_idx)
+            inputs[StorageWeakRef(meta_fk(n.meta).storage())].add(input_idx)
             input_idx += 1
         elif n.op == "call_function":
             if n.target is operator.getitem:
@@ -356,7 +359,7 @@ def find_input_mutations(g):
                     # TODO: not correct for args that contain tensors in a struct
                     # like list
                     mutated_inputs |= inputs[
-                        StorageWeakRef(argument.meta[FK].storage())
+                        StorageWeakRef(meta_fk(argument.meta).storage())
                     ]
         # TODO: error on unrecognized nodes
     return mutated_inputs
@@ -412,10 +415,10 @@ def create_aot_backends():
     """
     Register aliases for the AOT backends
     """
-    # aot_nop uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-    BACKENDS["aot_nop"] = aot_nop
+    # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
+    BACKENDS["aot_eager"] = aot_eager
 
-    # aot_nop uses AOT Autograd backend with print compiler. It prints the
+    # aot_eager uses AOT Autograd backend with print compiler. It prints the
     # graphs and also saves the graph modules that are sent to AOT Autograd.
     # This is helpful for debugging.
     BACKENDS["aot_print"] = aot_print
