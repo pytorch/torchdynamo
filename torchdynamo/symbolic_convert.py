@@ -604,7 +604,14 @@ class InstructionTranslatorBase(object):
         self.push(None)
 
     def END_FINALLY(self, inst):
-        assert self.pop() is None
+        tos = self.pop()
+        if sys.version_info < (3, 8):
+            # python3.7 and 3.8 can have END_FINALLY without BEGIN_FINALLY
+            assert tos is None or (
+                tos.is_python_constant() and tos.as_python_constant() is None
+            )
+        else:
+            assert tos is None
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -1236,7 +1243,8 @@ class InstructionTranslatorBase(object):
         self.output.guards.add(
             GlobalWeakRefSource(name).create_guard(GuardBuilder.WEAKREF_ALIVE)
         )
-        self.f_globals[name] = weakref.ref(value)
+        if name not in self.output.root_globals:
+            self.output.install_global(name, weakref.ref(value))
 
     @property
     def fake_mode(self):

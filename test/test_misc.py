@@ -516,15 +516,15 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x
 
         with torch.no_grad():
-            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
@@ -2377,6 +2377,27 @@ class MiscTests(torchdynamo.testing.TestCase):
             torchdynamo.config.verbose = False
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
+
+    def test_inplace_param_update(self):
+        def fn(param, y):
+            prev_grad = torch.is_grad_enabled()
+            try:
+                torch.set_grad_enabled(False)
+                torch.set_grad_enabled(True)
+                torch.set_grad_enabled(False)
+                param.add_(y)
+            finally:
+                torch.set_grad_enabled(prev_grad)
+
+        y = torch.randn(4)
+        x = torch.nn.Parameter(torch.randn(4))
+        fn(x, y)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn(x, y)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
 
 
 class TestTracer(JitTestCase):

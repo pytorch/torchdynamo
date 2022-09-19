@@ -262,18 +262,21 @@ class ContextWrappingVariable(ContextManagerVariable):
 
 
 class GradModeVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_value, initial_value=None, **kwargs):
+        var = GradModeVariable(target_value, initial_value, **kwargs)
+        var._call_func(tx, target_value)
+        return var
+
     def __init__(self, target_value, initial_value=None, **kwargs):
         super(GradModeVariable, self).__init__(
             target_value=target_value, initial_value=initial_value, **kwargs
         )
 
     def enter(self, tx):
-        assert self.initial_value == torch.is_grad_enabled()
-        return super(GradModeVariable, self).enter(tx)
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def _call_func(self, tx, value):
-        if self.target_value == self.initial_value:
-            return
         tx.output.graph.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),

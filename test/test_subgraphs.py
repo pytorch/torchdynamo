@@ -428,8 +428,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
         self._common(fn, 2, 9)
         torchdynamo.reset()
         with torch.no_grad():
-            # fewer ops (no disable grad) if already disabled
-            self._common(fn, 2, 5)
+            self._common(fn, 2, 9)
 
     def test_resume_with_no_grad2(self):
         def fn(a, b):
@@ -458,7 +457,7 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             x = x + 4
             return x
 
-        self._common(fn, 2, 15)
+        self._common(fn, 2, 19)
 
     def test_resume_tuple_iterator(self):
         def fn(a, b):
