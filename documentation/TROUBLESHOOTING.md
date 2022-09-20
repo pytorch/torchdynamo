@@ -6,7 +6,8 @@
   - [Minifying TorchInductor Errors](#minifying-torchinductor-errors)
   - [Minifying Backend Compiler Errors](#minifying-backend-compiler-errors)
 - [Performance Profiling](#performance-profiling)
-  - [Understanding Coarse-Grained Compile Times](#understanding-coarse-grained-compile-times)
+  - [Accessing TorchDynamo Profiler](#accessing-torchdynamo-profiler)
+  - [TorchInductor Debug Tracing](#torchinductor-debug-tracing)
   - [Memory Profiling](#memory-profiling)
   - [Graph Breaks](#graph-breaks)
     - [Identifying the cause of a graph break](#identifying-the-cause-of-a-graph-break)
@@ -29,6 +30,7 @@ We're also actively developing debug tools, profilers, and improving our errors/
 | `torchdynamo.explain`               | Find graph breaks and display reasoning for them                                                                             | `torchdynamo.explain(fn, *inputs)`                                           |
 | Record/Replay (in progress)         | Record and replay frames which to reproduce errors during graph capture                                                      | `torchdynamo.config.replay_record_enabled = True`                            |
 | TorchDynamo function name filtering | only compile functions with the given name to reduce noise when debugging an issue                                           | set environment variable TORCHDYNAMO_DEBUG_FUNCTION=\<name\>                 |
+| TorchInductor Tracing               | Show time taken in each TorchInductor stage + output code and graph visualization                                            | set the environment variable TORCHINDUCTOR_TRACE=1                           | s |
 
 # Guide to Diagnosing Runtime Errors
 Below is the TorchDynamo compiler stack. 
@@ -105,7 +107,7 @@ Below is the portion of the stack which we are focusing on:
 
 <img src="./images/torchinductor_backend.png" width=600>
 
-With TorchInductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while TorchInductor lowers the forward and backward graphs to GPU code or C++. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes which are causing the issue the issue. The first step is to determine whether the error occurs during tracing of the backward graph with AOTAutograd or during TorchInductor lowering. As mentioned above in step 2, the `"aot_eager"` backend can be used to run only AOTAutograd in isolation without lowering. If the error still occurs with this backend, this indicates that the error is occurring during AOTAutograd tracing.
+With TorchInductor as the chosen backend, AOTAutograd is used to generate the backward graph from the forward graph captured by torchdynamo. It's important to note that errors can occur during this tracing and also while TorchInductor lowers the forward and backward graphs to GPU code or C++. A model can often consist of hundreds or thousands of FX nodes, so narrowing the exact nodes where this problem occurred can be very difficult. Fortunately, there are tools availabe to automatically minify these input graphs to the nodes which are causing the issue. The first step is to determine whether the error occurs during tracing of the backward graph with AOTAutograd or during TorchInductor lowering. As mentioned above in step 2, the `"aot_eager"` backend can be used to run only AOTAutograd in isolation without lowering. If the error still occurs with this backend, this indicates that the error is occurring during AOTAutograd tracing.
 
 Here's an example:
 
@@ -273,6 +275,52 @@ The other difference from the procedure in [TorhInductor Errors](#torchinductor-
 ## Accessing TorchDynamo Profiler
 TorchDynamo has a builtin stats function for collecting and displaying the time spent in each compilation phase. These stats can be accessed by calling `torchdynamo.utils.compile_times()` after executing TorchDynamo. By default, this returns a string representation of the compile times spent in each TorchDynamo function by name. 
 
+## TorchInductor Debug Tracing
+TorchInductor has a builtin stats and trace function for displaying time spent in each compilation phase, output code, output graph visualization and IR dump. This is a debugging tool designed to make it easier to debug/understand the internals of  TorchInductor.
+
+Setting the environment variable `TORCHINDUCTOR_TRACE=1` will cause a debug trace directory to be created and printed:
+```
+$ env TORCHINDUCTOR_TRACE=1 python repro.py
+torchinductor.debug: [WARNING] model_forward_0 debug trace: /tmp/torchinductor_jansel/rh/crhwqgmbqtchqt3v3wdeeszjb352m4vbjbvdovaaeqpzi7tdjxqr.debug
+```
+
+Here is an [example debug directory output](https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396) for the test program:
+```
+torch.nn.Sequential(
+        torch.nn.Linear(10, 10),
+        torch.nn.LayerNorm(10),
+        torch.nn.ReLU(),
+    )
+```
+
+Note each file in that debug trace can be enabled/disabled via `torchinductor.config.trace.*`.  The profile and the diagram are both disabled by default since they are expensive to generate.
+
+A single node in this new debug format looks like:
+```
+buf1: SchedulerNode(ComputedBuffer)
+buf1.writes = 
+    {   MemoryDep(name='buf1', index=0, size=()),
+        MemoryDep(name='buf1', index=0, size=(s0,))}
+buf1.unmet_dependencies = {MemoryDep(name='buf0', index=c0, size=(s0,))}
+buf1.met_dependencies = {MemoryDep(name='primals_2', index=c0, size=(s0,))}
+buf1.group.device = cuda:0
+buf1.group.iteration = (1, s0)
+buf1.sizes = ([], [s0])
+class buf1_loop_body:
+    var_ranges = {z0: s0}
+    index0 = z0
+    index1 = 0
+    def body(self, ops):
+        get_index = self.get_index('index0')
+        load = ops.load('buf0', get_index, False)
+        get_index_1 = self.get_index('index0')
+        load_1 = ops.load('primals_2', get_index_1, False)
+        add = ops.add(load, load_1)
+        get_index_2 = self.get_index('index1')
+        reduction = ops.reduction('buf1', torch.float32, torch.float32, 'sum', get_index_2, add)
+        return reduction
+```
+See the [example debug directory output](https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396) for more examples.
 
 ## Memory Profiling
 TBD
