@@ -466,7 +466,9 @@ def replay(filename):
     init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
-    record.globals = record.globals | globals()
+    record.globals = {
+        k: v for k, v in itertools.chain(record.globals.items(), globals().items())
+    }
 
     try:
         _compile(
