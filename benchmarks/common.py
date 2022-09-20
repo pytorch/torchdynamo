@@ -1184,6 +1184,7 @@ class BenchmarkRunner:
             ):
                 accuracy_status = "eager_variation"
                 return record_status(accuracy_status)
+            correct_rerun_result = None
 
             # Run with Dynamo
             reset_rng_state()
