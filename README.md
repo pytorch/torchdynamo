@@ -231,7 +231,7 @@ for _ in range(100):
 ```
 
 ## Troubleshooting
-See [Troubleshooting](TROUBLESHOOTING.md).
+See [Troubleshooting](./documentation/TROUBLESHOOTING.md).
 
 ## Adding Backends
 
