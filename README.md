@@ -188,7 +188,7 @@ additional packages. Some of the most commonly used backends are
 
 Debugging backends:
 * `torchdynamo.optimize("eager")` - Uses PyTorch to run the extracted GraphModule. This is quite useful in debugging TorchDynamo issues.
-* `torchdynamo.optimize("aot_nop")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
+* `torchdynamo.optimize("aot_eager")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
 
 Training & inference backends:
 * `torchdynamo.optimize("inductor")` - Uses TorchInductor backend with AotAutograd and cudagraphs.  [Read more](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)
