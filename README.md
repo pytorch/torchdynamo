@@ -9,7 +9,7 @@ compiled with a customizable backend. It creates this FX Graph through
 bytecode analysis and is designed to mix Python execution with compiled
 backends to get the best of both worlds: usability and performance.
 
-![](TorchDynamo.png)
+![](./documentation/images/TorchDynamo.png)
 
 For more on TorchDynamo you can read our [posts on PyTorch dev-discuss]
 or [watch a deep-dive video].
