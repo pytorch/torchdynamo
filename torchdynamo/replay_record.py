@@ -3,6 +3,7 @@ from dataclasses import field
 from types import CodeType
 from types import ModuleType
 from typing import Any
+from typing import Dict
 
 import dill
 
@@ -10,7 +11,7 @@ import dill
 @dataclasses.dataclass
 class ModuleRecord:
     module: ModuleType
-    accessed_attrs: dict[str, Any] = field(default_factory=dict)
+    accessed_attrs: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclasses.dataclass
@@ -21,10 +22,10 @@ class DummyModule:
 @dataclasses.dataclass
 class ExecutionRecord:
     code: CodeType
-    globals: dict[str, Any] = field(default_factory=dict)
-    locals: dict[str, Any] = field(default_factory=dict)
-    builtins: dict[str, Any] = field(default_factory=dict)
-    code_options: dict[str, Any] = field(default_factory=dict)
+    globals: Dict[str, Any] = field(default_factory=dict)
+    locals: Dict[str, Any] = field(default_factory=dict)
+    builtins: Dict[str, Any] = field(default_factory=dict)
+    code_options: Dict[str, Any] = field(default_factory=dict)
 
     def dump(self, f):
         dill.dump(self, f)
@@ -40,11 +41,11 @@ class ExecutionRecorder:
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
-    globals: dict[str, Any] = field(default_factory=dict)
-    locals: dict[str, Any] = field(default_factory=dict)
-    builtins: dict[str, Any] = field(default_factory=dict)
-    code_options: dict[str, Any] = field(default_factory=dict)
-    name_to_modrec: dict[str, Any] = field(default_factory=dict)
+    globals: Dict[str, Any] = field(default_factory=dict)
+    locals: Dict[str, Any] = field(default_factory=dict)
+    builtins: Dict[str, Any] = field(default_factory=dict)
+    code_options: Dict[str, Any] = field(default_factory=dict)
+    name_to_modrec: Dict[str, Any] = field(default_factory=dict)
 
     def add_local_var(self, name, var):
         if isinstance(var, ModuleType):

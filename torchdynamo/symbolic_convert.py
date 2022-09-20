@@ -520,7 +520,9 @@ class InstructionTranslatorBase(object):
         module_name = inst.argval
 
         # Are we replaying? if so, load recorded module
-        recorded_name = f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_{hash(self.f_code.co_filename)}_{self.lineno}"
+        recorded_name = (
+            f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_{level}_{fromlist}_{module_name}"
+        )
         if recorded_name in self.f_globals:
             value = self.f_globals[recorded_name]
             source = GlobalSource(recorded_name)

@@ -231,14 +231,17 @@ def gen_record_file_name(exc, code):
 
 
 def write_record_to_file(filename, exec_record):
-    if os.path.exists(filename):
-        log.warning(
-            f"Unable to write execution record {filename}; file already exists."
-        )
-    else:
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, "wb") as f:
-            exec_record.dump(f)
+    try:
+        if os.path.exists(filename):
+            log.warning(
+                f"Unable to write execution record {filename}; file already exists."
+            )
+        else:
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            with open(filename, "wb") as f:
+                exec_record.dump(f)
+    except Exception:
+        log.error(f"Unable to write execution record {filename}", exc_info=1)
 
 
 def count_calls(g: fx.Graph):
