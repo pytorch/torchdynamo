@@ -325,6 +325,12 @@ def fill_scalar(self, value):
     return torch.full_like(self, value)
 
 
+@register_decomposition([aten.fill.Tensor])
+def fill_tensor(self, value: Tensor):
+    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
+    return torch.full_like(self, value.item())
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
