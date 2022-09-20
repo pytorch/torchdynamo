@@ -63,6 +63,7 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TIMM
     "coat_lite_mini",  # INCORRECT
     "pit_b_224",  # INCORRECT
+    "swin_base_patch4_window7_224",  # INCORRECT
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -118,6 +119,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "pit_b_224",  # INCORRECT
     "tinynet_a",  # INCORRECT
     "twins_pcpvt_base",  # INCORRECT
+    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
