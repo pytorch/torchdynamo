@@ -613,11 +613,6 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
                                 if torchdynamo.config.dynamic_shapes
                                 else arg_for_guard.stride()
                             )
-                            dtype = (
-                                None
-                                if torchdynamo.config.dynamic_shapes
-                                else arg_for_guard.dtype
-                            )
 
                             equals = new_graph.graph.create_node(
                                 "call_function",
@@ -626,7 +621,7 @@ def export(f, *args, aten_graph=False, guard_args=True, **kwargs):
                                     placeholders[arg_for_guard_position],
                                     shape,
                                     strides,
-                                    dtype,
+                                    arg_for_guard.dtype,
                                 ),
                                 {},
                                 name="arg_guard_equality_check",
