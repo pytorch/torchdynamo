@@ -145,15 +145,12 @@ SLOW_BENCHMARKS = {
 
 # https://github.com/pytorch/torchdynamo/issues/519
 AOT_AUTOGRAD_NOT_YET_WORKING = {
-    # https://github.com/pytorch/functorch/issues/586
+    # https://github.com/pytorch/torchdynamo/issues/1147
     "tts_angular",
     "demucs",
-    "tacotron2",  # also has an issue with normalize_ir
-    # https://github.com/pytorch/torchdynamo/issues/590
+    # https://github.com/pytorch/torchdynamo/issues/739
     "pyhpc_isoneutral_mixing",
     "vision_maskrcnn",
-    # https://github.com/pytorch/torchdynamo/issues/80
-    "hf_BigBird",
     # https://github.com/pytorch/pytorch/issues/81526
     "moco",
     # https://github.com/pytorch/pytorch/issues/81529
@@ -163,25 +160,14 @@ AOT_AUTOGRAD_NOT_YET_WORKING = {
 # https://github.com/pytorch/torchdynamo/issues/332
 INDUCTOR_INFERENCE_NOT_YET_WORKING = {
     *AOT_AUTOGRAD_NOT_YET_WORKING,
-    # RuntimeError: The tensor has a non-zero number of elements,
-    "fastNLP_Bert",
     # Accuracy errors
     "hf_Longformer",
-    "hf_Reformer",
     "maml",
+    "Super_SloMo",
 }
 
 INDUCTOR_TRAINING_NOT_YET_WORKING = {
     *INDUCTOR_INFERENCE_NOT_YET_WORKING,
-    # load_mask nesting needed
-    "Super_SloMo",
-    # float16 issue or CUDA error: operation not permitted when stream is capturing
-    "resnet50_quantized_qat",
-    "mobilenet_v2_quantized_qat",
-    # TypeError: expected Tensor as element 0 in argument 1, but got NoneType
-    "dlrm",
-    # RuntimeError: CUDA out of memory.
-    "Background_Matting",
 }
 
 TRT_NOT_YET_WORKING = {
@@ -326,7 +312,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 1e-3
             elif name in REQUIRE_EVEN_HIGHER_TOLERANCE:
-                tolerance = 8 * 1e-3
+                tolerance = 8 * 1e-2
         return tolerance, cosine
 
     def compute_loss(self, pred):

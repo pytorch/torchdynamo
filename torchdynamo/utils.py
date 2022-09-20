@@ -8,6 +8,7 @@ import functools
 import gc
 import inspect
 import itertools
+import logging
 import logging.config
 import math
 import operator
@@ -18,6 +19,7 @@ import sys
 import time
 import types
 import weakref
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any
 from typing import Dict
@@ -28,9 +30,8 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-import torchdynamo.config
-
-from . import config
+import torchdynamo
+import torchdynamo.config as config
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -116,6 +117,43 @@ def compile_times(repr="str", aggregate=False):
         return headers, values
 
 
+class DuplicateWarningChecker(object):
+    def __init__(self, maxsize=4096):
+        self.maxsize = maxsize
+        self.reset()
+
+    def reset(self):
+        self.set = collections.OrderedDict()
+
+    def add(self, key):
+        if key in self.set:
+            self.set.move_to_end(key, last=True)
+            if not config.verbose:
+                return False
+        else:
+            self.set[key] = None
+            while len(self.set) > self.maxsize:
+                self.set.popitem(last=False)
+        return True
+
+
+graph_break_dup_warning_checker = DuplicateWarningChecker()
+
+
+# Return all loggers that torchdynamo is responsible for
+def get_loggers():
+    return [
+        logging.getLogger("torchdynamo"),
+        logging.getLogger("torchinductor"),
+    ]
+
+
+# Set the level of all loggers that torchdynamo is responsible for
+def set_loggers_level(level):
+    for logger in get_loggers():
+        logger.setLevel(level)
+
+
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
@@ -145,13 +183,18 @@ LOGGING_CONFIG = {
 }
 
 
+# initialize torchdynamo loggers
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
-        logger = logging.getLogger("torchdynamo")
-        logger.setLevel(config.log_level)
-        logger = logging.getLogger("torchinductor")
-        logger.setLevel(config.log_level)
+        if config.log_file_name is not None:
+            log_file = logging.FileHandler(config.log_file_name)
+            log_file.setLevel(config.log_level)
+            for logger in get_loggers():
+                logger.addHandler(log_file)
+
+    set_loggers_level(config.log_level)
+    graph_break_dup_warning_checker.reset()
 
 
 # filter out all frames after entering dynamo
@@ -396,6 +439,19 @@ def clone_inputs(example_inputs):
         if isinstance(res[i], torch.Tensor):
             res[i] = clone_input(res[i])
     return res
+
+
+@contextmanager
+def preserve_rng_state():
+    rng = torch.clone(torch.random.get_rng_state())
+    if torch.cuda.is_available():
+        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    try:
+        yield
+    finally:
+        torch.random.set_rng_state(rng)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng)
 
 
 def is_jit_model(model0):
@@ -692,7 +748,7 @@ def same(
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert ref.dtype == res.dtype
+            assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -716,7 +772,14 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                passes_test = res_error <= (1.1 * ref_error + 1e-5)
+                multiplier = 1.1
+
+                if fp64_ref.numel() < 500:
+                    # In the presence of noise, noise might dominate our error
+                    # metric for smaller tensors.
+                    multiplier = 2
+
+                passes_test = res_error <= (multiplier * ref_error + 1e-5)
                 if not passes_test:
                     log.warning(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
@@ -767,14 +830,14 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = torchdynamo.config.cache_size_limit
-    torchdynamo.config.cache_size_limit = sys.maxsize
+    prior = config.cache_size_limit
+    config.cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         pass
-        torchdynamo.config.cache_size_limit = prior
+        config.cache_size_limit = prior
 
 
 # map from transformed code back to original user code

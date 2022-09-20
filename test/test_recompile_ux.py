@@ -85,7 +85,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         with unittest.mock.patch.object(
             torchdynamo.config, "cache_size_limit", expected_recompiles
         ):
-            with self.assertLogs(level="WARNING") as logs:
+            with self.assertLogs(logger="torchdynamo", level="WARNING") as logs:
                 for _ in range(10):
                     bsz = torch.randint(low=0, high=1000, size=())
                     x = torch.randn((bsz, 3, 4))
@@ -152,7 +152,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
             # warmup
             opt_func(cached_input)
 
-            with self.assertLogs(level="WARNING") as logs:
+            with self.assertLogs(logger="torchdynamo", level="WARNING") as logs:
                 opt_func = torchdynamo.optimize("eager")(func)
                 opt_func(missed_input)
             self.assert_single_log_contains(logs, expected_failure)
@@ -190,7 +190,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         # warmup
         opt_func(a, b)
 
-        with self.assertLogs(level="WARNING") as logs:
+        with self.assertLogs(logger="torchdynamo", level="WARNING") as logs:
             opt_func = torchdynamo.optimize("eager")(func)
             opt_func(a, 1)
         self.assert_single_log_contains(

@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import dis
 import enum
+import logging
 import math
 import os
 import sys
@@ -515,15 +516,15 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x
 
         with torch.no_grad():
-            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
@@ -2280,6 +2281,30 @@ class MiscTests(torchdynamo.testing.TestCase):
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_cond_export_single_arg(self):
+        from functorch.experimental.cond import cond
+
+        def true_fn(x):
+            return x
+
+        def false_fn(x):
+            return x.sin()
+
+        def f(pred, x):
+            return cond(pred, true_fn, false_fn, [x])
+
+        graph, guard = torchdynamo.export(
+            f, torch.tensor(False), torch.tensor([0.25, 0.25])
+        )
+        true_mirror = graph(torch.tensor(True), torch.tensor([0.25, 0.25]))
+        self.assertTrue(same(torch.tensor([0.25, 0.25]), true_mirror))
+        true_mirror_2 = graph(torch.tensor(True), torch.tensor([0.33, 0.33, 0.33]))
+        self.assertTrue(same(torch.tensor([0.33, 0.33, 0.33]), true_mirror_2))
+
+        false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
+        self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
+
     def test_disable_optimize(self):
         cnt = torchdynamo.testing.CompileCounter()
 
@@ -2305,6 +2330,74 @@ class MiscTests(torchdynamo.testing.TestCase):
 
             f3(torch.ones(6))
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_config_log_level(self):
+        @torchdynamo.optimize("eager")
+        def fn(a, b):
+            return a + b
+
+        with self.assertLogs(logger="torchdynamo", level=logging.DEBUG) as log:
+            torchdynamo.config.log_level = logging.DEBUG
+            fn(torch.randn(10), torch.randn(10))
+            cur_len = len(log)
+            self.assertGreater(cur_len, 0)
+
+            torchdynamo.config.log_level = logging.WARNING
+            fn(torch.randn(10), torch.randn(10))
+            self.assertEqual(cur_len, len(log))
+
+    def test_duplicate_graph_break_warning(self):
+        @torchdynamo.optimize("eager")
+        def f1(a, b):
+            f2(a, b)
+
+        def f2(a, b):
+            c = a + b
+            print("break")
+            return a + b + c
+
+        @torchdynamo.optimize("eager")
+        def g1(a, b):
+            g2(a, b)
+
+        def g2(a, b):
+            c = a + b
+            print("break")
+            return a + b + c
+
+        def count_graph_break_msgs(msgs):
+            return sum(msg.find("Graph break") != -1 for msg in msgs)
+
+        with self.assertLogs(logger="torchdynamo", level=logging.WARNING) as log:
+            torchdynamo.config.verbose = True
+            f1(torch.randn(10), torch.randn(10))
+            self.assertGreater(count_graph_break_msgs(log.output), 1)
+
+        with self.assertLogs(logger="torchdynamo", level=logging.WARNING) as log:
+            torchdynamo.config.verbose = False
+            g1(torch.randn(10), torch.randn(10))
+            self.assertEqual(count_graph_break_msgs(log.output), 1)
+
+    def test_inplace_param_update(self):
+        def fn(param, y):
+            prev_grad = torch.is_grad_enabled()
+            try:
+                torch.set_grad_enabled(False)
+                torch.set_grad_enabled(True)
+                torch.set_grad_enabled(False)
+                param.add_(y)
+            finally:
+                torch.set_grad_enabled(prev_grad)
+
+        y = torch.randn(4)
+        x = torch.nn.Parameter(torch.randn(4))
+        fn(x, y)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn(x, y)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
 
 
 class TestTracer(JitTestCase):

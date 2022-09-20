@@ -7,6 +7,8 @@ from types import ModuleType
 
 import torch
 
+import torchdynamo.utils
+
 try:
     import torch._prims
     import torch._refs
@@ -21,7 +23,12 @@ except ImportError:
 # INFO print compiled functions + graphs
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
+# NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
+
+# the name of a file to write the logs to
+log_file_name = None
+
 # Verbose will print full stack traces on warnings and errors
 verbose = False
 
@@ -118,15 +125,22 @@ capture_scalar_outputs = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
+# Automatically split model graph into pieces to match DDP bucket sizes
+# to allow DDP comm/compute overlap
+optimize_ddp = False
+
 
 # If True, raises exception if TorchDynamo is called with a context manager
-raise_on_ctx_manager_usage = False
+raise_on_ctx_manager_usage = True
 
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
         if name not in _allowed_config_names:
             raise AttributeError(f"{__name__}.{name} does not exist")
+        # automatically set logger level whenever config.log_level is modified
+        if name == "log_level":
+            torchdynamo.utils.set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 

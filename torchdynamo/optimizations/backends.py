@@ -5,7 +5,6 @@ import logging
 import os
 import subprocess
 import tempfile
-import warnings
 
 import numpy as np
 import torch
@@ -101,6 +100,12 @@ def nvfuser(subgraph):
 def nvfuser_ofi(subgraph):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model_ofi(subgraph)
+
+
+@create_backend
+def onednn(subgraph):
+    with torch.jit.fuser("fuser3"):
+        return reload_jit_model(subgraph)
 
 
 @create_backend
@@ -296,7 +301,7 @@ def ipex(subgraph, **kwargs):
             traced_model = torch.jit.freeze(traced_model)
             return traced_model
         except Exception:
-            warnings.warn("JIT trace failed during the 'ipex' optimize process.")
+            log.warning("JIT trace failed during the 'ipex' optimize process.")
             return model
 
 

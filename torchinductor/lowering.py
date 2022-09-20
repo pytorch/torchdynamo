@@ -57,7 +57,6 @@ add_needs_realized_inputs(
         aten.bmm,
         aten.convolution,
         aten.convolution_backward,
-        aten.grid_sampler_2d,
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
@@ -448,8 +447,11 @@ def squeeze(x, dim=None):
     dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
     removed = new_shape.pop(dim)
-    assert removed == 1, removed
-    return view(x, new_shape)
+    if V.graph.sizevars.maybe_guard_equals(removed, 1):
+        return view(x, new_shape)
+
+    # squeeze does nothing if the size isn't 1
+    return x
 
 
 @register_lowering([aten.squeeze_])
@@ -765,11 +767,12 @@ def fallback_handler(kernel):
     return handler
 
 
+# https://github.com/pytorch/torchdynamo/issues/1215 to remove native_batch_norm
 def make_fallback(kernel):
     assert (
-        kernel not in decompositions
+        kernel not in decompositions or kernel is aten.native_batch_norm.default
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.native_batch_norm.default:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
@@ -804,6 +807,22 @@ def bernoulli_(x, *args):
     return x
 
 
+# This shouldn't be called in general
+@register_lowering(aten._foobar)
+def _foobar(_):
+    assert False
+
+
+@functools.lru_cache(1)
+def _warn_triton_random(salt):
+    log.warning("using triton random, expect difference from eager")
+
+
+def warn_triton_random():
+    # only warn once per graph
+    _warn_triton_random(V.graph.creation_time)
+
+
 def make_rand(fn_name):
     def rand_or_randn(
         *size,
@@ -813,7 +832,7 @@ def make_rand(fn_name):
         pin_memory=False,
         memory_format=None,
     ):
-        log.warning("using triton random, expect difference from eager")
+        warn_triton_random()
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
@@ -879,7 +898,7 @@ def randn(*args, **kwargs):
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
 def philox_seed_like(x):
-    log.warning("using triton random, expect difference from eager")
+    warn_triton_random()
     return V.graph.random_seed_buffer(x.get_device())
 
 
@@ -1173,7 +1192,11 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             )
         assert mask
         mask = functools.reduce(ops.and_, mask)
-        src_val = ops.masked(mask, lambda: src_loader(src_idx), 0.0)
+        src_val = ops.masked(
+            mask,
+            lambda: src_loader(src_idx),
+            0 if is_integer_type(x) else 0.0,
+        )
         return ops.where(
             mask,
             src_val,
@@ -1195,8 +1218,9 @@ def _unwrap(x):
 
 
 @register_lowering([torch.tensor, aten.scalar_tensor])
-def tensor(data, *, dtype=None, device=None, layout=None):
+def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert layout in (None, torch.strided)
+    assert pin_memory is False
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -1296,7 +1320,9 @@ def full_like(x, fill_value, **kwargs):
 
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
-    def inner(*size, dtype=None, device=None, layout=0, pin_memory=False):
+    def inner(
+        *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+    ):
         assert not pin_memory
         assert layout in (0, torch.strided)
         device = decode_device(device)
@@ -1463,12 +1489,10 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 def check_and_broadcast_indices(indices):
     assert all(
-        [
-            i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
-            for i in indices
-            if i is not None
-        ]
-    ), "indices must be int64, byte or bool"
+        i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+        for i in indices
+        if i is not None
+    ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
     assert all(
         [i.get_dtype() == torch.int64 for i in indices if i is not None]
     ), "bool indices are not supported yet"
@@ -1717,113 +1741,6 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
     )
 
 
-@register_lowering([aten.grid_sampler_2d])
-def grid_sampler_2d(
-    image, optical, interpolation_mode=0, padding_mode=0, align_corners=False
-):
-    image.realize_hint()  # reuse
-    optical.realize_hint()
-    image_loader = image.make_loader()
-    optical_loader = optical.make_loader()
-
-    assert interpolation_mode == 0
-    assert padding_mode in (0, 1)
-
-    N, C, IH, IW = image.get_size()
-    _, H, W, _ = optical.get_size()
-
-    def clamp(v, min, max):
-        if isinstance(min, (int, sympy.Expr)):
-            min = ops.index_expr(min, torch.float32)
-        if isinstance(max, (int, sympy.Expr)):
-            max = ops.index_expr(max, torch.float32)
-        return ops.maximum(min, ops.minimum(max, v))
-
-    def findex(v):
-        # indirect indexing via a float value
-        return ops.indirect_indexing(ops.to_dtype(v, torch.int64))
-
-    def fn(index):
-        n, c, y, x = index
-        ix = optical_loader([n, y, x, sympy.Integer(0)])
-        iy = optical_loader([n, y, x, sympy.Integer(1)])
-        zero = ops.constant(0.0, torch.float32)
-        one = ops.constant(1.0, torch.float32)
-        two = ops.constant(2.0, torch.float32)
-
-        def grid_sampler_compute_source_index(coord, size):
-            size = ops.index_expr(size, torch.float32)
-            if align_corners:
-                # unnormalize coord from [-1, 1] to [0, size - 1]
-                coord = ops.mul(ops.div(ops.add(coord, one), two), ops.sub(size, one))
-            else:
-                # unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
-                coord = ops.div(ops.sub(ops.mul(ops.add(coord, one), size), one), two)
-
-            if padding_mode == 0:  # GridSamplerPadding::Zeros
-                return coord
-            elif padding_mode == 1:  # GridSamplerPadding::Border
-                return clamp(coord, zero, ops.sub(size, one))
-            else:
-                raise NotImplementedError("reflection padding")
-
-        ix = grid_sampler_compute_source_index(ix, IW)
-        iy = grid_sampler_compute_source_index(iy, IH)
-
-        ix_nw = ops.floor(ix)
-        iy_nw = ops.floor(iy)
-
-        ix_ne = ops.add(ix_nw, one)
-        iy_ne = iy_nw
-
-        ix_sw = ix_nw
-        iy_sw = ops.add(iy_nw, one)
-
-        ix_se = ops.add(ix_nw, one)
-        iy_se = ops.add(iy_nw, one)
-
-        nw = ops.mul(ops.sub(ix_se, ix), ops.sub(iy_se, iy))
-        ne = ops.mul(ops.sub(ix, ix_sw), ops.sub(iy_sw, iy))
-        sw = ops.mul(ops.sub(ix_ne, ix), ops.sub(iy, iy_ne))
-        se = ops.mul(ops.sub(ix, ix_nw), ops.sub(iy, iy_nw))
-
-        # TODO(jansel): here we are missing the mask required
-        # for GridSamplerPadding::Zeros and instead always doing
-        # GridSamplerPadding::Border.  It does not seem to matter for
-        # correctness in the one model using this: SuperSlowMo.
-
-        ix_nw = clamp(ix_nw, 0, IW - 1)
-        iy_nw = clamp(iy_nw, 0, IH - 1)
-        ix_ne = clamp(ix_ne, 0, IW - 1)
-        iy_ne = clamp(iy_ne, 0, IH - 1)
-        ix_sw = clamp(ix_sw, 0, IW - 1)
-        iy_sw = clamp(iy_sw, 0, IH - 1)
-        ix_se = clamp(ix_se, 0, IW - 1)
-        iy_se = clamp(iy_se, 0, IH - 1)
-
-        nw_val = image_loader([n, c, findex(iy_nw), findex(ix_nw)])
-        ne_val = image_loader([n, c, findex(iy_ne), findex(ix_ne)])
-        sw_val = image_loader([n, c, findex(iy_sw), findex(ix_sw)])
-        se_val = image_loader([n, c, findex(iy_se), findex(ix_se)])
-
-        return functools.reduce(
-            ops.add,
-            [
-                ops.mul(nw_val, nw),
-                ops.mul(ne_val, ne),
-                ops.mul(sw_val, sw),
-                ops.mul(se_val, se),
-            ],
-        )
-
-    return Pointwise.create(
-        device=image.get_device(),
-        dtype=image.get_dtype(),
-        inner_fn=fn,
-        ranges=[N, C, H, W],
-    )
-
-
 @register_lowering(aten.reflection_pad2d)
 def reflection_pad2d(x, padding):
     assert len(padding) == 4
@@ -2058,16 +1975,17 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 def max_pool2d_with_indices(
     x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
 ):
+    if padding == 0:
+        padding = [0, 0]
+    if not stride:
+        stride = kernel_size
+
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0 or len(padding) == 2
+    assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
-    if padding == 0:
-        padding = [0, 0]
-    if stride is None:
-        stride = kernel_size
 
     x.realize_hint()
     *batch, h, w = x.get_size()
@@ -2122,16 +2040,17 @@ def max_pool2d_with_indices(
 def max_pool2d_with_indices_backward(
     grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
 ):
+    if padding == 0:
+        padding = [0, 0]
+    if not stride:
+        stride = kernel_size
+
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
-    assert padding == 0 or len(padding) == 2
+    assert len(padding) == 2
     assert len(x.get_size()) in (3, 4)
-    if padding == 0:
-        padding = [0, 0]
-    if stride is None:
-        stride = kernel_size
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
@@ -2146,13 +2065,13 @@ def max_pool2d_with_indices_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2209,6 +2128,7 @@ def max_pool2d_with_indices_backward(
                         check,
                     )
                     gradient = ops.where(mask, ops.add(gradient, grad_part), gradient)
+        assert gradient is not None
         return gradient
 
     return Pointwise.create(
@@ -2505,13 +2425,13 @@ def avg_pool2d_backward(
 
     h_window_size = max(
         [
-            h // stride[0] - max(0, (h - kernel_size[0]) // stride[0])
+            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
             for h in range(kernel_size[0] * 2)
         ]
     )
     w_window_size = max(
         [
-            w // stride[1] - max(0, (w - kernel_size[1]) // stride[1])
+            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
             for w in range(kernel_size[1] * 2)
         ]
     )
@@ -2592,15 +2512,15 @@ def avg_pool2d_backward(
                     scale,
                 )
 
+                mask = ops.and_(
+                    ops.lt(ph, phend),
+                    ops.lt(pw, pwend),
+                )
                 if gradient is None:
-                    # don't need mask for 0, 0
-                    gradient = part
+                    gradient = ops.where(mask, part, ops.constant(0.0, torch.float32))
                 else:
-                    mask = ops.and_(
-                        ops.lt(ph, phend),
-                        ops.lt(pw, pwend),
-                    )
                     gradient = ops.where(mask, ops.add(gradient, part), gradient)
+        assert gradient is not None
         return gradient
 
     rv = Pointwise.create(
@@ -2859,7 +2779,7 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering([aten.div, prims.div], broadcast=True)
+@register_lowering([aten.div], broadcast=True)
 def div(a, b):
     def fn(*args):
         return ops.div(*args)
@@ -2872,6 +2792,20 @@ def div(a, b):
         a if isinstance(a, Number) else to_dtype(a, dtype),
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
+
+
+# TODO(lezcano) I believe the casting behaviour of prims.div is wrong
+# https://github.com/pytorch/pytorch/issues/84412
+# div prim performs truncation division on integer inputs
+#   and true division for floating and complex inputs
+@register_lowering([prims.div], broadcast=True)
+def div_prim(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+        return div_mode(a, b, rounding_mode="floor")
+    else:
+        return div(a, b)
 
 
 # TODO - enable builtin and disable decomp to lower to ptx instruction
@@ -2939,6 +2873,8 @@ register_pointwise(aten.round)
 register_pointwise(aten.sign)
 register_pointwise(aten.silu)
 register_pointwise(aten.ceil)
+register_pointwise(aten.fmod)
+register_pointwise(aten.signbit, override_dtype=torch.bool)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
 register_pointwise(aten.isnan, override_dtype=torch.bool)
 
@@ -2960,6 +2896,7 @@ def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promote=False)
     def fn(*args, **kwargs):
         result = outplace_op(*args, **kwargs)
+        result = to_dtype(result, args[0].get_dtype())
         return mutate_to(args[0], result)
 
     return fn

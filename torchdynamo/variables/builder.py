@@ -19,7 +19,7 @@ from .. import config
 from .. import mutation_guard
 from .. import skipfiles
 from ..allowed_functions import is_allowed
-from ..allowed_functions import is_builtin
+from ..allowed_functions import is_builtin_callable
 from ..allowed_functions import is_numpy
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -302,7 +302,7 @@ class VariableBuilder:
                 value=value,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif is_builtin(value):
+        elif is_builtin_callable(value):
             return BuiltinVariable(
                 value,
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),

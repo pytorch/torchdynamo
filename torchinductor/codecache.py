@@ -4,10 +4,10 @@ import getpass
 import hashlib
 import logging
 import os
-import random
 import re
 import subprocess
 import sysconfig
+import tempfile
 import types
 from ctypes import cdll
 
@@ -39,10 +39,10 @@ def write(source_code, ext, extra=""):
         os.makedirs(subdir, exist_ok=True)
     path = os.path.join(subdir, f"{basename}.{ext}")
     if not os.path.exists(path):
-        # use a random temp file for thread safety
-        tmp_path = f"{path}.{random.randint(0, 2**31)}"
-        with open(tmp_path, "w") as fd:
-            fd.write(source_code)
+        # use a temp file for thread safety
+        fd, tmp_path = tempfile.mkstemp(dir=subdir)
+        with os.fdopen(fd, "w") as f:
+            f.write(source_code)
         os.rename(tmp_path, path)
     return basename, path
 
@@ -81,10 +81,12 @@ def install_gcc_via_conda():
                 "create",
                 f"--prefix={prefix}",
                 "--channel=conda-forge",
+                "--quiet",
                 "-y",
                 "python=3.8",
                 "gxx",
-            ]
+            ],
+            stdout=subprocess.PIPE,
         )
         assert os.path.exists(cxx_path)
     return cxx_path
@@ -114,7 +116,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++2a -Wno-unused-variable
+            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
             -o{output} {input}
@@ -142,6 +144,7 @@ class CppCodeCache:
 
             cls.cache[key] = cdll.LoadLibrary(output_path)
             cls.cache[key].key = key
+
         return cls.cache[key]
 
 
@@ -164,67 +167,6 @@ class PyCodeCache:
 
 
 @functools.lru_cache(None)
-def patch_triton_hackery():
-    """
-    The following is a copy and paste of triton.code_gen.Kernel.__call__,
-    with a bunch of stuff moved to a closure, so it is only called once.
-
-    This makes tiny kernels run ~1.2x faster.
-    """
-    import torch
-    from triton.code_gen import Kernel
-    from triton.code_gen import _triton
-
-    # query device index and cuda stream
-    device = torch.cuda.current_device()
-    torch.cuda.set_device(device)
-    cc = torch.cuda.get_device_capability(device)
-    cc = str(cc[0]) + "-" + str(cc[1])
-    stream = torch.cuda.current_stream(device).cuda_stream
-
-    def faster_triton_kernel_call(
-        self, *wargs, grid, num_warps=4, num_stages=2, **kwargs
-    ):
-        # handle arguments passed by name
-        kwargs = {
-            self.fn.arg_names.index(name): value for name, value in kwargs.items()
-        }
-        wargs = list(wargs)
-        for i, pos in enumerate(sorted(kwargs)):
-            wargs.insert(pos + i, kwargs[pos])
-
-        if len(wargs) != len(self.fn.arg_names):
-            raise TypeError(
-                f"Function takes {len(self.fn.arg_names)} positional arguments but {len(wargs)} were given"
-            )
-
-        # handle annotations
-        for pos, _type in self.fn.annotations.items():
-            wargs[pos] = _type(wargs[pos])
-
-        # check that tensors are on GPU.
-        # for arg in wargs:
-        #     if hasattr(arg, 'data_ptr'):
-        #         assert arg.is_cuda, "All tensors must be on GPU!"
-
-        return _triton.runtime.launch(
-            wargs,
-            self.fn.do_not_specialize,
-            self.fn.cache_key + cc,
-            self.fn.arg_names,
-            device,
-            stream,
-            self.fn.bin_cache,
-            num_warps,
-            num_stages,
-            self.add_to_cache,
-            grid,
-        )
-
-    Kernel.__call__ = faster_triton_kernel_call
-
-
-@functools.lru_cache(None)
 def patch_triton_dir():
     os.environ["TRITON_CACHE_DIR"] = os.environ.get(
         "TRITON_CACHE_DIR", os.path.join(cache_dir(), "triton")
@@ -235,7 +177,4 @@ class TritonCodeCache:
     @classmethod
     def load(cls, source_code):
         patch_triton_dir()
-        if config.triton.hackery and not config.triton.cudagraphs:
-            # this breaks cudagraphs, but speeds up small inputs:
-            patch_triton_hackery()
         return PyCodeCache.load(source_code)

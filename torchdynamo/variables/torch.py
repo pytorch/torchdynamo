@@ -159,11 +159,11 @@ class TorchVariable(VariableTracker):
         ):
             return self._call_ntuple(tx, args, kwargs, options)
         elif self.value is torch.no_grad:
-            return GradModeVariable(False, **options)
+            return GradModeVariable.create(tx, False, **options)
         elif self.value is torch.enable_grad:
-            return GradModeVariable(True, **options)
+            return GradModeVariable.create(tx, True, **options)
         elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable(args[0].as_python_constant(), **options)
+            return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
         elif self.value is torch.is_grad_enabled:
             assert not (args or kwargs)
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(

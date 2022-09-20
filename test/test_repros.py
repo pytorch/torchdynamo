@@ -790,10 +790,12 @@ class ReproTests(torchdynamo.testing.TestCase):
             640,
             False,
         )
+
         self.assertGreaterEqual(torchdynamo.utils.counters["frames"]["ok"], 3)
+        # Graph break because of dynamic slicing
         self.assertEqual(
             torchdynamo.utils.counters["frames"]["total"],
-            torchdynamo.utils.counters["frames"]["ok"],
+            torchdynamo.utils.counters["frames"]["ok"] + 1,
         )
 
     @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
@@ -817,8 +819,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         # repeat_interleave is a dynamic shape operator we do not execute/
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
-        self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, ifdyn(5, 10))
+        self.assertEqual(cnt.frame_count, ifdyn(2, 4))
+        self.assertEqual(cnt.op_count, ifdyn(9, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -904,6 +906,20 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(list(opt_fn(torch.tensor([4])).shape), [4])
 
+    def test_slicing_dynamic_shape_setitem(self):
+        def fn(input_lengths: torch.Tensor, new_ones_1):
+            getitem_13 = input_lengths[3]
+            new_ones_1[(3, slice(getitem_13, None, None))] = 0
+            setitem_13 = new_ones_1
+            return (setitem_13,)
+
+        x = torch.randn(10).to(dtype=torch.int64)
+        y = torch.randn(10, 204)
+        ref = fn(x, y)
+        opt_fn = torchdynamo.optimize("aot_eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
     @requires_static_shapes
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -935,6 +951,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (36, 35, 29, 28))
 
+    # see: https://github.com/pytorch/pytorch/issues/80067
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     @patch.object(torchdynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -950,7 +968,7 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         self.assertEqual(cnt.frame_count, ifdyn(5, 4))
         # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (36, 35, 29, 28))
+        self.assertIn(cnt.op_count, (31, 36, 35, 29, 28))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1038,9 +1056,14 @@ class ReproTests(torchdynamo.testing.TestCase):
         model = BatchNormAct2d(1).eval()
         correct = model(a)
         cnt = torchdynamo.testing.CompileCounter()
+        if not torchdynamo.config.specialize_int_float:
+            # _local_scalar_dense causes graph break w 0-dim tensor
+            opt_model = torchdynamo.optimize(cnt)(model)
+            self.assertTrue(same(opt_model(a), correct))
+            return
+
         opt_model = torchdynamo.optimize_assert(cnt)(model)
         self.assertTrue(same(opt_model(a), correct))
-
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
@@ -1582,6 +1605,32 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_ellipsis(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lnorm = torch.nn.LayerNorm(
+                    (256,), eps=1e-06, elementwise_affine=True
+                )
+                self.linear = torch.nn.Linear(
+                    in_features=256, out_features=256, bias=True
+                )
+
+            def forward(self, cat_10):
+                lnorm = self.lnorm(cat_10)
+                getitem_64 = lnorm[
+                    (slice(None, None, None), slice(0, 1, None), Ellipsis)
+                ]
+                linear = self.linear(getitem_64)
+                return (linear,)
+
+        args = [torch.randn(2, 197, 256)]
+
+        mod = Repro()
+        opt_mod = torchdynamo.optimize("eager", nopython=True)(mod)
+
+        self.assertTrue(same(mod(*args), opt_mod(*args)))
 
 
 if __name__ == "__main__":

@@ -133,6 +133,7 @@ class UnspecTests(torchdynamo.testing.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)

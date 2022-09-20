@@ -35,6 +35,9 @@ log = logging.getLogger(__name__)
 
 
 def pformat(obj):
+    if isinstance(obj, set):
+        # pformat has trouble with sets of sympy exprs
+        obj = sorted(obj, key=str)
     result = pprint.pformat(obj, indent=4)
     if "\n" in result:
         return f"\n{textwrap.indent(result, ' '*4)}"
@@ -69,6 +72,7 @@ class BaseSchedulerNode:
         self.min_order: Optional[int] = None
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
+        self.written = False
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -164,6 +168,9 @@ class BaseSchedulerNode:
     def is_template(self):
         return False
 
+    def is_extern(self):
+        return False
+
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
 
@@ -180,10 +187,51 @@ class BaseSchedulerNode:
                 return False
         return True
 
+    def codegen_originating_info(self, buffer, only_once=True):
+        if not config.comment_origin:
+            return
+
+        if only_once and self.written:
+            return
+        origins = self.node.origins
+        out_lines = []
+
+        for o in origins:
+            if o.op == "output":
+                # These are boring and samey
+                continue
+
+            out_lines.append("")
+            # TODO(voz): Should the pragma be constant somewhere?
+            out_lines.append("#pragma CMT ORIGIN:")
+            out_lines.append(f"#pragma CMT {o.op} {o.target}")
+            if "stack_trace" in o.meta:
+                stack_trace = f"{o.meta['stack_trace']}"
+                stack_trace_last_line = stack_trace.split("|")[-1]
+                out_lines.append(
+                    "#pragma CMT "
+                    + stack_trace_last_line.replace("{", "{{")
+                    .replace("}", "}}")
+                    .replace("\n", "\\")
+                )
+                out_lines.append("#pragma CMT END ORIGIN")
+                out_lines.append("")
+
+        if len(out_lines) == 0:
+            return
+
+        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+        buffer.writelines(out_lines)
+        self.written = True
+
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self):
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
+
+    def is_extern(self):
+        return True
 
 
 class TemplateSchedulerNode(BaseSchedulerNode):
@@ -695,7 +743,7 @@ class Scheduler:
         def visit(n):
             if n not in seen:
                 seen.add(n)
-                for dep in n.unmet_dependencies:
+                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
                     visit(name_to_node[dep.name])
                 result.append(n)
 
@@ -977,18 +1025,18 @@ class Scheduler:
 
     def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
-        self.flush()
         scheduler_node.allocate()
         node = scheduler_node.node
         node.codegen(V.graph.wrapper_code)
+        self.free_buffers()
 
     def codegen_template_call(
         self, scheduler_node: Union[FusedSchedulerNode, TemplateSchedulerNode]
     ):
-        self.flush()
         node, *epilogue = scheduler_node.get_nodes()
         node.allocate()
         template_codegen(self, node, epilogue)
+        self.free_buffers()
 
     def create_backend(self, device: torch.device):
         assert (
@@ -1013,22 +1061,27 @@ class Scheduler:
     def codegen(self):
         for node in self.nodes:
             self.buffer_names_no_longer_needed.update(node.last_usage)
+
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if device != self.current_device:
+                if (
+                    device != self.current_device
+                    or node.is_extern()
+                    or node.is_template()
+                ):
                     self.flush()
                     self.current_device = device
 
+            self.buffer_names_to_free.update(node.last_usage)
+
             if node.is_template():
                 self.codegen_template_call(node)
-                self.free_buffers()
+            elif node.is_extern():
+                self.codegen_extern_call(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
-            elif isinstance(node, ExternKernelSchedulerNode):
-                self.codegen_extern_call(node)
-                self.free_buffers()
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
-            self.buffer_names_to_free.update(node.last_usage)
+
         self.flush()

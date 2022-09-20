@@ -5,7 +5,6 @@ import itertools
 import math
 import numbers
 import operator
-from contextlib import contextmanager
 from typing import Dict
 from typing import List
 
@@ -18,6 +17,9 @@ if fake_tensors_available:
     from torch._subclasses import FakeTensor
     from ..utils import wrap_to_fake_tensor
     from ..utils import deepcopy_to_fake_tensor
+    from torch._subclasses.fake_tensor import DataDependentOutputException
+    from torch._subclasses.fake_tensor import DynamicOutputShapeException
+
 
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
@@ -33,6 +35,7 @@ from ..source import AttrSource
 from ..utils import clone_input
 from ..utils import is_lazy_module
 from ..utils import istype
+from ..utils import preserve_rng_state
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from .base import MutableLocal
@@ -41,19 +44,6 @@ from .base import typestr
 from .constant import ConstantVariable
 from .lists import ShapeVariable
 from .lists import SizeVariable
-
-
-@contextmanager
-def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
-    try:
-        yield
-    finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
 
 
 class TensorVariable(VariableTracker):
@@ -145,31 +135,25 @@ class TensorVariable(VariableTracker):
                             lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
                         )
                 except RuntimeError as e:
-                    raise TorchRuntimeError() from e
+                    if use_fake_tensors and isinstance(e, DataDependentOutputException):
+                        if (
+                            config.capture_scalar_outputs
+                            and proxy.node.target == "item"
+                        ):
+                            example_value = torch.zeros(
+                                size=(), dtype=args[0].dtype
+                            ).item()
+                        else:
+                            unimplemented(f"data dependent operator: {e.func}")
+                    elif use_fake_tensors and isinstance(
+                        e, DynamicOutputShapeException
+                    ):
+                        unimplemented(f"dynamic shape operator: {e.func}")
+                    else:
+                        raise TorchRuntimeError() from e
             else:
                 if use_fake_tensors:
                     example_value = fake_wrapper(example_value)
-
-        # Avoids a .item() call in the tensor slice that would attempt to get a value out
-        # fake tensors, and which would determine the output shape of the slice.
-        # It is a workaround until https://github.com/pytorch/pytorch/pull/83567
-        # is landed and there is more complete support for breaking on data dependent operators.
-
-        if (
-            proxy.node.target == operator.getitem
-            and use_fake_tensors
-            and args is not None
-            and not config.dynamic_shapes
-        ):
-            if (
-                isinstance(args[0], FakeTensor)
-                and isinstance(args[1], slice)
-                and any(
-                    isinstance(e, FakeTensor)
-                    for e in (args[1].start, args[1].stop, args[1].step)
-                )
-            ):
-                unimplemented("dynamic shape slicing")
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)

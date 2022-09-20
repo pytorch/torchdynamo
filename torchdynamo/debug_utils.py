@@ -16,6 +16,8 @@ import torchdynamo
 from torchdynamo import config
 from torchdynamo.utils import clone_inputs
 
+log = logging.getLogger(__name__)
+
 
 def minifier_dir():
     return f"/tmp/minifier_{getpass.getuser()}"
@@ -35,6 +37,7 @@ class NNModuleToString:
         torch.nn.Softmax,
         torch.nn.ReLU,
         torch.nn.MaxPool2d,
+        torch.nn.Embedding,
     ]
 
     @staticmethod
@@ -45,7 +48,7 @@ class NNModuleToString:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            logging.warn(
+            log.warning(
                 f"Was not able to save the following children modules as reprs {cant_convert}"
             )
             return False
@@ -341,13 +344,54 @@ def run_fwd_maybe_bwd(gm, args):
     from torchdynamo.testing import reduce_to_scalar_loss
     from torchdynamo.testing import requires_bwd_pass
 
+    gm = copy.deepcopy(gm)
+    args = clone_inputs(args)
+    gm.zero_grad(True)
     out = gm(*args)
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
         loss.backward()
-        return collect_results(gm, out, loss, args)
+        return collect_results(gm, out, loss, [])
     else:
         return out
+
+
+def same_two_models(gm, opt_gm, example_inputs):
+    """
+    Check two models have same accuracy.
+    """
+    from torchdynamo.utils import same
+
+    ref = run_fwd_maybe_bwd(gm, example_inputs)
+
+    fp64_model, fp64_examples = cast_to_fp64(
+        copy.deepcopy(gm), clone_inputs(example_inputs)
+    )
+    fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples)
+
+    res = run_fwd_maybe_bwd(opt_gm, example_inputs)
+
+    passing = same(ref, res, fp64_ref, tol=0.001)
+    return passing
+
+
+def cast_to(dtype, model, inputs):
+    from torch.utils._pytree import tree_map
+
+    # cast model and inputs to fp16
+    model = model.to(dtype)
+
+    inputs = tree_map(
+        lambda x: x.to(dtype)
+        if isinstance(x, torch.Tensor) and x.is_floating_point()
+        else x,
+        inputs,
+    )
+    return model, inputs
+
+
+def cast_to_fp64(model, inputs):
+    return cast_to(torch.float64, model, inputs)
 
 
 def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
@@ -408,6 +452,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name):
     model_str = NNModuleToString.convert(gm)
     with open(file_name, "w") as fd:
         fd.write(generate_dynamo_fx_repro_string(model_str, args, compiler_name))
+    print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to repro.py")
     repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
     shutil.copyfile(file_name, repro_path)
 
@@ -524,17 +569,16 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
             except Exception as exc:
                 orig_failure = str(exc)
-                logging.warn(
+                log.warning(
                     f"Compiled Fx GraphModule failed with {orig_failure}. Starting minifier."
                 )
                 dump_state_fn = functools.partial(
                     dump_backend_state, compiler_name=compiler_name
                 )
-                if config.repro_level == 1:
-                    dump_state_fn(
-                        fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
-                    )
-                else:
+                dump_state_fn(
+                    fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
+                )
+                if config.repro_level > 1:
                     # As opposed to using dump_to_minify, like we do in
                     # wrap_compiler_debug, we directly run minifier here. This
                     # is because we can't serialize compiler_fn here.

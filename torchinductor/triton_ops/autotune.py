@@ -15,6 +15,7 @@ from triton.ops.matmul import get_configs_io_bound
 from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
 
 from torchinductor import config
+from torchinductor.ir import ReductionHint
 from torchinductor.triton_ops.mm_perf_model import estimate_matmul_time
 from torchinductor.utils import conditional_product
 
@@ -269,7 +270,7 @@ def apply_triton_config(config):
     return cached_autotune([config])
 
 
-def pointwise_heuristics(size_hints, contiguous=False, filename=None):
+def pointwise_heuristics(size_hints, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
@@ -306,15 +307,23 @@ def pointwise_heuristics(size_hints, contiguous=False, filename=None):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction_heuristics(size_hints, contiguous=False, filename=None):
+def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
     """args to @triton.heuristics()"""
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
             size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
         )
-        if contiguous:
+        outer_config = triton_config_reduction(size_hints, 128, 8)
+        tiny_config = triton_config_reduction(
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+        )
+        if reduction_hint == ReductionHint.INNER:
             return apply_triton_config(contiguous_config)
+        elif reduction_hint == ReductionHint.OUTER:
+            return apply_triton_config(outer_config)
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            return apply_triton_config(tiny_config)
         if not config.triton.autotune:
             return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
         return cached_autotune(
