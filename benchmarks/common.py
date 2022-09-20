@@ -1684,7 +1684,7 @@ def main(runner, original_dir=None):
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
-        if args.accuracy_aot_nop:
+        if args.backend == "aot_eager":
             args.exclude = (
                 CI_SKIP_AOT_EAGER_TRAINING
                 if args.training
