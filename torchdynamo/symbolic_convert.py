@@ -245,6 +245,7 @@ class InstructionTranslatorBase(object):
             isinstance(x, VariableTracker)
             for x in itertools.chain(args, kwargs.values())
         )
+        # import pdb; pdb.set_trace()
         self.push(fn.call_function(self, args, kwargs))
 
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):

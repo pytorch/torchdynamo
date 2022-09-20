@@ -1,9 +1,11 @@
+import copy
 import inspect
 import sys
 import types
 from typing import Dict
 from typing import List
 
+import torch
 import torch._C
 
 from torchdynamo.variables.functions import UserFunctionVariable
@@ -546,6 +548,29 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import TensorVariable
+
+        # handle copy.copy and copy.deepcopy on tensors
+        if len(args) == 1 and isinstance(args[0], variables.TensorVariable):
+            copy_fn = None
+            if self.value.__code__.co_code == copy.copy.__code__.co_code:
+                # copy_fn = ?
+                pass
+            elif self.value.__code__.co_code == copy.deepcopy.__code__.co_code:
+                copy_fn = torch.clone
+            if copy_fn:
+                options = VariableTracker.propagate(self, args, kwargs.values())
+                return TensorVariable.create(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        copy_fn,
+                        *proxy_args_kwargs(args, kwargs),
+                        current_tx=tx,
+                    ),
+                    **options,
+                )
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torchdynamo.disable() wrapped function {self.value}")
         else:
