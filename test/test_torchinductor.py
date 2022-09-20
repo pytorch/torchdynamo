@@ -3435,7 +3435,7 @@ class CommonTemplate:
         check_model(
             self,
             fn,
-            (torch.randn([2, 3], device = self.device), torch.tensor(10, device = "cpu"))
+            (torch.randn([2, 3], device=self.device), torch.tensor(10, device="cpu")),
         )
 
 
