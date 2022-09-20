@@ -7,17 +7,16 @@ import pandas as pd
 
 def check_csv(filename):
     """
-    Basic accuracy checking. If a model fails, the speedup will be 0.
+    Basic accuracy checking.
     """
 
-    actual = pd.read_csv(filename)
+    df = pd.read_csv(filename)
 
     failed = []
-    for model_name in actual["name"]:
-        speedup = float(actual.loc[actual["name"] == model_name]["speedup"])
-        status = "PASS"
-        if speedup == 0:
-            status = "FAIL"
+    for _, row in df.iterrows():
+        model_name = row["name"]
+        status = row["accuracy"]
+        if "pass" not in status:
             failed.append(model_name)
 
         print(f"{model_name:34} {status}")

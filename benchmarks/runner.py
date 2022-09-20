@@ -33,6 +33,7 @@ from os.path import abspath
 from os.path import exists
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import torch
 from matplotlib import rcParams
@@ -50,14 +51,13 @@ DEFAULT_OUTPUT_DIR = "benchmark_logs"
 
 TABLE = {
     "training": {
-        "ts_nnc": "--training --speedup-ts --use-eval-mode ",
-        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts --use-eval-mode ",
-        "eager": "--training --backend=eager --use-eval-mode",
-        "aot_eager": "--training --accuracy-aot-nop --generate-aot-autograd-stats --use-eval-mode ",
-        "aot_cudagraphs": "--training --backend=aot_cudagraphs --use-eval-mode ",
-        "aot_nnc": "--training --accuracy-aot-ts-mincut --use-eval-mode ",
-        "aot_nvfuser": "--training --nvfuser --accuracy-aot-ts-mincut --use-eval-mode ",
-        "inductor_cudagraphs": "--training --inductor --use-eval-mode",
+        "ts_nnc": "--training --speedup-ts ",
+        "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts ",
+        "eager": "--training --backend=eager ",
+        "aot_eager": "--training --backend=aot_eager ",
+        "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
+        "aot_nvfuser": "--training --nvfuser --backend=aot_nvfuser ",
+        "inductor_cudagraphs": "--training --inductor --skip-accuracy-check ",  # TODO - remove skip-accuracy-check
     },
     "inference": {
         "ts_nnc": "--speedup-ts",
@@ -104,14 +104,16 @@ DEFAULTS = {
         "cuda",
     ],
     "quick": {
-        "torchbench": ["resnet18", "resnet50"],
-        "huggingface": ["AlbertForMaskedLM", "BertForMaskedLM"],
-        "timm_models": ["resnest101e", "mobilenetv2_100"],
+        "torchbench": '-k "resnet..$"',
+        "huggingface": "-k Albert",
+        "timm_models": ' -k "^resnet" -k "^inception"',
     },
 }
 
 
 def percentage(part, whole, decimals=2):
+    if whole == 0:
+        return 0
     return round(100 * float(part) / float(whole), decimals)
 
 
@@ -215,35 +217,34 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         lines.append(f"mkdir {output_dir}")
         lines.append("")
 
-        for iter in itertools.product(suites, devices, dtypes):
-            suite, device, dtype = iter
-            lines.append(
-                f"# Commands for {suite} for device={device}, dtype={dtype} for {mode}"
-            )
-            info = TABLE[mode]
-            for compiler in compilers:
-                base_cmd = info[compiler]
-                output_filename = (
-                    f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}.csv"
+        for testing in ["performance", "accuracy"]:
+            for iter in itertools.product(suites, devices, dtypes):
+                suite, device, dtype = iter
+                lines.append(
+                    f"# Commands for {suite} for device={device}, dtype={dtype} for {mode} and for {testing} testing"
                 )
-                cmd = f"python benchmarks/{suite}.py --{dtype} -d{device} --no-skip --output={output_filename} --quiet"
-                cmd = f"{cmd} {base_cmd}"
-                if args.profile_compiler:
-                    cmd = f"{cmd} --raise-on-assertion-error --raise-on-backend-error"
+                info = TABLE[mode]
+                for compiler in compilers:
+                    base_cmd = info[compiler]
+                    output_filename = f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}_{testing}.csv"
+                    cmd = f"python benchmarks/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
+                    cmd = f"{cmd} {base_cmd} --no-skip --quiet"
+                    if args.profile_compiler:
+                        cmd = (
+                            f"{cmd} --raise-on-assertion-error --raise-on-backend-error"
+                        )
 
-                skip_tests_str = get_skip_tests(suite)
-                cmd = f"{cmd} {skip_tests_str}"
+                    skip_tests_str = get_skip_tests(suite)
+                    cmd = f"{cmd} {skip_tests_str}"
 
-                if args.log_operator_inputs:
-                    cmd = f"{cmd} --log-operator-inputs"
+                    if args.log_operator_inputs:
+                        cmd = f"{cmd} --log-operator-inputs"
 
-                if args.quick:
-                    for name in DEFAULTS["quick"][suite]:
-                        new_cmd = f"{cmd} --only={name}"
-                        lines.append(new_cmd)
-                else:
+                    if args.quick:
+                        filters = DEFAULTS["quick"][suite]
+                        cmd = f"{cmd} {filters}"
                     lines.append(cmd)
-            lines.append("")
+                lines.append("")
         runfile.writelines([line + "\n" for line in lines])
 
 
@@ -488,8 +489,9 @@ class ParsePerformanceLogs(Parser):
             )
 
     def parse(self):
+        self.extract_df("accuracy", "accuracy")
         for metric in self.metrics:
-            self.extract_df(metric)
+            self.extract_df(metric, "performance")
         self.generate_executive_summary()
         for suite in self.suites:
             self.plot_graph(
@@ -514,12 +516,12 @@ class ParsePerformanceLogs(Parser):
             frame["batch_size"] = batch_sizes
         return frames
 
-    def extract_df(self, metric):
+    def extract_df(self, metric, testing):
         for iter in itertools.product(self.suites, self.devices, self.dtypes):
             suite, device, dtype = iter
             frames = []
             for compiler in self.compilers:
-                output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}.csv"
+                output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}_{testing}.csv"
                 df = self.read_csv(output_filename)
                 df = df[["dev", "name", "batch_size", metric]]
                 df.rename(columns={metric: compiler}, inplace=True)
@@ -536,11 +538,23 @@ class ParsePerformanceLogs(Parser):
                 for idx in range(2, len(frames)):
                     df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
+            if testing == "performance":
+                df_accuracy = self.parsed_frames[suite]["accuracy"]
+                perf_rows = []
+                for model_name in df["name"]:
+                    perf_row = df[df["name"] == model_name]
+                    acc_row = df_accuracy[df_accuracy["name"] == model_name]
+                    for compiler in self.compilers:
+                        if acc_row[compiler].iloc[0] != "pass":
+                            perf_row[compiler].iloc[0] = 0.0
+                    perf_rows.append(perf_row)
+                df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
             self.parsed_frames[suite][metric] = df
 
     def comp_time(self, compiler, df):
-        df = df.sort_values(by=compiler, ascending=False)[compiler][: self.bottom_k]
+        df = df[compiler][df[compiler] > 0]
+        # df = df.sort_values(by=compiler, ascending=False)[compiler][: self.bottom_k]
         return f"{mean(df):.2f}"
 
     def geomean(self, compiler, df):
@@ -554,6 +568,13 @@ class ParsePerformanceLogs(Parser):
         passing = df[df[compiler] > 0.0][compiler].count()
         perc = int(percentage(passing, total, decimals=0))
         return f"{perc}%, {passing}/{total}"
+
+    def memory(self, compiler, df):
+        cr = df["eager"] / df[compiler]
+        cr.replace(np.inf, 0, inplace=True)
+        cr = cr.fillna(0)
+        cr = cr[cr > 0]
+        return f"{gmean(cr):.2f}"
 
     def exec_summary_df(self, fn, metric):
         """
@@ -613,22 +634,26 @@ class ParsePerformanceLogs(Parser):
             passrate_caption, self.passrate, "speedup"
         )
 
-        comp_time_caption = (
-            f"Mean compilation time (seconds) for worst {self.bottom_k} models\n"
-        )
+        comp_time_caption = "Mean compilation time (seconds)\n"
         comp_time_summary = self.exec_summary_text(
             comp_time_caption, self.comp_time, "start_latency"
+        )
+
+        peak_memory_caption = 'WIP Peak memory footprint reduction ratio normalized to torchdynamo("eager")\n'
+        peak_memory_summary = self.exec_summary_text(
+            peak_memory_caption, self.memory, "peak_memory"
         )
 
         str_io.write(passrate_summary)
         str_io.write(speedup_summary)
         str_io.write(comp_time_summary)
+        str_io.write(peak_memory_summary)
         self.executive_summary = str_io.getvalue()
 
     def prepare_message(self, suite):
         title = f"## {suite} suite with {self.dtypes[0]} precision ##"
         body = ""
-        for metric in ["speedup", "start_latency"]:
+        for metric in ["speedup", "accuracy", "start_latency", "peak_memory"]:
             df = self.parsed_frames[suite][metric]
             df = df.drop("dev", axis=1)
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
@@ -636,8 +661,12 @@ class ParsePerformanceLogs(Parser):
             str_io.write("\n")
             if metric == "speedup":
                 str_io.write("Performance speedup\n")
+            elif metric == "accuracy":
+                str_io.write("Accuracy\n")
             elif metric == "start_latency":
-                str_io.write("Compilation latency\n")
+                str_io.write("Compilation latency (sec)\n")
+            elif metric == "peak_memory":
+                str_io.write("Peak Memory footprint (GBs)\n")
             str_io.write("~~~\n")
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")

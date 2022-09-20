@@ -1650,10 +1650,20 @@ class CommonTemplate:
             ),
         )
 
-    def test_fill(self):
+    def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
             return tmp, aten.fill.Scalar(tmp, 2)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
+    def test_fill2(self):
+        def fn(x):
+            tmp = torch.ones_like(x)
+            return tmp, aten.fill.Tensor(tmp, torch.tensor(3.0))
 
         self.common(
             fn,
