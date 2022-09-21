@@ -1212,7 +1212,7 @@ class BenchmarkRunner:
             optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             try:
-                if self.args.devices == ["cuda"]:
+                if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.empty_cache()
                 t0 = time.perf_counter()
