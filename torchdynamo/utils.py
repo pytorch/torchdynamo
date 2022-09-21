@@ -784,6 +784,7 @@ def same(
                     log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
                     )
+                    # import pdb; pdb.set_trace()
                 return passes_test
 
             return False

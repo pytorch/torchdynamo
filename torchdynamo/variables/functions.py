@@ -182,7 +182,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     ) -> "VariableTracker":
         # handle copy.copy and copy.deepcopy on tensors
         if self.fn is copy.copy or self.fn is copy.deepcopy:
-            if len(args) >= 1 and isinstance(args[0], variables.TensorVariable):
+            if len(args) != 1:
+                unimplemented("copy.copy/copy.deepcopy does not have 1 argument")
+            if isinstance(args[0], variables.TensorVariable):
                 if self.fn is copy.copy:
                     return args[0]
                 elif self.fn is copy.deepcopy:
