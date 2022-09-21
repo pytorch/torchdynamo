@@ -67,7 +67,7 @@ from .variables.lists import ListVariable
 from .variables.lists import SliceVariable
 from .variables.lists import TupleVariable
 from .variables.misc import ClosureVariable
-from .variables.misc import ContextManagerVariable
+from .variables.misc import ContextWrappingVariable
 from .variables.misc import GetAttrVariable
 from .variables.misc import GradModeVariable
 from .variables.misc import PythonModuleVariable
@@ -85,7 +85,7 @@ log = logging.getLogger(__name__)
 class BlockStackEntry:
     target: Instruction
     stack_index: int = None
-    with_context: ContextManagerVariable = None
+    with_context: ContextWrappingVariable = None
 
     def can_restore(self):
         return self.with_context is not None
@@ -565,7 +565,7 @@ class InstructionTranslatorBase(object):
 
     def SETUP_WITH(self, inst):
         ctx = self.pop()
-        if not isinstance(ctx, ContextManagerVariable):
+        if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"SETUP_WITH {ctx}")
         self.output.guards.update(ctx.guards)
 

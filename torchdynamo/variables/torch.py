@@ -10,7 +10,8 @@ import torch.nn
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import NNModuleSource
 from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import FakeContextWrappingVariable
+from torchdynamo.variables.misc import AutocastModeVariable
+from torchdynamo.variables.misc import AutogradProfilerContextWrapperVariable
 
 from .. import config
 from .. import variables
@@ -202,14 +203,16 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
+        elif self.value is torch.amp.autocast_mode.autocast:
+            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
         elif self.value is torch.autograd.profiler.profile:
             if len(args) == 0 or len(args) > 0 and args[0]:
                 log.warning("Profiler will be ignored")
-            return FakeContextWrappingVariable(**options)
+            return AutogradProfilerContextWrapperVariable(**options)
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
             log.warning("Profiler will be ignored")
-            return FakeContextWrappingVariable(**options)
+            return AutogradProfilerContextWrapperVariable(**options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
