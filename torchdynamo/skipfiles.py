@@ -72,7 +72,6 @@ SKIP_DIRS = [
         abc,
         collections,
         contextlib,
-        copy,
         copyreg,
         dataclasses,
         enum,
