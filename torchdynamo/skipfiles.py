@@ -1,7 +1,6 @@
 import abc
 import collections
 import contextlib
-import copy
 import copyreg
 import dataclasses
 import enum

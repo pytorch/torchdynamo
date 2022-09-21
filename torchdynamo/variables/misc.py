@@ -1,11 +1,9 @@
-import copy
 import inspect
 import sys
 import types
 from typing import Dict
 from typing import List
 
-import torch
 import torch._C
 
 from torchdynamo.variables.functions import UserFunctionVariable
