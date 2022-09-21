@@ -357,6 +357,8 @@ class GraphLowering(torch.fx.Interpreter):
         ]
 
     def is_unspec_arg(self, name):
+        # dynamo wraps unspec variable as 1-element tensor on CPU,
+        # need to convert to scalar during codegen (triton only)
         return (
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
