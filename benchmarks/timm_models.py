@@ -51,7 +51,6 @@ BATCH_SIZE_DIVISORS = {
     "crossvit_9_240": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "densenet121": 2,
     "dla102": 2,
     "dpn107": 2,
     "eca_botnext26ts_256": 2,
