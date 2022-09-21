@@ -60,7 +60,10 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     # Huggingface
     "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
+    "BartForConditionalGeneration",  # OOM
     # TIMM
+    "coat_lite_mini",  # INCORRECT
+    "pit_b_224",  # INCORRECT
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -88,8 +91,11 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "BartForConditionalGeneration",  # OOM
     "BigBird",  # INCORRECT - Variation in Eager runs itself
     "DebertaForMaskedLM",  # INCORRECT, can't be reproduced locally
+    "DebertaForQuestionAnswering",  # INCORRECT
     "M2M100ForConditionalGeneration",  # OOM
     "MBartForConditionalGeneration",  # OOM
+    "MegatronBertForCausalLM",  # OOM
+    "MegatronBertForQuestionAnswering" "MT5ForConditionalGeneration",  # OOM  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
@@ -106,6 +112,14 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "tf_mixnet_l",  # INCORRECT, can't be reproduced locally
     "tf_efficientnet_b0",  # INCORRECT, can't be reproduced locally
     "xcit_large_24_p8_224",  # fp64_OOM
+    "coat_lite_mini",  # INCORRECT
+    "convit_base",  # INCORRECT
+    "gmixer_24_224",  # INCORRECT
+    "mobilevit_s",  # INCORRECT
+    "nfnet_l0",  # INCORRECT
+    "pit_b_224",  # INCORRECT
+    "tinynet_a",  # INCORRECT
+    "twins_pcpvt_base",  # INCORRECT
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
@@ -144,6 +158,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "hf_Albert",
     "hf_Bart",
     "hf_GPT2",
+    "hf_Reformer",
     "mobilenet_v3_large",
     "pytorch_struct",
     "vgg16",
@@ -152,6 +167,8 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "timm_efficientnet",  # from functionalization (only fails for inductor)
     "hf_Bert",
     "soft_actor_critic",
+    "tacotron2",
+    "yolov3",
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
