@@ -3230,6 +3230,7 @@ class CommonTemplate:
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
+    @unittest.skip("https://github.com/pytorch/torchdynamo/issues/1297")
     @patch.object(torchinductor.config.triton, "cudagraphs", False)
     def test_symbolic(self):
         def f(x):
