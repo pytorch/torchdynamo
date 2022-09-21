@@ -356,7 +356,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 
 class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
     def __init__(self, **kwargs):
-        # device_type, dtype=None, enabled=True, cache_enabled=None
         super(AutogradProfilerContextWrapperVariable, self).__init__(**kwargs)
 
     def enter(self, tx):
