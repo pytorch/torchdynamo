@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 import torchdynamo.testing
-from torchdynamo.testing import same
+from torchdynamo.utils import same
 
 from . import test_modules
 from . import test_repros
@@ -97,7 +97,7 @@ class UnspecTests(torchdynamo.testing.TestCase):
         cnts = torchdynamo.testing.CompileCounter()
         opt_fn = torchdynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
-        self.assertTrue(same(res1, res2))
+        self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
     def test_feed_random_values_into_graph_only(self):
         def fn(shape):
