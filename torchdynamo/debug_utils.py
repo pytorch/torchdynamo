@@ -109,7 +109,7 @@ def _cuda_system_info_comment():
         )
         model_str += f"{cuda_version_out}\n"
     except FileNotFoundError:
-        print("nvcc does not exist")
+        model_str += "nvcc not found\n"
 
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
