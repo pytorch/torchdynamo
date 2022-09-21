@@ -61,9 +61,6 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # Huggingface
     "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
     # TIMM
-    "coat_lite_mini",  # INCORRECT
-    "pit_b_224",  # INCORRECT
-    "swin_base_patch4_window7_224",  # INCORRECT
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -91,7 +88,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "BartForConditionalGeneration",  # OOM
     "BigBird",  # INCORRECT - Variation in Eager runs itself
     "DebertaForMaskedLM",  # INCORRECT, can't be reproduced locally
-    "DebertaForQuestionAnswering",  # INCORRECT
     "M2M100ForConditionalGeneration",  # OOM
     "MBartForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
@@ -100,7 +96,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "YituTechConvBert",  # pandas.errors.ParserError: Error tokenizing data
     # TIMM
     "cait_m36_384",  # OOM
-    "convit_base",  # INCORRECT
     "eca_botnext26ts_256",  # OOM
     "eca_halonext26ts",  # OOM
     "jx_nest_base",  # OOM
@@ -110,15 +105,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "sebotnet33ts_256",  # INCORRECT, can't be reproduced locally
     "tf_mixnet_l",  # INCORRECT, can't be reproduced locally
     "tf_efficientnet_b0",  # INCORRECT, can't be reproduced locally
-    "coat_lite_mini",  # INCORRECT
-    "convit_base",  # INCORRECT
-    "gmixer_24_224",  # INCORRECT
-    "mixnet_l",  # INCORRECT
-    "mobilevit_s",  # INCORRECT
-    "nfnet_l0",  # INCORRECT
-    "pit_b_224",  # INCORRECT
-    "tinynet_a",  # INCORRECT
-    "twins_pcpvt_base",  # INCORRECT
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
