@@ -3230,7 +3230,8 @@ class CommonTemplate:
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
         self.common(forward, args)
 
-    @unittest.skip("https://github.com/pytorch/torchdynamo/issues/1297")
+    # https://github.com/pytorch/torchdynamo/issues/1297
+    @unittest.expectedFailure
     @patch.object(torchinductor.config.triton, "cudagraphs", False)
     def test_symbolic(self):
         def f(x):
@@ -3396,3 +3397,7 @@ if HAS_CUDA:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+
+if __name__ == "__main__":
+    unittest.main()
