@@ -95,7 +95,8 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "M2M100ForConditionalGeneration",  # OOM
     "MBartForConditionalGeneration",  # OOM
     "MegatronBertForCausalLM",  # OOM
-    "MegatronBertForQuestionAnswering" "MT5ForConditionalGeneration",  # OOM  # OOM
+    "MegatronBertForQuestionAnswering",  # OOM
+    "MT5ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
@@ -179,6 +180,8 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "timm_regnet",
     # Huggingface
     "AlbertForMaskedLM",
+    "AllenaiLongformerBase",
+    "BartForCausalLM",
     "BartForConditionalGeneration",
     "DebertaForMaskedLM",
     "DebertaForQuestionAnswering",
@@ -187,6 +190,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "M2M100ForConditionalGeneration",
     "MT5ForConditionalGeneration",
     "MegatronBertForCausalLM",
+    "MegatronBertForQuestionAnswering",
     "MobileBertForMaskedLM",
     "PegasusForConditionalGeneration",
     "T5ForConditionalGeneration",
