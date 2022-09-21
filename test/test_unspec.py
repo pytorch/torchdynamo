@@ -97,9 +97,6 @@ class UnspecTests(torchdynamo.testing.TestCase):
         cnts = torchdynamo.testing.CompileCounter()
         opt_fn = torchdynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
-        print(res1)
-        print(res2)
-        print(same(res1, res2))
         self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
     def test_feed_random_values_into_graph_only(self):
