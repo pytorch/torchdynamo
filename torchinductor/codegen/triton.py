@@ -766,11 +766,7 @@ class TritonKernel(Kernel):
         else:
             ep = ""
 
-        if (
-            name in V.graph.graph_inputs.keys()
-            and V.graph.graph_inputs[name].get_numel() == 1
-            and V.graph.graph_inputs[name].get_device().type == "cpu"
-        ):
+        if V.graph.is_unspec_arg(name):
             line = var
         else:
             line = f"tl.load({var} + {index}, {mask}{ep})"
@@ -1048,12 +1044,7 @@ class TritonKernel(Kernel):
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 1-element tensor on CPU, need to convert to scalar
         for i in range(len(call_args)):
-            x = call_args[i]
-            if (
-                x in V.graph.graph_inputs.keys()
-                and V.graph.graph_inputs[x].get_numel() == 1
-                and V.graph.graph_inputs[x].get_device().type == "cpu"
-            ):
+            if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
 
         grid = []

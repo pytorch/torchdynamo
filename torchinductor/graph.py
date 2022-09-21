@@ -355,3 +355,10 @@ class GraphLowering(torch.fx.Interpreter):
             for node in self.graph_outputs
             if not isinstance(node, ir.NoneAsConstantBuffer)
         ]
+
+    def is_unspec_arg(self, name):
+        return (
+            name in self.graph_inputs.keys()
+            and self.graph_inputs[name].get_numel() == 1
+            and self.graph_inputs[name].get_device().type == "cpu"
+        )
