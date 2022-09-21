@@ -348,13 +348,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.enter(tx)
 
     def _func_name(self):
-        return "_C._set_grad_enabled"
+        return "torch.amp.autocast_mode.autocast"
 
     def fn_name(self):
-        if self.target_values:
-            return "enable_grad"
-        else:
-            return "no_grad"
+        return "torch.amp.autocast_mode.autocast"
 
 
 class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
