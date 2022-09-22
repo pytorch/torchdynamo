@@ -65,6 +65,7 @@ from .misc import TypingVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import TensorVariable
 from .tensor import TensorWithTFOverrideVariable
+from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
@@ -453,12 +454,20 @@ class VariableBuilder:
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
-            unspec_var = UnspecializedPythonVariable.create(
-                tx=self.tx,
-                proxy=proxy,
-                example_value=wrapped_value,
-                **options,
-            )
+            if isinstance(value, np.number):
+                unspec_var = UnspecializedNumpyVariable.create(
+                    tx=self.tx,
+                    proxy=proxy,
+                    example_value=wrapped_value,
+                    **options,
+                )
+            else:
+                unspec_var = UnspecializedPythonVariable.create(
+                    tx=self.tx,
+                    proxy=proxy,
+                    example_value=wrapped_value,
+                    **options,
+                )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             return unspec_var
 
