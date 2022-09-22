@@ -336,7 +336,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         def exit_functional_autocast(mode):
             mode.__exit__(None, None, None)
 
-        out_node = tx.output.graph.create_node(
+        tx.output.graph.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
@@ -346,19 +346,8 @@ class AutocastModeVariable(ContextWrappingVariable):
             mode.__enter__()
             return mode
 
-        out_node = tx.output.graph.create_node(
+        self.mode = tx.output.graph.create_node(
             "call_function", enter_functional_autocast, (*self.target_values,), {}
-        )
-        self.mode = out_node
-
-    def _call_func(self, tx, values):
-        # pass
-        def enter_functional_autocast(*vals):
-            mode = torch.amp.autocast(*vals)
-            mode.__enter__()
-
-        out_node = tx.output.graph.create_node(
-            "call_function", enter_functional_autocast, (*values,), {}
         )
 
     def _func_name(self):
