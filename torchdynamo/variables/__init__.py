@@ -33,6 +33,7 @@ from .nn_module import NNModuleVariable
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import FakeItemVariable
 from .tensor import TensorVariable
+from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable
@@ -71,6 +72,7 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
+    "UnspecializedNumpyVariable",
     "UnspecializedPythonVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",

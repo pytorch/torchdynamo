@@ -240,9 +240,6 @@ class GuardBuilder:
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
-        assert not isinstance(
-            val, np.number
-        ), "Numpy types should be turned into python types."
         assert istype(
             val,
             (
@@ -261,6 +258,14 @@ class GuardBuilder:
                 torch.Size,
                 torch.device,
                 torch.dtype,
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
             ),
         ), t.__name__
         if istype(val, (torch.device, torch.dtype)):
