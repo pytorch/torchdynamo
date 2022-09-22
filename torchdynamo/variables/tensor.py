@@ -240,6 +240,7 @@ class TensorVariable(VariableTracker):
             isinstance(example_value, numbers.Number)
             and (
                 proxy.node.target == "item"
+                or proxy.node.target == "numel"
                 or proxy.node.target in {math.sqrt, math.pow}
             )
             and config.capture_scalar_outputs
@@ -419,7 +420,16 @@ class TensorVariable(VariableTracker):
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
         elif name == "numel" and self.size is not None:
-            constant_result = ConstantVariable(product(self.size), **options)
+            if config.capture_scalar_outputs:
+                return self.__class__.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_method", "numel", (self.as_proxy(),), {}, current_tx=tx
+                    ),
+                    **options,
+                )
+            else:
+                constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)
         elif name == "is_floating_point" and self.dtype is not None:
