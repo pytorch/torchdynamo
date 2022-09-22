@@ -379,7 +379,7 @@ class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def fn_name(self):
-        return "torch.amp.autocast_mode.autocast"
+        return "autograd.profiler.profile"
 
 
 class WithExitFunctionVariable(VariableTracker):
