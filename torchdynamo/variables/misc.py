@@ -330,20 +330,36 @@ class AutocastModeVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.target_values = [val.as_python_constant() for val in target_values]
-        self.mode = torch.amp.autocast(*self.target_values)
-        self._call_func(tx, self.target_values)
+        self.mode = None
 
     def exit(self, tx, *args):
-        return variables.ConstantVariable(self.mode.__exit__(*args))
+        def exit_functional_autocast(mode):
+            mode.__exit__(None, None, None)
+
+        out_node = tx.output.graph.create_node(
+            "call_function", exit_functional_autocast, (self.mode,), {}
+        )
 
     def enter(self, tx):
-        self.mode.__enter__()
+        def enter_functional_autocast(*vals):
+            mode = torch.amp.autocast(*vals)
+            mode.__enter__()
+            return mode
+
+        out_node = tx.output.graph.create_node(
+            "call_function", enter_functional_autocast, (*self.target_values,), {}
+        )
+        self.mode = out_node
 
     def _call_func(self, tx, values):
-        tx.output.graph.create_node(
-            "call_function", torch.amp.autocast_mode.autocast, (*values,), {}
+        # pass
+        def enter_functional_autocast(*vals):
+            mode = torch.amp.autocast(*vals)
+            mode.__enter__()
+
+        out_node = tx.output.graph.create_node(
+            "call_function", enter_functional_autocast, (*values,), {}
         )
-        self.enter(tx)
 
     def _func_name(self):
         return "torch.amp.autocast_mode.autocast"

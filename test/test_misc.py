@@ -2501,7 +2501,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(exported.dtype, real_dtype)
 
         self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.bfloat16)
+        self.assertEqual(exported.dtype, torch.torch.float16)
 
 
 class TestTracer(JitTestCase):
