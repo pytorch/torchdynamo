@@ -666,3 +666,69 @@ class FunctionTests(torchdynamo.testing.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    def test_copy_copy(self):
+        import copy
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x):
+            y = copy.copy(x)
+            return y, y + 1
+
+        x = torch.zeros(10)
+        y, _ = f(x)
+        y[0] = 1
+        self.assertEqual(x[0], 1)
+
+        with self.assertRaises(torchdynamo.exc.Unsupported):
+            f([[1, 2], [3, 4]])
+
+    def test_copy_deepcopy(self):
+        import copy
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x):
+            y = copy.deepcopy(x)
+            return y
+
+        x = torch.zeros(10)
+        y = f(x)
+        y[0] = 1
+        self.assertEqual(x[0], 0)
+
+        with self.assertRaises(torchdynamo.exc.Unsupported):
+            f([[1, 2], [3, 4]])
+
+    def test_copy_weird(self):
+        import copy
+        import importlib
+
+        copy_alias = copy.deepcopy
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x):
+            y = copy_alias(x)
+            return y
+
+        f(torch.rand(10))
+
+        # funny way to do a copy - should we even expect users to do this?
+        spec_copy = importlib.util.find_spec("copy")
+        copy2 = importlib.util.module_from_spec(spec_copy)
+        spec_copy.loader.exec_module(copy2)
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def g(x):
+            y = copy2.deepcopy(x)
+            return y
+
+        with self.assertRaises(torchdynamo.exc.Unsupported):
+            g(torch.rand(10))
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def h(x):
+            y = copy.deepcopy(x, [])
+            return y
+
+        with self.assertRaises(torchdynamo.exc.Unsupported):
+            h(torch.rand(10))

@@ -1,7 +1,6 @@
 import abc
 import collections
 import contextlib
-import copy
 import copyreg
 import dataclasses
 import enum
@@ -72,7 +71,6 @@ SKIP_DIRS = [
         abc,
         collections,
         contextlib,
-        copy,
         copyreg,
         dataclasses,
         enum,
