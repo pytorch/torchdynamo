@@ -20,7 +20,7 @@ from typing import Set
 import numpy as np
 import torch
 
-from torchdynamo import eval_frame
+from torchdynamo import convert_frame
 
 from . import config
 from . import mutation_guard
@@ -410,7 +410,7 @@ class GuardBuilder:
         assert guard.name == ""
         assert guard.source is GuardSource.GLOBAL
         code = None
-        if eval_frame.initial_grad_state:
+        if convert_frame.initial_grad_state:
             code = "___is_grad_enabled()"
         else:
             code = "not ___is_grad_enabled()"
