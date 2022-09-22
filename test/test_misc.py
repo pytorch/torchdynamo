@@ -2400,6 +2400,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnts.op_count, 5)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.cuda.is_bf16_supported(), "Requires bf16")
     def test_autocast(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
