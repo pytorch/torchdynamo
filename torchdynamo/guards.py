@@ -36,6 +36,7 @@ from .utils import orig_code_map
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
+from torchdynamo import eval_frame
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class Guard:
 
     def __str__(self):
         s = f"""
-            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
+            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}
             {{
                 'guard_types': {self.guard_types},
                 'code': {self.code_list},
@@ -404,11 +405,11 @@ class GuardBuilder:
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
 
     def GRAD_MODE(self, guard: Guard):
-        """Guard on the current value of torch.is_grad_enabled()"""
+        """Guard on the initial grad state"""
         assert guard.name == ""
         assert guard.source is GuardSource.GLOBAL
         code = None
-        if torch.is_grad_enabled():
+        if eval_frame.initial_grad_state:
             code = "___is_grad_enabled()"
         else:
             code = "not ___is_grad_enabled()"

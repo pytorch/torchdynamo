@@ -105,16 +105,17 @@ class NewGlobalVariable(VariableTracker):
         super(NewGlobalVariable, self).__init__(**kwargs)
 
 
-class ContextWrappingVariable(VariableTracker):
-    """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
+class ContextManagerVariable(VariableTracker):
+    pass
 
-    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+class ContextWrappingVariable(ContextManagerVariable):
+    def __init__(self, target_value, initial_value=None, **kwargs):
         super(ContextWrappingVariable, self).__init__(**kwargs)
-        self.guards = self.guards | self._guards_singleton
-        self.target_values = target_values
-        self.initial_values = initial_values
+        self.target_value = target_value
+        if initial_value is None:
+            initial_value = self._initial_value()
+        self.initial_value = initial_value
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -256,6 +257,10 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GradModeVariable(ContextWrappingVariable):
+    """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
+
+    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
+
     @staticmethod
     def create(tx, target_value, **kwargs):
         var = GradModeVariable(
@@ -270,6 +275,7 @@ class GradModeVariable(ContextWrappingVariable):
         super(GradModeVariable, self).__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))

@@ -53,6 +53,7 @@ null_context = contextlib.nullcontext
 unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
+initial_grad_state = None
 
 
 def remove_from_cache(f):
@@ -190,6 +191,8 @@ class OptimizeContext(_TorchDynamoContext):
     def __init__(self, callback, backend_ctx_ctor):
         def on_enter():
             global most_recent_backend
+            global initial_grad_state
+            initial_grad_state = torch.is_grad_enabled()
             if (
                 most_recent_backend is not None
                 and most_recent_backend is not compiler_fn
