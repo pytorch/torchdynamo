@@ -2,6 +2,7 @@ import operator
 from typing import Dict
 from typing import List
 
+import numpy as np
 import torch
 
 from .. import variables
@@ -15,7 +16,11 @@ class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(ConstantVariable, self).__init__(**kwargs)
         assert not isinstance(value, torch.Tensor)
-        self.value = value
+
+        if isinstance(value, np.number):
+            self.value = value.item()
+        else:
+            self.value = value
 
     def as_proxy(self):
         return self.value
