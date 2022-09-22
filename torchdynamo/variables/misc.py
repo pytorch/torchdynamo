@@ -110,12 +110,10 @@ class ContextManagerVariable(VariableTracker):
 
 
 class ContextWrappingVariable(ContextManagerVariable):
-    def __init__(self, target_value, initial_value=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs):
         super(ContextWrappingVariable, self).__init__(**kwargs)
-        self.target_value = target_value
-        if initial_value is None:
-            initial_value = self._initial_value()
-        self.initial_value = initial_value
+        self.target_values = target_values
+        self.initial_values = initial_values
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
