@@ -635,6 +635,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(14),))
 
+    def test_arange4(self):
+        def fn(x):
+            return x - torch.arange(512, -512, -1.0, device=x.device)
+
+        self.common(fn, (torch.randn(1024),))
+
     def test_linspace(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
