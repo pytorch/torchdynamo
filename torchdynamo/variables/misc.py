@@ -105,11 +105,7 @@ class NewGlobalVariable(VariableTracker):
         super(NewGlobalVariable, self).__init__(**kwargs)
 
 
-class ContextManagerVariable(VariableTracker):
-    pass
-
-
-class ContextWrappingVariable(ContextManagerVariable):
+class ContextWrappingVariable(VariableTracker):
     def __init__(self, target_values, initial_values=None, **kwargs):
         super(ContextWrappingVariable, self).__init__(**kwargs)
         self.target_values = target_values
