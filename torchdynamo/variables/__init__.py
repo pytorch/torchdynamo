@@ -17,7 +17,7 @@ from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
 from .misc import BlackHoleVariable
 from .misc import ClosureVariable
-from .misc import ContextManagerVariable
+from .misc import ContextWrappingVariable
 from .misc import GetAttrVariable
 from .misc import GradModeVariable
 from .misc import InspectSignatureVariable
@@ -46,7 +46,7 @@ __all__ = [
     "ClosureVariable",
     "ConstantVariable",
     "ConstDictVariable",
-    "ContextManagerVariable",
+    "ContextWrappingVariable",
     "DataClassVariable",
     "DefaultDictVariable",
     "FakeItemVariable",
