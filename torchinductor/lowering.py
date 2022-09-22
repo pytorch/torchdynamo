@@ -1325,6 +1325,7 @@ def tensor_constructor(fill_value):
     ):
         assert not pin_memory
         assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
