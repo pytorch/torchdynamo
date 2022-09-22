@@ -1729,6 +1729,11 @@ def upsample_bicubic2d(x, output_size, align_corners, scales_h=None, scales_w=No
     iH = V.graph.sizevars.guard_static_shape(iH)
     iW = V.graph.sizevars.guard_static_shape(iW)
 
+    def get_int_dtype(maxval):
+        if maxval > torch.iinfo(torch.int32).max:
+            return torch.int64
+        return torch.int32
+
     def compute_scale(in_size, out_size, align_corners, scale=None):
         if align_corners:
             return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
@@ -1802,8 +1807,8 @@ def upsample_bicubic2d(x, output_size, align_corners, scales_h=None, scales_w=No
             ix = ops.indirect_indexing(clamp(fx, 0, iW - 1))
             return x_loader([n, c, iy, ix])
 
-        iy = ops.to_dtype(in_y, torch.int32)
-        ix = ops.to_dtype(in_x, torch.int32)
+        iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
+        ix = ops.to_dtype(in_x, get_int_dtype(iW + 1))
         iys_ofs = tuple((ops.add(iy, ofs) for ofs in (-1, 0, 1, 2)))
         ixs_ofs = tuple((ops.add(ix, ofs) for ofs in (-1, 0, 1, 2)))
 
