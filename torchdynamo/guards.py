@@ -20,6 +20,8 @@ from typing import Set
 import numpy as np
 import torch
 
+from torchdynamo import eval_frame
+
 from . import config
 from . import mutation_guard
 from ._guards import TensorGuards
@@ -36,7 +38,6 @@ from .utils import orig_code_map
 from .utils import rename_implicit
 from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
-from torchdynamo import eval_frame
 
 log = logging.getLogger(__name__)
 
