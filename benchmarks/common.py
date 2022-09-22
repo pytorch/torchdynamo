@@ -53,7 +53,78 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
-CI_SKIP_INFERENCE = [
+CI_SKIP_AOT_EAGER_INFERENCE = [
+    # TorchBench
+    "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "pyhpc_isoneutral_mixing",  # INCORRECT - Variation in Eager runs itself
+    "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    # Huggingface
+    "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
+    "BartForConditionalGeneration",  # OOM
+    # TIMM
+    "coat_lite_mini",  # INCORRECT
+    "pit_b_224",  # INCORRECT
+]
+
+CI_SKIP_AOT_EAGER_TRAINING = [
+    *CI_SKIP_AOT_EAGER_INFERENCE,
+    # TorchBench
+    "Background_Matting",  # INCORRECT - Variation in Eager runs itself
+    "demucs",  # OOM
+    "dlrm",  # OOM
+    "fastNLP_Bert",  # INCORRECT, can't be reproduced locally
+    "hf_Albert",  # INCORRECT, can't be reproduced locally
+    "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "LearningToPaint",  # INCORRECT - Variation in Eager runs itself
+    "mobilenet_v2",  # INCORRECT - Variation in Eager runs itself
+    "mobilenet_v3_large",  # INCORRECT - Variation in Eager runs itself
+    "pytorch_CycleGAN_and_pix2pix",  # INCORRECT - Variation in Eager runs itself
+    "pytorch_unet",  # INCORRECT - Variation in Eager runs itself
+    "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "Super_SloMo",  # INCORRECT - Variation in Eager runs itself
+    "tacotron2",  # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation
+    "timm_efficientnet",  # INCORRECT, can't be reproduced locally
+    "vision_maskrcnn",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    # Huggingface
+    "AlbertForMaskedLM",  # OOM
+    "AlbertForQuestionAnswering",  # OOM
+    "BartForConditionalGeneration",  # OOM
+    "BigBird",  # INCORRECT - Variation in Eager runs itself
+    "DebertaForMaskedLM",  # INCORRECT, can't be reproduced locally
+    "DebertaForQuestionAnswering",  # INCORRECT
+    "M2M100ForConditionalGeneration",  # OOM
+    "MBartForConditionalGeneration",  # OOM
+    "MegatronBertForCausalLM",  # OOM
+    "MegatronBertForQuestionAnswering",  # OOM
+    "MT5ForConditionalGeneration",  # OOM
+    "PegasusForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # OOM
+    "XLNetLMHeadModel",  # OOM
+    "YituTechConvBert",  # pandas.errors.ParserError: Error tokenizing data
+    # TIMM
+    "cait_m36_384",  # OOM
+    "eca_botnext26ts_256",  # OOM
+    "eca_halonext26ts",  # OOM
+    "jx_nest_base",  # OOM
+    "levit_128",  # RuntimeError: Trying to backward through the graph a second time
+    "dm_nfnet_f0",  # INCORRECT, can't be reproduced locally
+    "rexnet_100",  # INCORRECT, can't be reproduced locally
+    "sebotnet33ts_256",  # INCORRECT, can't be reproduced locally
+    "tf_mixnet_l",  # INCORRECT, can't be reproduced locally
+    "tf_efficientnet_b0",  # INCORRECT, can't be reproduced locally
+    "xcit_large_24_p8_224",  # fp64_OOM
+    "coat_lite_mini",  # INCORRECT
+    "convit_base",  # INCORRECT
+    "gmixer_24_224",  # INCORRECT
+    "mobilevit_s",  # INCORRECT
+    "nfnet_l0",  # INCORRECT
+    "pit_b_224",  # INCORRECT
+    "tinynet_a",  # INCORRECT
+    "twins_pcpvt_base",  # INCORRECT
+]
+
+CI_SKIP_INDCUTOR_INFERENCE = [
+    *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "DALLE2_pytorch",
     "detectron2",
@@ -78,13 +149,17 @@ CI_SKIP_INFERENCE = [
     "tnt_s_patch16_224",
 ]
 
-CI_SKIP_TRAINING = [
+CI_SKIP_INDUCTOR_TRAINING = [
+    # CI does not check accuracy for inductor training yet
+    # *CI_SKIP_AOT_EAGER_TRAINING,
+    # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     "attention_is_all_you_need_pytorch",
     "drq",
     "hf_Albert",
     "hf_Bart",
     "hf_GPT2",
+    "hf_Reformer",
     "mobilenet_v3_large",
     "pytorch_struct",
     "vgg16",
@@ -93,6 +168,8 @@ CI_SKIP_TRAINING = [
     "timm_efficientnet",  # from functionalization (only fails for inductor)
     "hf_Bert",
     "soft_actor_critic",
+    "tacotron2",
+    "yolov3",
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
@@ -103,6 +180,8 @@ CI_SKIP_TRAINING = [
     "timm_regnet",
     # Huggingface
     "AlbertForMaskedLM",
+    "AllenaiLongformerBase",
+    "BartForCausalLM",
     "BartForConditionalGeneration",
     "DebertaForMaskedLM",
     "DebertaForQuestionAnswering",
@@ -111,6 +190,7 @@ CI_SKIP_TRAINING = [
     "M2M100ForConditionalGeneration",
     "MT5ForConditionalGeneration",
     "MegatronBertForCausalLM",
+    "MegatronBertForQuestionAnswering",
     "MobileBertForMaskedLM",
     "PegasusForConditionalGeneration",
     "T5ForConditionalGeneration",
@@ -1612,9 +1692,19 @@ def main(runner, original_dir=None):
     if args.ci:
         # Only dump error on CI
         args.quiet = True
-        args.exclude += CI_SKIP_INFERENCE
-        if args.training:
-            args.exclude += CI_SKIP_TRAINING
+        args.repeat = 2
+        if args.backend == "aot_eager":
+            args.exclude = (
+                CI_SKIP_AOT_EAGER_TRAINING
+                if args.training
+                else CI_SKIP_AOT_EAGER_INFERENCE
+            )
+        elif args.inductor:
+            args.exclude = (
+                CI_SKIP_INDUCTOR_TRAINING
+                if args.training
+                else CI_SKIP_INDCUTOR_INFERENCE
+            )
 
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
