@@ -29,8 +29,8 @@ class AotAutogradStrategy(object):
 
     @classmethod
     def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
-        if count_calls(gm.graph) < 2:
-            return gm.forward  # no point for tiny graphs
+        # if count_calls(gm.graph) < 2:
+        #     return gm.forward  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
