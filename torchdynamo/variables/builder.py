@@ -255,6 +255,12 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
+            elif issubclass(
+                value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
+            ):
+                return UnspecializedNNModuleVariable(
+                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                )
             else:
                 return self.tx.output.add_submodule(
                     value,
