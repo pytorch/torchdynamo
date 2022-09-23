@@ -25,7 +25,7 @@ from .conv_perf_model import estimate_conv_time
 log = logging.getLogger(__name__)
 
 
-class CachingAutotuner(triton.code_gen.Autotuner):
+class CachingAutotuner(triton.runtime.autotuner.Autotuner):
     """
     Simplified version of Triton autotuner that has no invalidation key
     and caches the best config to disk.
