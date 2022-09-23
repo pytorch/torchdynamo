@@ -94,6 +94,9 @@ inductor_skips["cpu"] = {
     "empty_like": {b8, f16, f32, f64},  # flaky
     "reciprocal": {b8},  # flaky
     "linalg.vander": {f32, f64},  # flaky
+    "sgn": {f16, f32, f64},  # flaky
+    "index_add": {b8, f16, f32, f64, i32, i64},  # flaky
+    "index_select": {f16, f32, f64},  # flaky
 }
 
 inductor_skips["cuda"] = {
@@ -108,8 +111,8 @@ inductor_skips["cuda"] = {
     "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    'nn.functional.conv_transpose1d': {f16},
-    'nn.functional.conv_transpose2d': {f16},
+    "nn.functional.conv_transpose1d": {f16},
+    "nn.functional.conv_transpose2d": {f16},
     # Call parameter type does not match function signature!
     "_masked.logsumexp": {f64},
     "cos": {b8, f64, i32, i64},
@@ -222,10 +225,8 @@ inductor_expected_failures["cpu"] = {
     "gather": {b8, f16, f32, f64, i32, i64},
     "gradient": {f16, f32, f64, i32, i64},
     "half": {b8, f16, f32, f64, i32, i64},
-    "index_add": {b8, f16, f32, f64, i32, i64},
     "index_put": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
-    "index_select": {f16, f32, f64},
     "inner": {f32, f64},
     "int": {b8, f16, f32, f64, i32, i64},
     "isclose": {b8, f16, f32, f64, i32, i64},
