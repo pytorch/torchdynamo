@@ -33,6 +33,7 @@ DTYPE_TO_CPP = {
     torch.int8: "signed char",
     torch.uint8: "unsigned char",
     torch.bool: "bool",
+    torch.bfloat16: "bfloat16",
 }
 INDEX_TYPE = "long"
 

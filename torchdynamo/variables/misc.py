@@ -105,29 +105,23 @@ class NewGlobalVariable(VariableTracker):
         super(NewGlobalVariable, self).__init__(**kwargs)
 
 
-class ContextManagerVariable(VariableTracker):
-    pass
-
-
-class ContextWrappingVariable(ContextManagerVariable):
+class ContextWrappingVariable(VariableTracker):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
     _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
 
-    def __init__(self, target_value, initial_value=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs):
         super(ContextWrappingVariable, self).__init__(**kwargs)
         self.guards = self.guards | self._guards_singleton
-        self.target_value = target_value
-        if initial_value is None:
-            initial_value = self._initial_value()
-        self.initial_value = initial_value
+        self.target_values = target_values
+        self.initial_values = initial_values
 
     def enter(self, tx):
-        self._call_func(tx, self.target_value)
+        self._call_func(tx, self.target_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        self._call_func(tx, self.initial_value)
+        self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def reconstruct(self, codegen, target_inst=None):
@@ -197,22 +191,25 @@ class ContextWrappingVariable(ContextManagerVariable):
             52 RETURN_VALUE
 
         """
-        if self.target_value == self.initial_value:
+        if self.target_values == self.initial_values:
             return ([], [])
 
-        def set_grad_insts(mode):
+        def set_context_insts(values):
             global_torch_source = codegen.tx.import_source("torch")
             attr_source = AttrSource(global_torch_source, self._func_name())
-            load_set_grad_enabled_insts = attr_source.reconstruct(codegen)
+            load_set_context_enabling_insts = attr_source.reconstruct(codegen)
+
+            loads = [codegen.create_load_const(val) for val in values]
+
             return [
-                *load_set_grad_enabled_insts,
-                codegen.create_load_const(mode),
-                create_instruction("CALL_FUNCTION", 1),
+                *load_set_context_enabling_insts,
+                *loads,
+                create_instruction("CALL_FUNCTION", len(values)),
                 create_instruction("POP_TOP"),
             ]
 
-        init_block = set_grad_insts(self.target_value)
-        finally_block = set_grad_insts(self.initial_value)
+        init_block = set_context_insts(self.target_values)
+        finally_block = set_context_insts(self.initial_values)
         setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
         prologue = init_block + [setup_final_inst]
 
@@ -226,7 +223,7 @@ class ContextWrappingVariable(ContextManagerVariable):
                 create_instruction("END_FINALLY"),
             ]
         else:
-            except_block = set_grad_insts(self.initial_value)
+            except_block = set_context_insts(self.initial_values)
             epilogue = [
                 create_instruction("POP_BLOCK"),
                 *except_block,
@@ -237,14 +234,11 @@ class ContextWrappingVariable(ContextManagerVariable):
 
         return (prologue, epilogue)
 
-    def _call_func(self, tx, initial_value):
+    def _call_func(self, tx, initial_values):
         raise NotImplementedError("_call_func called on base")
 
     def _func_name(self):
         raise NotImplementedError("_func_name called on base")
-
-    def _initial_value(self):
-        raise NotImplementedError("_initial_value called on base")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -263,20 +257,26 @@ class ContextWrappingVariable(ContextManagerVariable):
 
 class GradModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_value, initial_value=None, **kwargs):
-        var = GradModeVariable(target_value, initial_value, **kwargs)
-        var._call_func(tx, target_value)
+    def create(tx, target_value, **kwargs):
+        var = GradModeVariable(
+            target_values=[target_value],
+            initial_values=[torch.is_grad_enabled()],
+            **kwargs,
+        )
+        var._call_func(tx, [target_value])
         return var
 
-    def __init__(self, target_value, initial_value=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs):
         super(GradModeVariable, self).__init__(
-            target_value=target_value, initial_value=initial_value, **kwargs
+            target_values=target_values, initial_values=initial_values, **kwargs
         )
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def _call_func(self, tx, value):
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        value = values[0]
         tx.output.graph.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),
@@ -285,19 +285,81 @@ class GradModeVariable(ContextWrappingVariable):
     def _func_name(self):
         return "_C._set_grad_enabled"
 
-    def _initial_value(self):
-        return torch.is_grad_enabled()
-
     def fn_name(self):
-        if self.target_value:
+        if self.target_values:
             return "enable_grad"
         else:
             return "no_grad"
 
 
-class FakeContextWrappingVariable(ContextManagerVariable):
+class AutocastModeVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_values, kwargs):
+        values = target_values
+        # device_type : str,
+        # dtype : Optional[_dtype] = None,
+        # enabled : bool = True,
+        # cache_enabled : Optional[bool] = None):cache_enabled
+        assert "device_type" in kwargs
+        values.append(kwargs["device_type"])
+        del kwargs["device_type"]
+
+        if "dtype" in kwargs:
+            values.append(kwargs["dtype"])
+            del kwargs["dtype"]
+        else:
+            values.append(variables.ConstantVariable(None))
+
+        if "enabled" in kwargs:
+            values.append(kwargs["enabled"])
+            del kwargs["enabled"]
+        else:
+            values.append(variables.ConstantVariable(True))
+
+        if "cache_enabled" in kwargs:
+            values.append(kwargs["cache_enabled"])
+            del kwargs["cache_enabled"]
+        else:
+            values.append(variables.ConstantVariable(None))
+
+        var = AutocastModeVariable(tx, target_values, initial_values=None, **kwargs)
+        return var
+
+    def __init__(self, tx, target_values, initial_values=None, **kwargs):
+        super(AutocastModeVariable, self).__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.target_values = [val.as_python_constant() for val in target_values]
+        self.mode = None
+
+    def exit(self, tx, *args):
+        def exit_functional_autocast(mode):
+            mode.__exit__(None, None, None)
+
+        tx.output.graph.create_node(
+            "call_function", exit_functional_autocast, (self.mode,), {}
+        )
+
+    def enter(self, tx):
+        def enter_functional_autocast(*vals):
+            mode = torch.amp.autocast(*vals)
+            mode.__enter__()
+            return mode
+
+        self.mode = tx.output.graph.create_node(
+            "call_function", enter_functional_autocast, (*self.target_values,), {}
+        )
+
+    def _func_name(self):
+        return "torch.amp.autocast_mode.autocast"
+
+    def fn_name(self):
+        return "torch.amp.autocast_mode.autocast"
+
+
+class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
     def __init__(self, **kwargs):
-        super(FakeContextWrappingVariable, self).__init__(**kwargs)
+        super(AutogradProfilerContextWrapperVariable, self).__init__(**kwargs)
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))

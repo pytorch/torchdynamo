@@ -1056,7 +1056,7 @@ def arange(
     assert isinstance(step, int)
 
     dtype = dtype or torch.int64
-    length = (end - start) // step
+    length = ceildiv((end - start), step)
     start = sympy.Integer(start)
     step = sympy.Integer(step)
 
@@ -1596,29 +1596,6 @@ def index_put_(self, indices, values, accumulate=False):
     )
     buffer.name = V.graph.register_buffer(buffer)
     return self
-
-
-@register_lowering(aten.index_select, type_promote=False)
-def index_select(x, dim, indices):
-    x_loader = x.make_loader()
-    index_loader = indices.make_loader()
-    dim = _validate_dim(x, dim, 0)
-
-    sizes = list(x.get_size())
-    (sizes[dim],) = indices.get_size()
-
-    def fn(idx):
-        assert len(idx) == len(sizes)
-        idx = list(idx)
-        idx[dim] = ops.indirect_indexing(index_loader([idx[dim]]))
-        return x_loader(idx)
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=sizes,
-    )
 
 
 @register_lowering(aten.scatter_, type_promote=False)

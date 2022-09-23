@@ -66,7 +66,7 @@ def unique(it):
 
 def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
-    return (numer + (denom - 1)) // denom
+    return -(numer // -denom)
 
 
 def gen_gm_and_inputs(target, args, kwargs):

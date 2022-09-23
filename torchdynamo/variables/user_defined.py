@@ -21,7 +21,7 @@ from ..utils import is_namedtuple_cls
 from ..utils import namedtuple_fields
 from .base import MutableLocal
 from .base import VariableTracker
-from .misc import FakeContextWrappingVariable
+from .misc import AutogradProfilerContextWrapperVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -84,7 +84,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value is torch.autograd.profiler.profile:
-            return FakeContextWrappingVariable()
+            return AutogradProfilerContextWrapperVariable()
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)

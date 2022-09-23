@@ -101,12 +101,16 @@ def _cuda_system_info_comment():
         return "# torch.cuda.is_available()==False, no GPU info collected\n"
 
     model_str = "# CUDA Info: \n"
-    cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
-    cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
-    cuda_version_out = "".join(
-        [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
-    )
-    model_str += f"{cuda_version_out}\n"
+    try:
+        cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
+        cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
+        cuda_version_out = "".join(
+            [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
+        )
+        model_str += f"{cuda_version_out}\n"
+    except FileNotFoundError:
+        model_str += "nvcc not found\n"
+
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
         stdout=subprocess.PIPE,
@@ -135,8 +139,10 @@ def generate_compiler_repro_string(gm, args):
         """
     )
     model_str += f"# torch version: {torch.version.__version__}\n"
-    model_str += f"# torch cuda version: {torch.version.cuda}\n"
-    model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
+    if hasattr(torch.version, "cuda"):
+        model_str += f"# torch cuda version: {torch.version.cuda}\n"
+    if hasattr(torch.version, "git_version"):
+        model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
     model_str += _cuda_system_info_comment()
 
     model_str += NNModuleToString.convert(gm)
