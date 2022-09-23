@@ -9,17 +9,15 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.testing._internal.common_utils import (
     TestCase,
     suppress_warnings,
-    TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     dtype_abbrs,
-    skipCUDAMemoryLeakCheckIf
+    skipCUDAMemoryLeakCheckIf,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
-    OpDTypes
+    OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 
@@ -47,35 +45,37 @@ except (ImportError, ModuleNotFoundError, AssertionError):
     raise unittest.SkipTest("requires sympy/functorch")
 
 
-bf16 = torch.bfloat16   # not tested
+bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
 f32 = torch.float32
 f16 = torch.float16
-i8 = torch.int8     # not tested
-i16 = torch.int16   # not tested
+i8 = torch.int8  # not tested
+i16 = torch.int16  # not tested
 i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
-u8 = torch.uint8    # not tested
+u8 = torch.uint8  # not tested
 
-_ops = partial(ops, dtypes=OpDTypes.supported,
-               allowed_dtypes=[f16, f32, f64, i32, i64, b8])
+_ops = partial(
+    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
+)
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
 TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
-COLLECT_EXPECT = os.getenv('PYTORCH_COLLECT_EXPECT', '0') == '1'
+COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 
 seen_succeeded = defaultdict(dict)
 seen_failed = defaultdict(dict)
 failed_reasons = defaultdict(set)
 
+
 def print_seen():
     expected_failures = defaultdict(list)
 
     def fmt_dtypes(dtypes):
-        r = ', '.join(sorted(dtype_abbrs[d] for d in dtypes))
-        return '{' + r + '}'
+        r = ", ".join(sorted(dtype_abbrs[d] for d in dtypes))
+        return "{" + r + "}"
 
     def process(device_type):
         for op, failed_dtypes in seen_failed[device_type].items():
@@ -86,18 +86,23 @@ def print_seen():
             if failed_reasons[op]:
                 reasons = "  # " + ", ".join(sorted(failed_reasons[op]))
             if expected_failures_dtypes:
-                expected_failures[device_type].append(f"    \"{op}\": {fmt_dtypes(expected_failures_dtypes)},{reasons}")
+                expected_failures[device_type].append(
+                    f'   "{op}": {fmt_dtypes(expected_failures_dtypes)},{reasons}'
+                )
 
         expected_failures[device_type].sort()
-        nl = '\n'
-        print(f"""
+        nl = "\n"
+        print(
+            f"""
 inductor_expected_failures[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
-""")
+"""
+        )
 
     process("cpu")
     process("cuda")
+
 
 if COLLECT_EXPECT:
     atexit.register(print_seen)
@@ -105,22 +110,23 @@ if COLLECT_EXPECT:
 inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
-    "lu_unpack": {f32, f64},    # free(): invalid next size (fast)
+    "lu_unpack": {f32, f64},  # free(): invalid next size (fast)
 }
 
 inductor_skips["cuda"] = {
-    "_masked.logsumexp": {f64},     # Call parameter type does not match function signature!
-    "cos": {b8, f64, i32, i64},     # Call parameter type does not match function signature!
+    # Call parameter type does not match function signature!
+    "_masked.logsumexp": {f64},
+    "cos": {b8, f64, i32, i64},
     "erf": {f64, i32, i64},
     "exp": {b8, f64, i32, i64},
-    "isclose": {b8, f16, f32, f64, i32, i64},   # LLVM ERROR
-    "isfinite": {f16, f32, f64, i32, i64},      # LLVM ERROR
+    "isclose": {b8, f16, f32, f64, i32, i64},  # LLVM ERROR
+    "isfinite": {f16, f32, f64, i32, i64},  # LLVM ERROR
     "log": {b8, i32, i64},
     "log1p": {b8, i32, i64},
     "log2": {b8, i32, i64},
     "logsumexp": {f64},
-    "lu_unpack": {f32, f64},    # RuntimeError: CUDA error
-    "nan_to_num": {f16, f32, f64, i32, i64},    # LLVM ERROR
+    "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
+    "nan_to_num": {f16, f32, f64, i32, i64},  # LLVM ERROR
     "nn.functional.binary_cross_entropy": {f64},
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.cross_entropy": {f64},
@@ -624,27 +630,24 @@ inductor_expected_failures["cuda"] = {
     "zero_": {b8, f16, f32, f64, i32, i64},
 }
 
+
 class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_cuda = check_model_cuda
 
     @onlyNativeDeviceTypes
     @suppress_warnings
-    @skipCUDAMemoryLeakCheckIf(True)    # inductor kernels failing this test intermittently
+    @skipCUDAMemoryLeakCheckIf(
+        True
+    )  # inductor kernels failing this test intermittently
     @_ops(op_db)
     def test_comprehensive(self, device, dtype, op):
 
-        # breakpoint()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
 
         device_type = torch.device(device).type
-
-        # if (device_type, dtype, op_name) in EXCLUDE_SET or \
-        #    (None, dtype, op_name) in EXCLUDE_SET or \
-        #    (None, None, op_name) in EXCLUDE_SET:
-        #     self.skipTest(f"{op_name} in {dtype} not supported")
 
         if dtype in inductor_skips[device_type].get(op_name, set()):
             test_expect = TestExpect.SKIP
@@ -695,7 +698,10 @@ class TestInductorOpInfo(TestCase):
             seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
             if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                raise RuntimeError(f"unexpected success {op_name}, {dtype}, {device_type}")
+                raise RuntimeError(
+                    f"unexpected success {op_name}, {dtype}, {device_type}"
+                )
+
 
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
