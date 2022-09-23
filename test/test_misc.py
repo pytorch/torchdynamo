@@ -1316,6 +1316,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize(cnts)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_python_slice(self):
         def f1(input):
