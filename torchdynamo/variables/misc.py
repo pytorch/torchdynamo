@@ -358,8 +358,10 @@ class AutocastModeVariable(ContextWrappingVariable):
 
 
 class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
-    def __init__(self, **kwargs):
-        super(AutogradProfilerContextWrapperVariable, self).__init__(**kwargs)
+    def __init__(self, target_values=None, **kwargs):
+        super(AutogradProfilerContextWrapperVariable, self).__init__(
+            target_values=target_values, **kwargs
+        )
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
