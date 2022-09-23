@@ -2840,6 +2840,49 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
+class LinearReLU(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn_prepacked.linear_eltwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+    
+    @classmethod
+    def create(cls, x, w, b, attr, scalars, algorithm):
+        kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
+        *m, k1 = x.get_size()
+        k2, n = w.get_size()
+
+        inputs = [x, w]
+        constant_args = [attr, scalars, algorithm]
+        if b is not None:
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+
+        return LinearReLU(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=list(m) + [n],
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,)
+    
+    def apply_constraint(self):
+        pass
 
 class Convolution(ExternKernelAlloc):
     kernel = "aten.convolution"
