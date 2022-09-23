@@ -85,9 +85,32 @@ inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
     "lu_unpack": {f32, f64},  # free(): invalid next size (fast)
+    "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
+    "mvlgamma_mvlgamma_p_1": {f32, f64, i32, i64},  # flaky
+    "mvlgamma_mvlgamma_p_3": {f32, f64, i32, i64},  # flaky
+    "mvlgamma_mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
+    "cumprod": {f32, f64},  # flaky
+    "_masked.prod": {f32, f64},  # flaky
+    "empty_like": {f16, f32, f64},  # flaky
+    "reciprocal": {bool},  # flaky
+    "linalg.vander": {f32, f64},  # flaky
 }
 
 inductor_skips["cuda"] = {
+    # flaky
+    "__rdiv__": {b8, f16, f32, f64, i32, i64},
+    "mvlgamma_mvlgamma_p_1": {f16, f32, f64, i32, i64},
+    "mvlgamma_mvlgamma_p_3": {f16, f32, f64, i32, i64},
+    "mvlgamma_mvlgamma_p_5": {f16, f32, f64, i32, i64},
+    "cumprod": {f32, f64},
+    "_masked.prod": {f16, f32, f64},
+    "empty_like": {f16, f32, f64},
+    "reciprocal": {bool},
+    "linalg.vander": {f32, f64},
+    "sparse.sampled_addmm": {f32, f64},
+    'nn.functional.conv_transpose1d': {f16},
+    'nn.functional.conv_transpose2d': {f16},
+
     # Call parameter type does not match function signature!
     "_masked.logsumexp": {f64},
     "cos": {b8, f64, i32, i64},
@@ -129,7 +152,7 @@ inductor_expected_failures["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__radd__": {b8, f16, f32, f64, i32, i64},
     "__rand__": {b8, i32, i64},
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},
+
     "__rmatmul__": {f32, f64, i32, i64},
     "__rmod__": {f16, f32, f64},
     "__rmul__": {b8, f16, f32, f64, i32, i64},
@@ -172,7 +195,7 @@ inductor_expected_failures["cpu"] = {
     "dist": {f16},
     "double": {b8, f16, f32, f64, i32, i64},
     "einsum": {f32, f64, i32, i64},
-    "empty_like": {b8, f16, f32, i32, i64},
+    "empty_like": {b8, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8},
     "expand": {b8, f16, f32, f64, i32, i64},
@@ -502,8 +525,6 @@ inductor_expected_failures["cuda"] = {
     "nn.functional.batch_norm": {f16, f32, f64},
     "nn.functional.batch_norm.without_cudnn": {f16, f32, f64},
     "nn.functional.bilinear": {f16},
-    "nn.functional.conv_transpose1d": {f16},
-    "nn.functional.conv_transpose2d": {f16},
     "nn.functional.conv_transpose3d": {f16},
     "nn.functional.cross_entropy": {f16},
     "nn.functional.ctc_loss": {f32, f64},
