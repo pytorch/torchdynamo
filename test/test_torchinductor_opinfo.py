@@ -1,49 +1,23 @@
+import atexit
+import os
 from collections import defaultdict
 from enum import Enum
-import os
-import atexit
+from functools import partial
 
 import torch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
-
-from torch.testing._internal.common_utils import (
-    TestCase,
-    suppress_warnings,
-    run_tests,
-    dtype_abbrs,
-    skipCUDAMemoryLeakCheckIf,
-)
-from torch.testing._internal.common_device_type import (
-    onlyNativeDeviceTypes,
-    ops,
-    instantiate_device_type_tests,
-    OpDTypes,
-)
+from torch.testing._internal.common_device_type import OpDTypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import onlyNativeDeviceTypes
+from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import dtype_abbrs
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import skipCUDAMemoryLeakCheckIf
+from torch.testing._internal.common_utils import suppress_warnings
 
-
-from functools import partial
-import unittest
-
-import importlib
-
-from .test_torchinductor import check_model_cuda, check_model
-
-try:
-    importlib.import_module("functorch")
-
-    from torch._decomp import get_decompositions
-
-    from torchinductor import config
-    from torchinductor.compile_fx import compile_fx
-
-    # This will only pass on pytorch builds newer than roughly 5/15/2022
-    assert get_decompositions([torch.ops.aten.trace])
-    # Requires functorch
-    from torchinductor.compile_fx import compile_fx_inner
-except (ImportError, ModuleNotFoundError, AssertionError):
-    raise unittest.SkipTest("requires sympy/functorch")
-
+from .test_torchinductor import check_model
+from .test_torchinductor import check_model_cuda
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -675,7 +649,7 @@ class TestInductorOpInfo(TestCase):
 
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
+            # kwargs = sample_input.kwargs
 
         try:
             if device_type == "cuda":
