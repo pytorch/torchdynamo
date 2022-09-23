@@ -86,31 +86,30 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "lu_unpack": {f32, f64},  # free(): invalid next size (fast)
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
-    "mvlgamma_mvlgamma_p_1": {f32, f64, i32, i64},  # flaky
-    "mvlgamma_mvlgamma_p_3": {f32, f64, i32, i64},  # flaky
-    "mvlgamma_mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
+    "mvlgamma.mvlgamma_p_1": {f32, f64, i32, i64},  # flaky
+    "mvlgamma.mvlgamma_p_3": {f32, f64, i32, i64},  # flaky
+    "mvlgamma.mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
     "cumprod": {f32, f64},  # flaky
     "_masked.prod": {f32, f64},  # flaky
-    "empty_like": {f16, f32, f64},  # flaky
-    "reciprocal": {bool},  # flaky
+    "empty_like": {b8, f16, f32, f64},  # flaky
+    "reciprocal": {b8},  # flaky
     "linalg.vander": {f32, f64},  # flaky
 }
 
 inductor_skips["cuda"] = {
     # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    "mvlgamma_mvlgamma_p_1": {f16, f32, f64, i32, i64},
-    "mvlgamma_mvlgamma_p_3": {f16, f32, f64, i32, i64},
-    "mvlgamma_mvlgamma_p_5": {f16, f32, f64, i32, i64},
+    "mvlgamma.mvlgamma_p_1": {f16, f32, f64, i32, i64},
+    "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
+    "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "cumprod": {f32, f64},
     "_masked.prod": {f16, f32, f64},
     "empty_like": {f16, f32, f64},
-    "reciprocal": {bool},
+    "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     'nn.functional.conv_transpose1d': {f16},
     'nn.functional.conv_transpose2d': {f16},
-
     # Call parameter type does not match function signature!
     "_masked.logsumexp": {f64},
     "cos": {b8, f64, i32, i64},
@@ -152,7 +151,6 @@ inductor_expected_failures["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__radd__": {b8, f16, f32, f64, i32, i64},
     "__rand__": {b8, i32, i64},
-
     "__rmatmul__": {f32, f64, i32, i64},
     "__rmod__": {f16, f32, f64},
     "__rmul__": {b8, f16, f32, f64, i32, i64},
@@ -224,8 +222,10 @@ inductor_expected_failures["cpu"] = {
     "gather": {b8, f16, f32, f64, i32, i64},
     "gradient": {f16, f32, f64, i32, i64},
     "half": {b8, f16, f32, f64, i32, i64},
+    "index_add": {b8, f16, f32, f64, i32, i64},
     "index_put": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
+    "index_select": {f16, f32, f64},
     "inner": {f32, f64},
     "int": {b8, f16, f32, f64, i32, i64},
     "isclose": {b8, f16, f32, f64, i32, i64},
@@ -342,7 +342,7 @@ inductor_expected_failures["cpu"] = {
     "segment_reduce.offsets": {f16, f32, f64},
     "select": {b8},
     "select_scatter": {b8},
-    "sgn": {b8, f16, f32, f64, i32, i64},
+    "sgn": {b8, i32, i64},
     "short": {b8, f16, f32, f64, i32, i64},
     "sign": {b8, i32, i64},
     "slice_scatter": {b8},
@@ -470,8 +470,10 @@ inductor_expected_failures["cuda"] = {
     "gradient": {f16, f32, f64, i32, i64},
     "half": {b8, f16, f32, f64, i32, i64},
     # "hsplit": {f16, f64},
+    "index_add": {b8, f16, f32, f64, i32, i64},
     "index_put": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
+    "index_select": {f16, f32, f64},
     "inner": {f16, f32, f64},
     "int": {b8, f16, f32, f64, i32, i64},
     "isinf": {b8, i32, i64},
@@ -593,7 +595,7 @@ inductor_expected_failures["cuda"] = {
     "segment_reduce.offsets": {f16, f32, f64},
     "select": {b8},
     "select_scatter": {b8},
-    "sgn": {b8, f16, f32, f64, i32, i64},
+    "sgn": {b8, i32, i64},
     "short": {b8, f16, f32, f64, i32, i64},
     "sign": {b8, i32, i64},
     "slice_scatter": {b8},
