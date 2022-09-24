@@ -946,10 +946,13 @@ make_fallback(aten.cumsum)
 make_fallback(aten._embedding_bag)
 make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
+make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
+make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
 make_fallback(aten.unfold_backward)
@@ -1373,6 +1376,8 @@ zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
 ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+
+register_lowering(aten.zero)(zeros_like)
 
 
 def new_constant(fill_value):

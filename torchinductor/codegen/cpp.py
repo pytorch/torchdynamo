@@ -565,9 +565,9 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        codecache_def.writeline("CppCodeCache.load('''")
+        codecache_def.writeline("async_compile.cpp('''")
         codecache_def.splice(code)
-        codecache_def.writeline("''').kernel")
+        codecache_def.writeline("''')")
 
         kernel_name = wrapper.next_kernel_name()
         codecache_str = codecache_def.getvalue()
