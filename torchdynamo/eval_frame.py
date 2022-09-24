@@ -5,9 +5,14 @@ import inspect
 import logging
 import os
 import threading
+import time
 import traceback
 import types
 import warnings
+from typing import Any
+from typing import Callable
+from typing import List
+from typing import Set
 from unittest.mock import patch
 
 import torch
@@ -362,6 +367,103 @@ def optimize(
         convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
         backend_ctx_ctor,
     )
+
+
+def evaluate(
+    f: Callable,
+    backends: Set[str] = [None, "inductor"],
+    inputs: List[Any] = [],
+    *,
+    warmups: List[Any] = [],
+    file=None,
+    nopython=False,
+):
+    assert f is not None, "Must provide a callabke to evaluate"
+    assert len(backends) > 0, "Must provide at least 1 backend"
+    assert len(inputs) > 0, "Must provide at least 1 input"
+
+    import cProfile
+    from pstats import Stats
+
+    backends = set(backends)
+
+    print(f"Starting evaluation of {len(backends)} backends: {backends}", file=file)
+
+    assert isinstance(backends, Set), "Backends must be a set"
+
+    result_lookup_table = []
+    for input_idx in range(0, len(inputs)):
+        result_lookup_table.append({})
+
+    for backend in backends:
+        if backend is None:
+            backend = "No Dynamo"
+
+        # TODO(voz): If backend is inductor, get data from the inductor trace util
+
+        print(f"EVALUATING {backend}", file=file)
+        torchdynamo.reset()
+        backend_fn = f
+        # A None backend indicates a run without TorchDynamo
+        if backend != "No Dynamo":
+            backend_fn = torchdynamo.optimize(backend, nopython=nopython)(f)
+
+        first_input = inputs[0]
+        (
+            explanation,
+            _,
+            _,
+            _,
+            _,
+        ) = torchdynamo.explain(f, first_input)
+        print(f"EXPLAIN FOR {backend}: {explanation}", file=file)
+        torchdynamo.reset()
+        try:
+            for warmup in warmups:
+                backend_fn(warmup)
+            print(f"WARMUP FINISHED FOR {backend}", file=file)
+        except Exception as e:
+            print(f"WARMUP FAILED FOR {backend}", file=file)
+            raise e
+
+        try:
+            pr = cProfile.Profile()
+            pr.enable()
+
+            start = time.time()
+            for input_idx in range(0, len(inputs)):
+                input = inputs[input_idx]
+                result = backend_fn(input)
+                result_lookup_table[input_idx][backend] = result
+
+            end = time.time()
+
+            pr.disable()
+            stats = Stats(pr, stream=file)
+            # TODO(voz): Memory profiling
+            # TODO(voz): CUDA Memory profiling
+            stats.sort_stats("tottime").print_stats(10)
+            print(f"RUN FINISHED FOR {backend}", file=file)
+            print(
+                f"    RUN FOR {backend} TOOK: {end - start} seconds for {len(inputs)} inputs and {len(warmups)} warmups",
+                file=file,
+            )
+
+        except Exception as e:
+            print(f"RUN FAILED FOR {backend}", file=file)
+            raise e
+
+        all_equal = True
+        for idx in range(0, len(result_lookup_table)):
+            results_by_backend = result_lookup_table[idx]
+            result = next(iter(results_by_backend.values()))
+            equal = all(same(r, result) for r in results_by_backend.values())
+            if not equal:
+                print("MISMATCH AT INPUT IDX {idx}", file=file)
+                all_equal = False
+
+        if all_equal:
+            print("ALL RESULTS EQUAL ACROSS ALL BACKENDS", file=file)
 
 
 @patch("torchdynamo.symbolic_convert.explain", True)
