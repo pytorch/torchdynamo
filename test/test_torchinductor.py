@@ -219,7 +219,7 @@ def check_model_cuda(
         ).copy_(x)
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
-    check_model(self, model, example_inputs, exact_dtype=exact_dtype)
+    check_model(self, model, example_inputs, kwargs, exact_dtype=exact_dtype)
 
     if check_lowp:
 
