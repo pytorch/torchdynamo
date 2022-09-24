@@ -205,7 +205,7 @@ def check_model_cuda(
     kwargs={},
     *,
     check_lowp=True,
-    exact_dtype=True
+    exact_dtype=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
