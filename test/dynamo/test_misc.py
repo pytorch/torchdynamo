@@ -2600,6 +2600,22 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(torch.allclose(ref, res))
 
 
+    def test_empty_graph(self):
+        import torch.distributed as dist
+        with patch.dict(os.environ, {"MASTER_ADDR": "localhost"}):
+            with patch.dict(os.environ, {"MASTER_PORT": "12355"}):
+                # initialize the process group
+                dist.init_process_group("gloo", rank=0, world_size=1)
+
+                def fn():
+                    get_world_size = torch.distributed.distributed_c10d.get_world_size()
+                    return (get_world_size,)
+
+
+                opt_fn = torchdynamo.optimize("inductor")(fn)
+                self.assertTrue(opt_fn() == 1)
+
+
 class CustomFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):

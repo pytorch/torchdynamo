@@ -9,6 +9,7 @@ from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
+from torchdynamo.utils import count_calls
 
 from . import config
 from . import overrides
@@ -75,6 +76,9 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
 ):
+    if count_calls(gm.graph) == 0:
+        return gm
+
     log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
     V.debug.fx_graph(gm, example_inputs)
 
