@@ -136,6 +136,7 @@ def check_model(
     self: TestCase,
     model,
     example_inputs,
+    kwargs={},
     tol=1e-4,
     *,
     check_lowp=True,
@@ -161,7 +162,8 @@ def check_model(
         if hasattr(model, "to"):
             model = model.to(torch.float)
     torch.manual_seed(0)
-    correct = model(*upcasted_inputs)
+
+    correct = model(*upcasted_inputs, **kwargs)
     # downcast the model back if needed
     if has_lowp_args:
         if hasattr(model, "to"):
@@ -170,11 +172,11 @@ def check_model(
     torchinductor.metrics.reset()
 
     @torchdynamo.optimize_assert(compile_fx)
-    def run(*ex):
-        return model(*ex)
+    def run(*ex, **kwargs):
+        return model(*ex, **kwargs)
 
     torch.manual_seed(0)
-    actual = run(*example_inputs)
+    actual = run(*example_inputs, **kwargs)
 
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
@@ -197,7 +199,13 @@ def check_model(
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
 def check_model_cuda(
-    self: TestCase, model, example_inputs, *, check_lowp=True, exact_dtype=True
+    self: TestCase,
+    model,
+    example_inputs,
+    kwargs={},
+    *,
+    check_lowp=True,
+    exact_dtype=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -211,7 +219,7 @@ def check_model_cuda(
         ).copy_(x)
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
-    check_model(self, model, example_inputs, exact_dtype=exact_dtype)
+    check_model(self, model, example_inputs, kwargs, exact_dtype=exact_dtype)
 
     if check_lowp:
 
@@ -225,7 +233,7 @@ def check_model_cuda(
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
-        check_model(self, model, example_inputs, 2e-3, exact_dtype=exact_dtype)
+        check_model(self, model, example_inputs, kwargs, 2e-3, exact_dtype=exact_dtype)
 
 
 class SweepInputs2:
