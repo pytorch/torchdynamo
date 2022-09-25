@@ -91,7 +91,7 @@ inductor_skips["cpu"] = {
     "mvlgamma.mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
     "cumprod": {f32, f64},  # flaky
     "_masked.prod": {f32, f64},  # flaky
-    "empty_like": {b8, f16, f32, f64},  # flaky
+    "empty_like": {b8, f16, f32, f64, i32, i64},  # flaky
     "reciprocal": {b8},  # flaky
     "linalg.vander": {f32, f64},  # flaky
     "sgn": {f16, f32, f64},  # flaky
@@ -299,6 +299,7 @@ inductor_expected_failures["cpu"] = {
     "nn.functional.fractional_max_pool3d": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.huber_loss": {f16, f32, f64},
+    "nn.functional.interpolate_bicubic": {f32, f64},
     "nn.functional.max_pool2d": {f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.pad.circular": {f16},
