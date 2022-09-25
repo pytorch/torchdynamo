@@ -2183,15 +2183,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_upsample_bicubic2d(self):
-        def fn(a):
-            return (
-                aten.upsample_bicubic2d(a, (128, 128), True),
-                aten.upsample_bicubic2d(a, (128, 256), False),
-            )
-
-        self.common(fn, (torch.randn([4, 3, 64, 32], dtype=torch.float32),))
-
     def test_sort(self):
         def fn(a):
             return torch.sort(a)
