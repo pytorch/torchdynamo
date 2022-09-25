@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import importlib
 import random
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -38,7 +39,7 @@ try:
     # Requires functorch
     from torchinductor.compile_fx import compile_fx_inner
 except (ImportError, ModuleNotFoundError, AssertionError) as e:
-    print(f"{type(e)}: {e}")
+    sys.stderr.write(f"{type(e)}: {e}\n")
     raise unittest.SkipTest("requires sympy/functorch")
 
 

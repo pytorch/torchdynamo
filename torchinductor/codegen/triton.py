@@ -1029,9 +1029,9 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
         call_args = ", ".join(call_args)
-        stream = code.get_cuda_stream(V.graph.scheduler.current_device.index)
+        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
         code.writeline(
-            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream})"
+            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
 
 

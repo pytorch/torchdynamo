@@ -250,11 +250,12 @@ class WrapperCodeGen(CodeGen):
 
         self.allocated = set()
         self.freed = set()
-        self.get_cuda_stream = functools.lru_cache(None)(self.get_cuda_stream)
+        self.write_get_cuda_stream = functools.lru_cache(None)(
+            self.write_get_cuda_stream
+        )
 
-    def get_cuda_stream(self, index):
+    def write_get_cuda_stream(self, index):
         name = f"stream{index}"
-        # self.writeline("torch.cuda.set_device(torch.cuda.current_device())")
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
 
