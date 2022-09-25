@@ -299,7 +299,6 @@ inductor_expected_failures["cpu"] = {
     "nn.functional.fractional_max_pool3d": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.huber_loss": {f16, f32, f64},
-    "nn.functional.interpolate_bicubic": {f32, f64},
     "nn.functional.max_pool2d": {f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.pad.circular": {f16},
