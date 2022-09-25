@@ -89,7 +89,7 @@ raise_on_backend_error = True
 skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
-    torch.testing._internal,
+    torch.testing,
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
