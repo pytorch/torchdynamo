@@ -91,9 +91,15 @@ inductor_skips["cpu"] = {
     "mvlgamma.mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
     "cumprod": {f32, f64},  # flaky
     "_masked.prod": {f32, f64},  # flaky
+    "_masked.std": {b8, f16, f32, f64, i32, i64},  # segfault
+    "histic": {b8, f16, f32, f64, i32, i64},  # segfault
     "empty_like": {b8, f16, f32, f64},  # flaky
     "reciprocal": {b8},  # flaky
+    "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.vander": {f32, f64},  # flaky
+    "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "reciprocal": {b8, f16, f32, f64, i32, i64},  # segfault
     "sgn": {f16, f32, f64},  # flaky
     "index_add": {b8, f16, f32, f64, i32, i64},  # flaky
     "index_select": {f16, f32, f64},  # flaky,
@@ -620,25 +626,27 @@ class TestInductorOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-        try:
-            if device_type == "cuda":
-                self.check_model_cuda(fn, args, kwargs, check_lowp=False)
-            elif device_type == "cpu":
-                self.check_model(fn, args, kwargs, check_lowp=False)
+            try:
+                with open("test_output.txt", "a") as f:
+                    print(f"RUNNING OP {op.name} on {device}", flush=True, file=f)
+                if device_type == "cuda":
+                    self.check_model_cuda(fn, args, kwargs, check_lowp=False)
+                elif device_type == "cpu":
+                    self.check_model(fn, args, kwargs, check_lowp=False)
 
-        except Exception as e:
+            except Exception as e:
 
-            if test_expect is TestExpect.XFAILURE:
-                return
+                if test_expect is TestExpect.XFAILURE:
+                    return
 
-            seen_failed[device_type].setdefault(op_name, set()).add(dtype)
+                seen_failed[device_type].setdefault(op_name, set()).add(dtype)
 
-            if COLLECT_EXPECT:
-                return
+                if COLLECT_EXPECT:
+                    return
 
-            raise e
-        else:
-            seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
+                raise e
+            else:
+                seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
             if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
                 raise RuntimeError(
