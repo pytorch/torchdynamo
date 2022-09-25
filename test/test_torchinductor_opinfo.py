@@ -96,7 +96,8 @@ inductor_skips["cpu"] = {
     "linalg.vander": {f32, f64},  # flaky
     "sgn": {f16, f32, f64},  # flaky
     "index_add": {b8, f16, f32, f64, i32, i64},  # flaky
-    "index_select": {f16, f32, f64},  # flaky
+    "index_select": {f16, f32, f64},  # flaky,
+    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64}, # segfault
 }
 
 inductor_skips["cuda"] = {
@@ -143,6 +144,8 @@ inductor_skips["cuda"] = {
     "special.ndtr": {f64},
     "sqrt": {b8, i32, i64},
     "tanh": {f64},
+    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64}, # segfault
+    "roll": {b8, f16, f32, f64, i32, i64}, # segfault
 }
 
 
@@ -212,7 +215,6 @@ inductor_expected_failures["cpu"] = {
     "fft.ifft": {b8, f32, f64, i32, i64},
     "fft.ifft2": {b8, f32, f64, i32, i64},
     "fft.ifftn": {b8, f32, f64, i32, i64},
-    "fft.ihfft": {b8, f32, f64, i32, i64},
     "fft.ihfft2": {f32, f64},
     "fft.ihfftn": {f32, f64},
     "fft.irfft": {b8, f32, f64, i32, i64},
@@ -256,8 +258,6 @@ inductor_expected_failures["cpu"] = {
     "logdet": {f32, f64},
     "logical_not": {f16, f32, f64, i32, i64},
     "long": {b8, f16, f32, f64, i32, i64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
@@ -298,11 +298,6 @@ inductor_expected_failures["cpu"] = {
     "pca_lowrank": {f32, f64},
     "pinverse": {f32, f64},
     "polar": {f32, f64},
-    "polygamma.polygamma_n_0": {b8, f32, f64, i32, i64},
-    "polygamma.polygamma_n_1": {b8, f32, f64, i32, i64},
-    "polygamma.polygamma_n_2": {b8, f32, f64, i32, i64},
-    "polygamma.polygamma_n_3": {b8, f32, f64, i32, i64},
-    "polygamma.polygamma_n_4": {b8, f32, f64, i32, i64},
     "quantile": {f32, f64},
     "rad2deg": {f16},
     "rand_like": {f16, f32, f64},
@@ -310,11 +305,7 @@ inductor_expected_failures["cpu"] = {
     "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "renorm": {f16, f32, f64},
-    "repeat": {b8, f16, f32, f64, i32, i64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "reshape_as": {b8, f16, f32, f64, i32, i64},
-    "resize_": {b8, f16, f32, f64, i32, i64},
-    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "rsub": {f16, f32, f64, i32, i64},
     "scatter": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {b8, f16, f32, f64, i32, i64},
@@ -336,7 +327,6 @@ inductor_expected_failures["cpu"] = {
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},
     "sort": {b8, f16, f32, f64, i32, i64},
     "sparse.sampled_addmm": {f32, f64},
-    "special.polygamma.special_polygamma_n_0": {b8, f32, f64, i32, i64},
     "split": {b8},
     "split.list_args": {b8},
     "split_with_sizes": {b8},
@@ -345,26 +335,20 @@ inductor_expected_failures["cpu"] = {
     "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "sub": {f16},
-    "sum_to_size": {b8, f16, f32, f64, i32, i64},
     "svd_lowrank": {f32, f64},
     "symeig": {f32, f64},
     "to": {b8, f16, f32, f64, i32, i64},
-    "to_sparse": {b8, f16, f32, f64, i32, i64},
     "tril": {f16},
     "triu": {f16},
     "unbind": {b8},
     "unflatten": {b8, f16, f32, f64, i32, i64},
-    "unfold": {b8, f16, f32, f64, i32, i64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
-    "view": {b8, f16, f32, f64, i32, i64},
-    "view_as": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
-    "where": {b8, f16, f32, f64, i32, i64},
-    "zero_": {b8, f16, f32, f64, i32, i64},
+    "zero_": {b8},
 }
 
 inductor_expected_failures["cuda"] = {
@@ -421,7 +405,6 @@ inductor_expected_failures["cuda"] = {
     "empty_like": {i32, i64},
     "eq": {b8, f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "erf": {b8, f16, f32},
     "expand": {b8, f16, f32, f64, i32, i64},
     "eye": {b8, f16, f32, f64, i32, i64},
     "fft.fft": {f16, f32, f64},
@@ -498,7 +481,6 @@ inductor_expected_failures["cuda"] = {
     "native_layer_norm": {f16, f32, f64},
     "new_empty": {b8, f16, f32, f64, i32, i64},
     "new_empty_strided": {b8, f16, f32, f64, i32, i64},
-    "new_full": {b8, f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
     "nn.functional.avg_pool1d": {f16, f32, f64},
     "nn.functional.bilinear": {f16},
@@ -527,22 +509,13 @@ inductor_expected_failures["cuda"] = {
     "pca_lowrank": {f32, f64},
     "pinverse": {f32, f64},
     "polar": {f32, f64},
-    "polygamma.polygamma_n_0": {b8, f16, f32, f64, i32, i64},
-    "polygamma.polygamma_n_1": {b8, f16, f32, f64, i32, i64},
-    "polygamma.polygamma_n_2": {b8, f16, f32, f64, i32, i64},
-    "polygamma.polygamma_n_3": {b8, f16, f32, f64, i32, i64},
-    "polygamma.polygamma_n_4": {b8, f16, f32, f64, i32, i64},
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "renorm": {f16, f32, f64},
-    "repeat": {b8, f16, f32, f64, i32, i64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "reshape_as": {b8, f16, f32, f64, i32, i64},
-    "resize_": {b8, f16, f32, f64, i32, i64},
-    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "rsub": {f16, f32, f64, i32, i64},
     "scatter": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {b8, f16, f32, f64, i32, i64},
@@ -577,17 +550,14 @@ inductor_expected_failures["cuda"] = {
     "to_sparse": {b8, f16, f32, f64, i32, i64},
     "unbind": {b8},
     "unflatten": {b8, f16, f32, f64, i32, i64},
-    "unfold": {b8, f16, f32, f64, i32, i64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
-    "view": {b8, f16, f32, f64, i32, i64},
-    "view_as": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
-    "where": {b8, f16, f32, f64, i32, i64},
-    "zero_": {b8, f16, f32, f64, i32, i64},
+    "zero_": {b8},
 }
 
+import torchdynamo
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
@@ -600,7 +570,7 @@ class TestInductorOpInfo(TestCase):
     )  # inductor kernels failing this test intermittently
     @_ops(op_db)
     def test_comprehensive(self, device, dtype, op):
-
+        torchdynamo.reset()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
@@ -636,6 +606,8 @@ class TestInductorOpInfo(TestCase):
             kwargs = sample_input.kwargs
 
         try:
+            with open("test_output.txt", "a") as f:
+                print(f"RUNNING OP {op.name} on {device}", flush=True, file=f)
             if device_type == "cuda":
                 self.check_model_cuda(fn, args, kwargs, check_lowp=False)
             elif device_type == "cpu":
