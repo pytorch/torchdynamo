@@ -415,12 +415,12 @@ def evaluate(
             _,
             _,
             _,
-        ) = torchdynamo.explain(f, first_input)
+        ) = torchdynamo.explain(f, *first_input)
         print(f"EXPLAIN FOR {backend}: {explanation}", file=file)
         torchdynamo.reset()
         try:
             for warmup in warmups:
-                backend_fn(warmup)
+                backend_fn(*warmup)
             if len(warmups) > 0:
                 print(f"WARMUP FINISHED FOR {backend}", file=file)
                 
@@ -435,7 +435,7 @@ def evaluate(
             start = time.time()
             for input_idx in range(0, len(inputs)):
                 input = inputs[input_idx]
-                result = backend_fn(input)
+                result = backend_fn(*input)
                 result_lookup_table[input_idx][backend] = result
 
             end = time.time()
