@@ -91,7 +91,7 @@ inductor_skips["cpu"] = {
     "mvlgamma.mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
     "cumprod": {f32, f64},  # flaky
     "_masked.prod": {f32, f64},  # flaky
-    "empty_like": {b8, f16, f32, f64},  # flaky
+    "empty_like": {b8, f16, f32, f64, i32, i64},  # flaky
     "reciprocal": {b8},  # flaky
     "linalg.vander": {f32, f64},  # flaky
     "sgn": {f16, f32, f64},  # flaky
@@ -107,7 +107,7 @@ inductor_skips["cuda"] = {
     "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "cumprod": {f16, f32, f64},
     "_masked.prod": {f16, f32, f64},
-    "empty_like": {f16, f32, f64},
+    "empty_like": {f16, f32, f64, i32, i64},
     "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
