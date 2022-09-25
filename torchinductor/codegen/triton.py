@@ -11,16 +11,15 @@ from typing import List
 
 import sympy
 import torch
-from triton.runtime.jit import JITFunction
 
 import torchinductor
 
 from .. import config
 from .. import ir
 from ..ir import ReductionHint
-from ..triton_ops.autotune import instance_descriptor
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
+from ..utils import instance_descriptor
 from ..utils import sympy_product
 from ..utils import sympy_subs
 from ..virtualized import V
@@ -38,6 +37,8 @@ log = logging.getLogger(__name__)
 
 
 def signature_of(arg):
+    from triton.runtime.jit import JITFunction
+
     if isinstance(arg, TensorArg):
         return JITFunction._type_of(arg.dtype)
     if isinstance(arg, SizeArg):
@@ -46,6 +47,8 @@ def signature_of(arg):
 
 
 def config_of(args):
+    from triton.runtime.jit import JITFunction
+
     divisible_by_16 = [
         i
         for i, arg in enumerate(args)
@@ -935,7 +938,8 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from torchinductor.ir import ReductionHint
-                    from torchinductor.triton_ops.autotune import {heuristics}, instance_descriptor
+                    from torchinductor.triton_ops.autotune import {heuristics}
+                    from torchinductor.utils import instance_descriptor
                 """
             )
 

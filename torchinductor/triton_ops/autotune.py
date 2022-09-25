@@ -1,5 +1,4 @@
 import builtins
-import collections
 import copy
 import hashlib
 import json
@@ -31,10 +30,6 @@ from .conv_perf_model import early_config_prune as conv_early_config_prune
 from .conv_perf_model import estimate_conv_time
 
 log = logging.getLogger(__name__)
-
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
-)
 
 
 class CachingAutotuner(KernelInterface):
