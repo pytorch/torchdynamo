@@ -423,7 +423,7 @@ def evaluate(
                 backend_fn(*warmup)
             if len(warmups) > 0:
                 print(f"WARMUP FINISHED FOR {backend}", file=file)
-                
+
         except Exception as e:
             print(f"WARMUP FAILED FOR {backend}", file=file)
             raise e
