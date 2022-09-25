@@ -86,7 +86,7 @@ raise_on_backend_error = True
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {torch.nn, torch.distributions}
+skipfiles_inline_module_allowlist = {torch.nn, torch.distributions, torch.testing._internal}
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
         torch._refs,
