@@ -97,7 +97,7 @@ inductor_skips["cpu"] = {
     "sgn": {f16, f32, f64},  # flaky
     "index_add": {b8, f16, f32, f64, i32, i64},  # flaky
     "index_select": {f16, f32, f64},  # flaky,
-    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64}, # segfault
+    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
 }
 
 inductor_skips["cuda"] = {
@@ -144,8 +144,8 @@ inductor_skips["cuda"] = {
     "special.ndtr": {f64},
     "sqrt": {b8, i32, i64},
     "tanh": {f64},
-    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64}, # segfault
-    "roll": {b8, f16, f32, f64, i32, i64}, # segfault
+    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
+    "roll": {b8, f16, f32, f64, i32, i64},  # segfault
 }
 
 
@@ -576,6 +576,7 @@ inductor_expected_failures["cuda"] = {
 }
 
 import torchdynamo
+
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
