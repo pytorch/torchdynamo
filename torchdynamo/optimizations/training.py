@@ -26,6 +26,51 @@ from .normalize import normalize_ir
 log = logging.getLogger(__name__)
 
 
+def is_aot_autograd_safe_to_run(gm, example_inputs):
+    """
+    There are some known issues with Aot Autograd. This is a workaround to catch
+    such cases, and fallback to eager. We should fix these quickly.
+
+    Issues
+    1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
+    2) LSTM - https://github.com/pytorch/functorch/issues/586
+    3) TODO - Add an issue for set_grad_enabled
+    4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
+    """
+    import functorch.compile
+
+    safe = True
+    # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+    for submod in gm.modules():
+        if submod.__class__.__name__ == "LSTM":
+            safe = False
+
+    # 2) set_grad_enabled
+    has_set_grad_enabled = False
+    for node in gm.graph.nodes:
+        if node.target == torch._C._set_grad_enabled:
+            has_set_grad_enabled = True
+
+    if functorch.compile.config.use_functionalize:
+        # There are two problematic classes we still exclude for now with
+        # functionalization:
+        #   - data mutation of inputs (fixed when we stop recording the
+        #   copy_ directly into the graph)
+        #   - metadata mutation of inputs (fixed if we do an extra partition
+        #   to avoid AotAutograd on the mutated inputs, or if we some how
+        #   get custom autograd function to reflect metadata changes to the
+        #   original tensor)
+        mutated = has_mutation(gm, example_inputs, inputs_only=True)
+    else:
+        mutated = has_mutation(gm, example_inputs)
+
+    gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
+
+    if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
+        safe = False
+    return safe
+
+
 class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
@@ -55,33 +100,7 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
-
-        # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
-        for submod in self.gm.modules():
-            if submod.__class__.__name__ == "LSTM":
-                self.use_fallback = True
-
-        # 2) set_grad_enabled
-        has_set_grad_enabled = False
-        for node in self.gm.graph.nodes:
-            if node.target == torch._C._set_grad_enabled:
-                has_set_grad_enabled = True
-
-        if functorch.compile.config.use_functionalize:
-            # There are two problematic classes we still exclude for now with
-            # functionalization:
-            #   - data mutation of inputs (fixed when we stop recording the
-            #   copy_ directly into the graph)
-            #   - metadata mutation of inputs (fixed if we do an extra partition
-            #   to avoid AotAutograd on the mutated inputs, or if we some how
-            #   get custom autograd function to reflect metadata changes to the
-            #   original tensor)
-            mutated = has_mutation(self.gm, self.example_inputs, inputs_only=True)
-        else:
-            mutated = has_mutation(self.gm, self.example_inputs)
-
-        if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
+        if not is_aot_autograd_safe_to_run(gm, example_inputs):
             self.use_fallback = True
 
     @property
