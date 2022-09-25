@@ -164,10 +164,10 @@ class PyCodeCache:
                 code = compile(f.read(), path, "exec")
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
+                mod.key = key
                 exec(code, mod.__dict__, mod.__dict__)
-                if key not in cls.cache:
-                    cls.cache[key] = mod
-                    cls.cache[key].key = key
+                # another thread might set this first
+                cls.cache.setdefault(key, mod)
         return cls.cache[key]
 
 
