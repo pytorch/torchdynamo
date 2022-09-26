@@ -1,7 +1,8 @@
-import subprocess
 import os
-from torch.testing._internal.common_methods_invocations import op_db
+import subprocess
 import sys
+
+from torch.testing._internal.common_methods_invocations import op_db
 
 if __name__ == "__main__":
     i = 0
@@ -10,11 +11,15 @@ if __name__ == "__main__":
         end = i + 20
         os.environ["PYTORCH_TEST_RANGE_START"] = f"{start}"
         os.environ["PYTORCH_TEST_RANGE_END"] = f"{end}"
-        popen = subprocess.Popen(["pytest", "test/test_torchinductor_opinfo.py"], stdout=subprocess.PIPE)
-        for line in popen.stdout: 
-            print(line.decode(), end='')
+        popen = subprocess.Popen(
+            ["pytest", "test/test_torchinductor_opinfo.py"], stdout=subprocess.PIPE
+        )
+        for line in popen.stdout:
+            print(line.decode(), end="")
         popen.stdout.close()
         return_code = popen.wait()
         if return_code:
-            raise subprocess.CalledProcessError(return_code, ["pytest", "test/test_torchinductor_opinfo.py"])
+            raise subprocess.CalledProcessError(
+                return_code, ["pytest", "test/test_torchinductor_opinfo.py"]
+            )
         i = end + 1

@@ -21,7 +21,7 @@ develop:
 	python setup.py develop
 
 test: develop
-	pytest test -o log_cli=False -s -k 'not opinfo'
+	pytest test -o log_cli=False
 
 torchbench: develop
 	python benchmarks/torchbench.py --fast
