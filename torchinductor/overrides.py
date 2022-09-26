@@ -2,6 +2,7 @@ import logging
 import random
 import weakref
 import copy
+import itertools
 
 import torch
 import torch.nn as nn
@@ -39,16 +40,18 @@ def replace_fx(gm: torch.fx.GraphModule):
     gm.recompile()
     return gm
 
+
 class EltwiseFusionOp:
     def __init__(self, post_op, scalars=[], algorithm=""):
         self.post_op = post_op
         self.scalars = scalars
         self.algorithm = algorithm
 
+
 class LinearEltwise(nn.Linear):
     def __init__(self, linear, eltwise, op_name, op_info, in_features, out_features, bias, device, dtype):
         super(LinearEltwise, self).__init__(in_features, out_features, bias=bias,
-            device=device, dtype=dtype)
+                                            device=device, dtype=dtype)
         self._update_module_params(linear, eltwise, op_name, op_info)
 
     def _update_module_params(self, linear, eltwise, op_name, op_info):
@@ -62,23 +65,26 @@ class LinearEltwise(nn.Linear):
         algorithm = ""
         if op_info.algorithm:
             assert hasattr(eltwise, op_info.algorithm)
-            algorithm = getattr(eltwise, op_info.algorithm) 
+            algorithm = getattr(eltwise, op_info.algorithm)
         self.algorithm = algorithm
 
     def forward(self, input):
-        y = torch.ops.mkldnn_prepacked.linear_eltwise(input, self.weight, self.bias, self.attr, self.scalars, self.algorithm)
+        y = torch.ops.mkldnn_prepacked.linear_eltwise(
+            input, self.weight, self.bias, self.attr, self.scalars, self.algorithm)
         return y
+
 
 def fuse_linear_eltwise_eval(linear, eltwise, op_name, op_info):
     return LinearEltwise(linear,
-                    eltwise,
-                    op_name,
-                    op_info,
-                    linear.in_features,
-                    linear.out_features,
-                    linear.bias is not None,
-                    linear.weight.device,
-                    linear.weight.dtype)
+                         eltwise,
+                         op_name,
+                         op_info,
+                         linear.in_features,
+                         linear.out_features,
+                         linear.bias is not None,
+                         linear.weight.device,
+                         linear.weight.dtype)
+
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(example_input.device == torch.device('cpu') for example_input in example_inputs)
@@ -86,8 +92,10 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     modules = dict(gm.named_modules())
 
-    for op_name, op_info in op_map.items():
-        pattern = (computation_op, op_info.post_op)
+    for (pointwise_name, pointwise_info), (computation_name, fuse_func) in itertools.product(
+        pointwise_op_map.items(), computation_op_map.items()
+    ):
+        pattern = (computation_name, pointwise_info.post_op)
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of linear is used by other nodes
@@ -97,12 +105,13 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
                 eval_mode = all(not n.training for n in [linear, eltwise])
                 if not eval_mode:
                     continue
-                fused_linear = fuse_linear_eltwise_eval(linear, eltwise, op_name, op_info)
+                fused_linear = fuse_func(linear, eltwise, pointwise_name, pointwise_info)
                 replace_node_module(node.args[0], modules, fused_linear)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-    gm.recompile()   
-    return gm    
+    gm.recompile()
+    return gm
+
 
 def _philox_rand_like_meta(input, seed, offset):
     return _prims.TensorMeta(input)
@@ -231,9 +240,11 @@ def rand_like(x, **kwargs):
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
-computation_op = nn.Linear
+computation_op_map = {
+    nn.Linear: fuse_linear_eltwise_eval
+}
 
-op_map = {
+pointwise_op_map = {
     "relu": EltwiseFusionOp(nn.ReLU),
     "sigmoid": EltwiseFusionOp(nn.Sigmoid),
     "tanh": EltwiseFusionOp(nn.Tanh),
