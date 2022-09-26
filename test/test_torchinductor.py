@@ -1916,6 +1916,7 @@ class CommonTemplate:
                     dtype=torch.float32,
                     device=a.device,
                 ),
+                torch.zeros(2, 3, names=None),
                 a + torch.ones(8, device=a.device),
                 torch.full((2, 3), 3.1416, device=a.device),
             )
