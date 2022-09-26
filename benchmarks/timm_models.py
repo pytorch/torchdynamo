@@ -10,7 +10,6 @@ import warnings
 import torch
 from common import BenchmarkRunner
 from common import main
-from torch._subclasses import FakeTensor
 
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
@@ -51,7 +50,6 @@ BATCH_SIZE_DIVISORS = {
     "crossvit_9_240": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "densenet121": 2,
     "dla102": 2,
     "dpn107": 2,
     "eca_botnext26ts_256": 2,
@@ -297,10 +295,9 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        if isinstance(pred, FakeTensor) and not isinstance(self.target, FakeTensor):
-            return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
-        else:
-            return self.loss(pred, self.target)
+        # High loss values make gradient checking harder, as small changes in
+        # accumulation order upsets accuracy checks.
+        return self.loss(pred, self.target) / 10.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)

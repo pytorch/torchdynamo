@@ -188,6 +188,7 @@ DYNAMIC_SHAPES_NOT_YET_WORKING = {
 }
 
 DONT_CHANGE_BATCH_SIZE = {
+    "demucs",
     "pytorch_struct",
     "pyhpc_turbulent_kinetic_energy",
 }
@@ -254,7 +255,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         )
         if cant_change_batch_size:
             batch_size = None
-        elif batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
+        if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
         if is_training:
