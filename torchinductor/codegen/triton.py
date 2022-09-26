@@ -934,11 +934,7 @@ class TritonKernel(Kernel):
 
         argdefs, _ = self.args.python_argdefs()
 
-        if config.dynamic_shapes:
-            maybe_const = ""
-        else:
-            maybe_const = ": tl.constexpr"
-
+        maybe_const = ""
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
                 argdefs.append(f"{tree.prefix}numel{maybe_const}")
