@@ -29,7 +29,6 @@ from torchdynamo.optimizations import backends
 from torchdynamo.optimizations.log_args import conv_args_analysis
 from torchdynamo.profiler import Profiler
 from torchdynamo.profiler import fx_insert_profiling
-from torchdynamo.testing import CompileCounterWithBackend
 from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
@@ -58,6 +57,7 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     "pyhpc_isoneutral_mixing",  # INCORRECT - Variation in Eager runs itself
     "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "demucs",  # OOM
     # Huggingface
     "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
     "BartForConditionalGeneration",  # OOM
@@ -285,6 +285,10 @@ def print_summary(filename):
                 print(col.ljust(width), f"{data[col].mean():.1%}")
             elif col in ("graphs", "graph_calls", "captured_ops", "total_ops"):
                 print(col.ljust(width), f"{data[col].mean():.1f}")
+            elif col in ("compilation_latency"):
+                print(col.ljust(width), f"mean={data[col].mean():.1f} seconds")
+            elif col in ("compression_ratio"):
+                print(col.ljust(width), f"mean={data[col].mean():.1f}x")
             else:
                 cdata = data[col].clip(1)
                 print(
@@ -548,10 +552,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     headers = ("dev", "name", "batch_size", "speedup")
     row = [current_device, current_name, current_batch_size, float(speedup)]
-    if "start_latency" in kwargs:
-        headers = headers + ("start_latency", "peak_memory")
-        row.append(kwargs["start_latency"])
-        row.append(kwargs["peak_memory"])
+    if "compilation_latency" in kwargs:
+        headers = headers + ("compilation_latency", "compression_ratio")
+        row.append(kwargs["compilation_latency"])
+        row.append(kwargs["compression_ratio"])
 
     output_csv(
         output_filename,
@@ -909,55 +913,6 @@ def get_peak_memory():
     return torch.cuda.max_memory_allocated() / 10**9
 
 
-def compilation_profiling_experiment(
-    model_iter_fn, model, example_inputs, backend="pytorch"
-):
-    # Get the context
-    cnt = CompileCounterWithBackend(backend)
-    if backend == "pytorch":
-        ctx = NullContext()
-    else:
-        ctx = torchdynamo.optimize(cnt)
-
-    # Exit the process after 600 seconds
-    timeout = 600
-
-    @exit_after(timeout)
-    def wrapper():
-        # Reset and warmup
-        torchdynamo.reset()
-        torch.cuda.empty_cache()
-        t0 = time.perf_counter()
-        with ctx:
-            model_iter_fn(model, example_inputs)
-            model_iter_fn(model, example_inputs)
-            model_iter_fn(model, example_inputs)
-        t1 = time.perf_counter()
-        compilation_latency = t1 - t0
-
-        # Measure memory
-        torch.cuda.reset_peak_memory_stats()
-        with ctx:
-            model_iter_fn(model, example_inputs)
-        peak_memory = get_peak_memory()
-        graphs = cnt.frame_count
-        return compilation_latency, peak_memory, graphs
-
-    try:
-        compilation_latency, peak_memory, graphs = wrapper()
-    except TimeOutException:
-        print(f"Timeout: {backend} took more than {timeout} seconds to compile")
-        compilation_latency = timeout
-        peak_memory = 0
-        graphs = 0
-    except Exception:
-        compilation_latency = 0
-        peak_memory = 0
-        graphs = 0
-
-    return compilation_latency, peak_memory, graphs
-
-
 def null_experiment(args, model_iter_fn, model, example_inputs):
     """
     A no-op experiment useful for making sure TorchBenchark alone works properly.
@@ -1115,44 +1070,6 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def profile_compilation(self, device, model_name, backend):
-        """
-        Profiles compilation characteristics, e.g., compilation latency and memory.
-        """
-
-        try:
-            batch_size = None
-            if self.args.batch_size_file:
-                batch_size = read_batch_size_from_file(
-                    self.args, self.args.batch_size_file, model_name
-                )
-            elif self.args.batch_size:
-                batch_size = self.args.batch_size
-            device, name, model, example_inputs, batch_size = self.load_model(
-                device,
-                model_name,
-                batch_size=batch_size,
-            )
-        except NotImplementedError:
-            log.warning(f"{model_name} failed to load")
-
-        assert (
-            device == "cuda"
-        ), "The memory measurement is currently specific to CUDA devices"
-        experiment = functools.partial(
-            compilation_profiling_experiment,
-            model_iter_fn=self.model_iter_fn,
-            model=model,
-            example_inputs=example_inputs,
-        )
-        time, memory, graphs = experiment(backend=backend)
-
-        output_csv(
-            output_filename,
-            ("dev", "name", "batch_size", "time", "memory", "graphs"),
-            [device, model_name, batch_size, time, memory, graphs],
-        )
-
     def batch_size_finder(self, device, model_name, initial_batch_size=128):
         batch_size = initial_batch_size
         while batch_size >= 1:
@@ -1282,6 +1199,24 @@ class BenchmarkRunner:
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment
     ):
+        def warmup(fn, model, example_inputs, mode, niters=5):
+            peak_mem = 0
+            try:
+                if current_device == "cuda":
+                    torch.cuda.reset_peak_memory_stats()
+                    torch.cuda.empty_cache()
+                t0 = time.perf_counter()
+                for _ in range(niters):
+                    fn(model, example_inputs)
+                t1 = time.perf_counter()
+                latency = t1 - t0
+                if current_device == "cuda":
+                    peak_mem = get_peak_memory()
+            except Exception as e:
+                log.exception(f"Failed for {mode} {e}")
+                return sys.exit(-1)
+            return latency, peak_mem
+
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
         with self.pick_grad(name, self.args.training):
@@ -1289,25 +1224,25 @@ class BenchmarkRunner:
             experiment_kwargs = {}
             results = []
 
+            eager_latency, eager_peak_mem = warmup(
+                self.model_iter_fn, model, example_inputs, "eager"
+            )
             optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+            dynamo_latency, dynamo_peak_mem = warmup(
+                optimized_model_iter_fn, model, example_inputs, "dynamo"
+            )
 
-            try:
-                if current_device == "cuda":
-                    torch.cuda.reset_peak_memory_stats()
-                    torch.cuda.empty_cache()
-                t0 = time.perf_counter()
-                for _ in range(4):
-                    optimized_model_iter_fn(model, example_inputs)
-                t1 = time.perf_counter()
-                compilation_time = t1 - t0
-                peak_memory = get_peak_memory()
-            except Exception as e:
-                log.exception(e)
-                return sys.exit(-1)
+            compilation_time = dynamo_latency - eager_latency
+            compression_ratio = eager_peak_mem / dynamo_peak_mem
+            # print(
+            #     f"memory: eager: {eager_peak_mem:.2f} GB, "
+            #     f"dynamo: {dynamo_peak_mem:.2f} GB, "
+            #     f"ratio: {compression_ratio:.2f}"
+            # )
 
             if experiment.func is speedup_experiment:
-                experiment_kwargs["start_latency"] = compilation_time
-                experiment_kwargs["peak_memory"] = peak_memory
+                experiment_kwargs["compilation_latency"] = compilation_time
+                experiment_kwargs["compression_ratio"] = compression_ratio
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -1323,7 +1258,7 @@ class BenchmarkRunner:
                     frames_third_pass = 0
 
                 results.append(
-                    f"{ok:3}/{total:3} +{frames_third_pass} frames {t1-t0:3.0f}s"
+                    f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
             if not hasattr(model, name):
@@ -1660,11 +1595,6 @@ def parse_args():
         action="store_true",
         help="finds the largest batch size that could fit on GPUs",
     )
-    group.add_argument(
-        "--profile-backend",
-        type=str,
-        help="reports the peak memory and compilation latency for a backend",
-    )
 
     mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument(
@@ -1959,13 +1889,6 @@ def main(runner, original_dir=None):
             batch_size = runner.batch_size_finder(device, args.only)
             print(args.only, batch_size)
             output_csv(output_filename, [], [args.only, batch_size])
-        return
-
-    if args.profile_backend and args.only:
-        if output_filename is None:
-            output_filename = "backends_profile.csv"
-        for device in args.devices:
-            runner.profile_compilation(device, args.only, args.profile_backend)
         return
 
     if args.export_profiler_trace:
