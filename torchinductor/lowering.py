@@ -1324,8 +1324,15 @@ def full_like(x, fill_value, **kwargs):
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
     def inner(
-        *size, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+        *size,
+        names=None,
+        dtype=None,
+        device=None,
+        layout=0,
+        pin_memory=False,
+        memory_format=None,
     ):
+        assert names is None
         assert not pin_memory
         assert layout in (0, torch.strided)
         assert memory_format in (None, torch.contiguous_format)

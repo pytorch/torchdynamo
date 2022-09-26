@@ -107,7 +107,7 @@ inductor_skips["cuda"] = {
     "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "cumprod": {f16, f32, f64},
     "_masked.prod": {f16, f32, f64},
-    "empty_like": {f16, f32, f64},
+    "empty_like": {f16, f32, f64, i32, i64},
     "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
