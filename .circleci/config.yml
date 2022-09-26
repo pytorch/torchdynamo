@@ -394,6 +394,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor inference run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -416,6 +417,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor inference run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -438,6 +440,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor inference run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -460,6 +463,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor inference run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -482,6 +486,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor training run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -504,6 +509,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor training run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -526,6 +532,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor training run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -548,6 +555,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor training run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -571,6 +579,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor training run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
@@ -593,6 +602,7 @@ jobs:
       - install_deps
       - run:
           name: TIMM TorchInductor training run
+          no_output_timeout: 30m
           command: |
             source .circleci/setup_env.sh
             make develop
