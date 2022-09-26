@@ -1,6 +1,7 @@
 import contextlib
 import dis
 import functools
+import logging
 import os.path
 import types
 import unittest
@@ -24,6 +25,8 @@ from .utils import same
 unsupported = torchdynamo.eval_frame.unsupported
 three = 3
 
+log = logging.getLogger(__name__)
+
 
 def clone_me(x):
     if x is None:
@@ -35,6 +38,11 @@ def collect_results(model, prediction, loss, example_inputs):
     results = []
     results.append(prediction)
     results.append(loss)
+    if isinstance(loss, torch.Tensor) and loss.item() > 1:
+        log.warning(
+            f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
+        )
+
     grads = dict()
     for name, param in model.named_parameters():
         grad = clone_me(param.grad)
