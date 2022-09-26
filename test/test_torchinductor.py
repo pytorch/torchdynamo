@@ -3340,7 +3340,7 @@ if HAS_CUDA:
 
     SweepInputsCudaTest.populate()
 
-    class GpuTests(TestCase):
+    class CudaTests(TestCase):
         common = check_model_cuda
         device = "cuda"
 
@@ -3352,9 +3352,9 @@ if HAS_CUDA:
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
 
-    CommonTemplate.install(GpuTests, "cuda")
+    CommonTemplate.install(CudaTests, "cuda")
 
-    class GPUReproTests(TestCase):
+    class CudaReproTests(TestCase):
         def test_index_put_issue(self):
             def forward(
                 self,
