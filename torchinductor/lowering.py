@@ -4,6 +4,8 @@ import logging
 import operator
 from collections.abc import Iterable
 from typing import List
+from typing import Optional
+from typing import Tuple
 
 import sympy
 import torch
@@ -1726,8 +1728,14 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
     )
 
 
-@register_lowering(aten.upsample_bicubic2d)
-def upsample_bicubic2d(x, output_size, align_corners, scales_h=None, scales_w=None):
+@register_lowering(aten.upsample_bicubic2d.default)
+def upsample_bicubic2d_default(
+    x,
+    output_size,
+    align_corners: bool,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
     x.realize_hint()
     x_loader = x.make_loader()
 
@@ -1833,6 +1841,26 @@ def upsample_bicubic2d(x, output_size, align_corners, scales_h=None, scales_w=No
         inner_fn=fn,
         ranges=[N, C, sympy.Integer(oH), sympy.Integer(oW)],
     )
+
+
+@register_lowering(aten.upsample_bicubic2d.vec)
+def upsample_bicubic2d_vec(
+    a,
+    output_size,
+    align_corners: bool,
+    scale_factors: Optional[Tuple[float, float]] = None,
+):
+    _, _, iH, iW = a.get_size()
+    iH = V.graph.sizevars.guard_static_shape(iH)
+    iW = V.graph.sizevars.guard_static_shape(iW)
+
+    if bool(output_size) + bool(scale_factors) != 1:
+        raise RuntimeError("Must specify exactly one of output_size and scale_factor.")
+    if output_size is None:
+        assert scale_factors is not None
+        output_size = (int(iH * scale_factors[0]), int(iW * scale_factors[1]))
+    scale_h, scale_w = scale_factors if scale_factors else (None, None)
+    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
 @register_lowering(aten.reflection_pad2d)
