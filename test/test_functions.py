@@ -732,3 +732,14 @@ class FunctionTests(torchdynamo.testing.TestCase):
 
         with self.assertRaises(torchdynamo.exc.Unsupported):
             h(torch.rand(10))
+
+    def test_copy_parameter(self):
+        import copy
+
+        @torchdynamo.optimize(nopython=True)
+        def f(x):
+            y = copy.deepcopy(x)
+            return y
+
+        with self.assertRaises(torchdynamo.exc.Unsupported):
+            f(torch.nn.Parameter(torch.zeros(10)))

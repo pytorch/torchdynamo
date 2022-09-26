@@ -184,7 +184,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if self.fn is copy.copy or self.fn is copy.deepcopy:
             if len(args) != 1:
                 unimplemented("copy.copy/copy.deepcopy does not have 1 argument")
-            if isinstance(args[0], variables.TensorVariable):
+            if (
+                isinstance(args[0], variables.TensorVariable)
+                and args[0].class_type is torch.Tensor
+            ):
                 if self.fn is copy.copy:
                     return args[0]
                 elif self.fn is copy.deepcopy:
