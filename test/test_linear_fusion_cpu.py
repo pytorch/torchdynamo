@@ -3,11 +3,12 @@ import torch.nn as nn
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import NodeSpec as ns, QuantizationTestCase
 
-import torchdynamo        
+import torchdynamo
 from torchdynamo.testing import same
 from torchinductor.overrides import fuse_fx, LinearEltwise
 
 torchdynamo.config.raise_on_backend_error = False
+
 
 def _eltwise_list():
     eltwise_list = [
@@ -22,6 +23,8 @@ def _eltwise_list():
     ]
     return eltwise_list
 
+# Inherit the QuantizationTestCase class
+# to leverage the checkGraphModuleNodes function
 class TestFuseFx(QuantizationTestCase):
     def _test_linear_eltwise(self, eltwise_fn, bias, input_shape):
         class M(nn.Module):
@@ -33,9 +36,9 @@ class TestFuseFx(QuantizationTestCase):
             def forward(self, x):
                 x = self.linear(x)
                 x = self.eltwise(x)
-                return x    
+                return x
 
-        mod = M(eltwise_fn, input_shape[-1], 10, bias).eval()          
+        mod = M(eltwise_fn, input_shape[-1], 10, bias).eval()
 
         @torchdynamo.optimize("inductor")
         def fn(x):
@@ -49,20 +52,17 @@ class TestFuseFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(
             fused_gm,
-            expected_node_list=expected_nodes)   
+            expected_node_list=expected_nodes)
 
         result = fn(v)
         assert same(result, mod(v))
 
     def test_linear_eltwise(self):
         for eltwise_fn in _eltwise_list():
-            for input_shape in [
-                [2, 3, 10],
-                [2, 10]]:
-                for bias in [
-                    True,
-                    False]:
+            for input_shape in [[2, 3, 10], [2, 10]]:
+                for bias in [True, False]:
                     self._test_linear_eltwise(eltwise_fn, bias, input_shape)
+
 
 if __name__ == '__main__':
     run_tests()
