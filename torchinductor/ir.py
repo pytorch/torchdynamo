@@ -2840,7 +2840,7 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-class LinearReLU(ExternKernelAlloc):
+class LinearEltwise(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
 
     def __init__(
@@ -2871,7 +2871,7 @@ class LinearReLU(ExternKernelAlloc):
         else:
             constant_args.insert(0, b)
 
-        return LinearReLU(
+        return LinearEltwise(
             layout=FlexibleLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
