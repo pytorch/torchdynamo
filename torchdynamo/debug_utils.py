@@ -169,7 +169,7 @@ COMPILER_REPRO_OPTIONS = {
 
 
 def dump_compiler_graph_state(gm, args, compiler_name):
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
@@ -449,7 +449,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name):
     """
     Saves the repro to a repro.py file
     """
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
@@ -473,7 +473,7 @@ def dump_backend_repro_as_tarfile(gm, args, compiler_name):
     """
     import tarfile
 
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
 
