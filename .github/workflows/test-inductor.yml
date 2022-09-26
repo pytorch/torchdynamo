@@ -18,7 +18,7 @@ jobs:
     - run: make setup_nightly
     - run: make develop
     - run: pytest ./test/test_torchinductor.py
-    - run: pytest ./test/test_torchinductor_opinfo.py
+    - run: python ./test/opinfo_harness.py
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
