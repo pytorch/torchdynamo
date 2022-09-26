@@ -36,6 +36,7 @@ class CheckSplitsCompiler:
         return gm
 
 
+@pytest.mark.skip("Module hangs in PyTorch CI")
 class TestDistributed(torchdynamo.testing.TestCase):
     """
     Test harness initializes dist process group
