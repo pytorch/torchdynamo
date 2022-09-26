@@ -735,6 +735,9 @@ class TestInductorOpInfo(TestCase):
             kwargs = sample_input.kwargs
 
             try:
+                with open("test_output.txt", "a") as f:
+                    print(f"RUNNING OP {op.name} on {device}", flush=True, file=f)
+                    print(f"RUNNING OP {op.name} on {device}", flush=True)
                 if device_type == "cuda" and op.name >= "softmax":
                     self.check_model_cuda(fn, args, kwargs, check_lowp=False)
                 elif device_type == "cpu":

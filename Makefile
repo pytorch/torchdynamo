@@ -21,7 +21,7 @@ develop:
 	python setup.py develop
 
 test: develop
-	pytest test -o log_cli=False
+	pytest test -o log_cli=False -s
 
 torchbench: develop
 	python benchmarks/torchbench.py --fast
