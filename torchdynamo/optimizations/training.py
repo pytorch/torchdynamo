@@ -1,8 +1,8 @@
 import logging
 import operator
 from collections import defaultdict
-from typing import Set
 from functools import partial
+from typing import Set
 
 import torch
 from torch.fx import GraphModule
@@ -263,7 +263,6 @@ class AotPrimsNvfuser(AotAutogradStrategy):
 aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
 
 
-
 def prims_executor(gm, inputs, *, executor):
     # This function is called once per forward/backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph and return
@@ -283,7 +282,6 @@ def prims_executor(gm, inputs, *, executor):
 
 def create_nvprims_backend(*, executor):
     class NvPrims(AotAutogradStrategy):
-
         def __init__(self, gm: torch.fx.GraphModule, example_inputs):
             super(NvPrims, self).__init__(gm, example_inputs)
             self.executor = executor
@@ -296,7 +294,9 @@ def create_nvprims_backend(*, executor):
                 bw_compiler=partial(prims_executor, executor=self.executor),
                 hasher_type="StaticShapeHasher",
             )
+
     return NvPrims
+
 
 aot_nvprims_nvfuser = create_nvprims_backend(executor="nvfuser").compile_fn
 aot_nvprims_aten = create_nvprims_backend(executor="aten").compile_fn
