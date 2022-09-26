@@ -1,3 +1,4 @@
+import functools
 import logging
 import operator
 from collections import defaultdict
@@ -183,6 +184,33 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+class AotInductorDebug(AotAutogradStrategy):
+    """
+    Uses TorchInductor Aot Autograd decopms and partitioner to isolate aot vs
+    inductor problems.
+    """
+
+    def candidate(self):
+        from functorch.compile import min_cut_rematerialization_partition
+        from functorch.compile import nop
+
+        from torchinductor.compile_fx import select_decomp_table
+
+        kwargs = {
+            # these are taken from memory_efficient_fusion()
+            "fw_compiler": nop,
+            "bw_compiler": nop,
+            "decompositions": select_decomp_table(),
+            "partition_fn": functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
+        }
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+aot_inductor_debug = AotInductorDebug.compile_fn
 
 
 class AOTMemEfficientFusionWithContext:
@@ -492,3 +520,7 @@ def create_aot_backends():
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
     BACKENDS["aot_cudagraphs"] = aot_cudagraphs
+
+    # aot_inductor_debug just replaces the inductor compiler with nop to help
+    # isolate inductor vs aot_eager errors
+    BACKENDS["aot_inductor_debug"] = aot_inductor_debug

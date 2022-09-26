@@ -752,7 +752,7 @@ def same(
                     exact_dtype=exact_dtype,
                 )
             ):
-                log.info("Accuracy failed for key name", k)
+                log.error(f"Accuracy failed for key name {k}")
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
