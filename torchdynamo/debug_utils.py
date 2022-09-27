@@ -15,7 +15,8 @@ from torch.utils._mode_utils import no_dispatch
 
 import torchdynamo
 from torchdynamo import config
-from torchdynamo.utils import clone_inputs, clone_input
+from torchdynamo.utils import clone_input
+from torchdynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
 
@@ -329,7 +330,11 @@ def wrap_compiler_debug(compiler, compiler_name: str):
 
                 @no_dispatch()
                 def to_real(e):
-                    return e if not isinstance (e, torch._subclasses.FakeTensor) else clone_tensor(e)
+                    return (
+                        e
+                        if not isinstance(e, torch._subclasses.FakeTensor)
+                        else clone_input(e)
+                    )
 
                 example_inputs = [to_real(e) for e in example_inputs]
 
@@ -344,10 +349,13 @@ def wrap_compiler_debug(compiler, compiler_name: str):
                 raise e
 
         if config.repro_after == "aot":
-            compiled = wrap_fn_to_repro(lambda: compiler(gm, example_inputs, **kwargs), example_inputs)
+            compiled = wrap_fn_to_repro(
+                lambda: compiler(gm, example_inputs, **kwargs), example_inputs
+            )
 
             def compiled_fn(*args):
                 return wrap_fn_to_repro(lambda: compiled(*args), args)
+
         else:
             compiled_fn = compiler(gm, example_inputs, **kwargs)
 
