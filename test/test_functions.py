@@ -5,6 +5,7 @@ import inspect
 import itertools
 import operator
 from typing import Any
+from unittest.mock import patch
 
 import torch
 from torch import sub
@@ -733,6 +734,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
         with self.assertRaises(torchdynamo.exc.Unsupported):
             h(torch.rand(10))
 
+    # test does not work with fake_tensor_propagation set to False since
+    # the Parameter gets silently converted to a tensor before the deepcopy call
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_copy_parameter(self):
         import copy
 
@@ -740,4 +744,7 @@ class FunctionTests(torchdynamo.testing.TestCase):
         def f(x):
             return copy.deepcopy(x)
 
-        f(torch.nn.Parameter(torch.zeros(10)))
+        t1 = torch.nn.Parameter(torch.rand(10))
+        t2 = f(t1)
+        self.assertIsInstance(t2, type(t1))
+        self.assertIsNot(t2.data, t1.data)
