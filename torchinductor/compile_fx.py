@@ -190,10 +190,18 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
         return torch.as_strided(buffer, x.size(), x.stride())
 
     assert isinstance(inputs, (list, tuple))
-    static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x
-        for idx, x in enumerate(inputs)
+    inputs = [
+        x.to("cuda") if x.dim() == 0 else x for x in inputs
     ]
+
+    static_inputs = []
+    for idx, x in enumerate(inputs):
+        if idx not in static_input_idxs:
+            static_inputs.append(static_input(x))
+        elif x.device.type == "cpu" and x.dim() == 0:
+            static_inputs.append(x.to("cuda"))
+        else:
+            static_inputs.append(inputs[idx])
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
@@ -224,6 +232,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             for idx, (dst, src, expanded_dims) in enumerate(
                 zip(static_inputs, new_inputs, inps_expanded_dims)
             ):
+                # breakpoint()
                 if idx in static_input_idxs:
                     assert dst.data_ptr() == src.data_ptr()
                 else:

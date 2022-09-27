@@ -765,12 +765,7 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         else:
             ep = ""
-
-        if V.graph.is_unspec_arg(name):
-            line = var
-        else:
-            line = f"tl.load({var} + {index}, {mask}{ep})"
-
+        line = f"tl.load({var} + {index}, {mask}{ep})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
