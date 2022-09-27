@@ -22,6 +22,7 @@ from scipy.stats import gmean
 from scipy.stats import ttest_ind
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
+from torch._ops import OpTracker
 
 import torchdynamo
 import torchdynamo.utils
@@ -519,7 +520,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         else:
             yield
 
-    with maybe_profile(enabled=args.export_profiler_trace) as p:
+    with maybe_profile(enabled=args.export_profiler_trace) as p, OpTracker() as op_tracker:
         frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
         for rep in range(args.repeat):
             inputs = (
@@ -570,6 +571,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         output_filename[:-4] + "_compilation_metrics.csv",
         ["dev", "name", "batch_size"] + headers,
         [current_device, current_name, current_batch_size] + data,
+    )
+    output_csv(
+        output_filename[:-4] + "_ops.csv",
+        ["dev", "name", "batch_size", "ops"],
+        [current_device, current_name, current_batch_size, op_tracker.ops()],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
