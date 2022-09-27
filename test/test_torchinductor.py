@@ -3427,16 +3427,16 @@ class CommonTemplate:
         out = compiled(torch.randn(12, 4, device=self.device))
         self.assertEqual(out[0].shape, (24, 2))
 
+    @patch.object(config.triton, "cudagraphs", True)
     def test_unspec_variable(self):
-        # dynamo wraps unspec variable as 1-element tensor on CPU
         def fn(x, y):
             return x + y
 
-        check_model(
-            self,
-            fn,
-            (torch.randn([2, 3], device=self.device), torch.tensor(10, device="cpu")),
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
         )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
 
 if HAS_CPU:

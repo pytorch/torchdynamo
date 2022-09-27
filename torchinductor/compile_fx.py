@@ -190,6 +190,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
         return torch.as_strided(buffer, x.size(), x.stride())
 
     assert isinstance(inputs, (list, tuple))
+    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
     inputs = [
         x.to("cuda") if x.device.type == "cpu" and x.dim() == 0 else x for x in inputs
     ]
