@@ -215,6 +215,10 @@ class CppOverrides(OpOverrides):
         return f"std::isnan({x})"
 
     @staticmethod
+    def lgamma(x):
+        return f"std::lgamma({x})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 

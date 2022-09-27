@@ -131,3 +131,7 @@ class trace:
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
+
+    # Upload the .tar.gz file
+    # Needs to be overriden based on specific environment needs
+    upload_tar = None

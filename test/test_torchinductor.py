@@ -1424,6 +1424,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_lgamma(self):
+        def fn(x):
+            return aten.lgamma(x) + 2, aten.cos(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_cos(self):
         def fn(x):
             return aten.cos(x) + 2, aten.cos(x + 1)
@@ -2185,6 +2194,15 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    def test_upsample_bicubic2d(self):
+        def fn(a):
+            return (
+                aten.upsample_bicubic2d(a, (128, 128), True),
+                aten.upsample_bicubic2d(a, (128, 256), False),
+            )
+
+        self.common(fn, (torch.randn([4, 3, 64, 32], dtype=torch.float32),))
 
     def test_sort(self):
         def fn(a):
@@ -3342,7 +3360,7 @@ if HAS_CUDA:
 
     SweepInputsCudaTest.populate()
 
-    class GpuTests(TestCase):
+    class CudaTests(TestCase):
         common = check_model_cuda
         device = "cuda"
 
@@ -3354,9 +3372,9 @@ if HAS_CUDA:
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
 
-    CommonTemplate.install(GpuTests, "cuda")
+    CommonTemplate.install(CudaTests, "cuda")
 
-    class GPUReproTests(TestCase):
+    class CudaReproTests(TestCase):
         def test_index_put_issue(self):
             def forward(
                 self,

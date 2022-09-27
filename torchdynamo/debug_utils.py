@@ -11,9 +11,11 @@ from collections import Counter
 
 import torch
 import torch.fx as fx
+from torch.utils._mode_utils import no_dispatch
 
 import torchdynamo
 from torchdynamo import config
+from torchdynamo.utils import clone_input
 from torchdynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
@@ -169,7 +171,7 @@ COMPILER_REPRO_OPTIONS = {
 
 
 def dump_compiler_graph_state(gm, args, compiler_name):
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
@@ -320,11 +322,22 @@ def wrap_compiler_debug(compiler, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
-        if config.repro_after == "aot":
+
+        def wrap_fn_to_repro(fn, example_inputs):
             try:
-                compiled_fn = compiler(gm, example_inputs, **kwargs)
-                compiled_fn(*example_inputs)
+                return fn()
             except Exception as e:
+
+                @no_dispatch()
+                def to_real(e):
+                    return (
+                        e
+                        if not isinstance(e, torch._subclasses.FakeTensor)
+                        else clone_input(e)
+                    )
+
+                example_inputs = [to_real(e) for e in example_inputs]
+
                 if config.repro_level == 1:
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
@@ -334,6 +347,15 @@ def wrap_compiler_debug(compiler, compiler_name: str):
                         fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
                     )
                 raise e
+
+        if config.repro_after == "aot":
+            compiled = wrap_fn_to_repro(
+                lambda: compiler(gm, example_inputs, **kwargs), example_inputs
+            )
+
+            def compiled_fn(*args):
+                return wrap_fn_to_repro(lambda: compiled(*args), args)
+
         else:
             compiled_fn = compiler(gm, example_inputs, **kwargs)
 
@@ -449,7 +471,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name):
     """
     Saves the repro to a repro.py file
     """
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
@@ -473,7 +495,7 @@ def dump_backend_repro_as_tarfile(gm, args, compiler_name):
     """
     import tarfile
 
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
 

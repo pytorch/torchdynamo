@@ -171,6 +171,10 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
+    def lgamma(x):
+        return f"tl.libdevice.lgamma({x})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -197,7 +201,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, {b})"
+        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
 
     @staticmethod
     def pow(a, b):

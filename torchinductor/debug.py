@@ -216,6 +216,18 @@ class DebugContext:
     def filename(self, suffix):
         return os.path.join(self._path, suffix)
 
+    def upload_tar(self):
+        if config.trace.upload_tar is not None:
+            import tarfile
+
+            assert self._path
+            tar_file = os.path.join(
+                self._path, f"{os.path.basename(self._path)}.tar.gz"
+            )
+            with tarfile.open(tar_file, "w:gz") as tar:
+                tar.add(self._path, arcname=os.path.basename(self._path))
+            config.trace.upload_tar(tar_file)
+
     def __enter__(self):
         log = logging.getLogger("torchinductor")
         if not log.handlers:
@@ -257,6 +269,7 @@ class DebugContext:
             self._save_profile_data()
 
         if self._path:
+            self.upload_tar()
             log.warning("%s debug trace: %s", get_graph_being_compiled(), self._path)
         self._stack.close()
 
