@@ -2525,17 +2525,17 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         @torchdynamo.optimize("eager", nopython=True)
         def f1():
-            m1(torch.ones(2, 3))
+            return m1(torch.ones(2, 3))
 
-        f1()
+        self.assertTrue(torch.allclose(f1(), torch.tensor([2.0])))
 
         m2 = Module2()
 
         @torchdynamo.optimize("eager", nopython=True)
         def f2():
-            m2(torch.ones(2, 3))
+            return m2(torch.ones(2, 3))
 
-        f2()
+        self.assertTrue(torch.allclose(f2(), torch.tensor([2.0])))
 
     def test_object_classmethod(self):
         class C:
@@ -2545,9 +2545,9 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         @torchdynamo.optimize("eager", nopython=True)
         def f():
-            C().fn(torch.ones(2, 3))
+            return C().fn(torch.ones(2, 3))
 
-        f()
+        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
 
     def test_object_staticmethod(self):
         class C:
@@ -2557,9 +2557,10 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         @torchdynamo.optimize("eager", nopython=True)
         def f():
-            C().fn(torch.ones(2, 3))
+            return C().fn(torch.ones(2, 3))
 
-        f()
+        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
 
 
 class CustomFunc(torch.autograd.Function):
