@@ -2,7 +2,6 @@
 import functools
 
 import torch
-from torch.nn import *
 
 import torchdynamo
 from torchdynamo.optimizations.training import is_aot_autograd_safe_to_run
@@ -20,7 +19,7 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.self_mod_model_lstm_lstm = LSTM(
+                self.self_mod_model_lstm_lstm = torch.nn.LSTM(
                     2048, 2048, num_layers=2, bidirectional=True
                 )
 
