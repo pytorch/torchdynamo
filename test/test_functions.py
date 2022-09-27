@@ -736,10 +736,8 @@ class FunctionTests(torchdynamo.testing.TestCase):
     def test_copy_parameter(self):
         import copy
 
-        @torchdynamo.optimize(nopython=True)
+        @torchdynamo.optimize("eager", nopython=True)
         def f(x):
-            y = copy.deepcopy(x)
-            return y
+            return copy.deepcopy(x)
 
-        with self.assertRaises(torchdynamo.exc.Unsupported):
-            f(torch.nn.Parameter(torch.zeros(10)))
+        f(torch.nn.Parameter(torch.zeros(10)))

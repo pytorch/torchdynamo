@@ -16,6 +16,7 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..utils import make_cell
+from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
 
@@ -184,16 +185,49 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if self.fn is copy.copy or self.fn is copy.deepcopy:
             if len(args) != 1:
                 unimplemented("copy.copy/copy.deepcopy does not have 1 argument")
-            if (
-                isinstance(args[0], variables.TensorVariable)
-                and args[0].class_type is torch.Tensor
-            ):
+            if isinstance(args[0], variables.TensorVariable):
                 if self.fn is copy.copy:
                     return args[0]
                 elif self.fn is copy.deepcopy:
-                    return variables.TorchVariable(torch.clone).call_function(
-                        tx, args, kwargs
-                    )
+                    if args[0].class_type is torch.Tensor:
+                        return args[0].call_method(tx, "clone", [], {})
+                    elif args[0].class_type is torch.nn.Parameter:
+                        # equivalent to torch.nn.Parameter(args[0].clone(memory_format=torch.preserve_format)), args[0].requires_grad))
+                        return variables.TorchVariable(
+                            torch.nn.Parameter
+                        ).call_function(
+                            tx,
+                            [
+                                args[0].call_method(
+                                    tx,
+                                    "clone",
+                                    [],
+                                    {
+                                        "memory_format": variables.BuiltinVariable(
+                                            getattr
+                                        ).call_function(
+                                            tx,
+                                            [
+                                                variables.TorchVariable(torch),
+                                                variables.ConstantVariable(
+                                                    "preserve_format"
+                                                ),
+                                            ],
+                                            {},
+                                        )
+                                    },
+                                ),
+                                variables.BuiltinVariable(getattr).call_function(
+                                    tx,
+                                    [
+                                        args[0],
+                                        variables.ConstantVariable("requires_grad"),
+                                    ],
+                                    {},
+                                ),
+                            ],
+                            {},
+                        )
             unimplemented("copy.copy/copy.deepcopy called on non-tensor")
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
