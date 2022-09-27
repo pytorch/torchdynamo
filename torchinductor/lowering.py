@@ -2733,7 +2733,10 @@ def make_reduction(reduction_type: str, override_dtype=None):
                 reduction_type, reduction_type
             ),
         )
-        result.realize()
+        if isinstance(
+            result.data.data, Reduction
+        ):  # Only realize if reduction isn't unrolled
+            result.realize()
         return result
 
     return inner
