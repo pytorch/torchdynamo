@@ -78,8 +78,14 @@ class BaseUserFunctionVariable(VariableTracker):
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
-    def __init__(self, fn, **kwargs):
+    def __init__(self, fn, is_constant=False, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
+        if hasattr(fn, "DYNAMO_MARKED_CONSTANT"):
+            # This method should be treated as a constant for the purposes of compilation
+            self.is_constant = True
+        else:
+            self.is_constant = False
+
         assert isinstance(
             fn, types.FunctionType
         ), f"expected FunctionType found {typestr(fn)} {fn}"
@@ -109,6 +115,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def bind_args(self, parent, args, kwargs):
+        assert not self.is_constant
         options = VariableTracker.propagate([self])
         wrap = functools.partial(wrap_bound_arg, options=options)
 
@@ -180,6 +187,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        if self.is_constant:
+            import pdb
+            pdb.set_trace()
         # handle copy.copy and copy.deepcopy on tensors
         if self.fn is copy.copy or self.fn is copy.deepcopy:
             if len(args) != 1:
@@ -217,8 +227,8 @@ class UserMethodVariable(UserFunctionVariable):
     ) -> "VariableTracker":
         if isinstance(self.obj, variables.NNModuleVariable) and getattr(
             self.fn, "__module__", ""
-        ).startswith("torch.nn."):
-            return self.obj.call_method(tx, self.fn.__name__, args, kwargs).add_options(
+        ).startswith("torch.nn.") or self.is_constant:
+            return self.obj.call_method(tx, self.fn.__name__, args, kwargs, constant=True).add_options(
                 self
             )
         return super().call_function(tx, args, kwargs)

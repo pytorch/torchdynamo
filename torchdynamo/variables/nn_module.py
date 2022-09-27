@@ -228,6 +228,7 @@ class NNModuleVariable(VariableTracker):
         name,
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
+        constant = False,
     ) -> "VariableTracker":
         from . import ConstantVariable
         from . import ListIteratorVariable
@@ -245,6 +246,26 @@ class NNModuleVariable(VariableTracker):
         ):
             return ConstantVariable(True, **options)
 
+        if constant:
+            def convert(x):
+                if isinstance(x, variables.TensorVariable):
+                    return x.proxy.node.meta['example_value']
+                return x.as_python_constant()
+
+            args = [convert(x) for x in args]
+            kwargs = {k: convert(x) for k,v in kwargs.items()}
+            import pdb
+            pdb.set_trace()
+            res = getattr(module, name)(*args, **kwargs)
+            name = f"{module.__class__.__name__}_{name}"
+            return tx.output.add_submodule(
+                res,
+                name,
+                source=NNModuleSource(GetItemSource(self.source, name)),
+                **options,
+            )            
+
+        
         if not all(
             x.is_python_constant() for x in itertools.chain(args, kwargs.values())
         ):
