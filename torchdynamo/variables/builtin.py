@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from torchdynamo.guards import GuardBuilder
+from torchdynamo.replay_record import DummyModule
 from torchdynamo.variables.dicts import ConstDictVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
 from torchdynamo.variables.tensor import FakeItemVariable
@@ -689,8 +690,12 @@ class BuiltinVariable(VariableTracker):
                 return ConstantVariable(member, **options)
             else:
                 return VariableBuilder(tx, source)(member).add_guards(guards)
-        elif isinstance(obj, PythonModuleVariable):
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)
+
             return VariableBuilder(tx, source)(member).add_guards(guards)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable(

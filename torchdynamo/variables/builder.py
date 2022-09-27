@@ -14,6 +14,7 @@ import torch
 from functorch.experimental.ops import PyOperator
 
 import torchdynamo
+from torchdynamo import replay_record
 
 from .. import config
 from .. import mutation_guard
@@ -355,7 +356,7 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, types.ModuleType):
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             return PythonModuleVariable(
                 value,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
