@@ -16,7 +16,6 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..utils import make_cell
-from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
 
@@ -192,7 +191,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     if args[0].class_type is torch.Tensor:
                         return args[0].call_method(tx, "clone", [], {})
                     elif args[0].class_type is torch.nn.Parameter:
-                        # equivalent to torch.nn.Parameter(args[0].clone(memory_format=torch.preserve_format)), args[0].requires_grad))
+                        # equivalent to
+                        # torch.nn.Parameter(
+                        #     args[0].clone(memory_format=torch.preserve_format)), args[0].requires_grad)
+                        # )
                         return variables.TorchVariable(
                             torch.nn.Parameter
                         ).call_function(
