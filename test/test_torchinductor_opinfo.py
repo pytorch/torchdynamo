@@ -145,7 +145,10 @@ inductor_skips["cuda"] = {
     "log2": {b8, i32, i64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
-    "nan_to_num": {i32, i64},  # FIXME bad decomposition, torch.finfo() requires a floating point input type
+    "nan_to_num": {
+        i32,
+        i64,
+    },  # FIXME bad decomposition, torch.finfo() requires a floating point input type
     "nn.functional.binary_cross_entropy": {f64},
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.cross_entropy": {f64},

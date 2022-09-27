@@ -2918,7 +2918,7 @@ def div(a, b):
 
 @register_lowering([aten.mul], broadcast=True)
 def mul(a, b):
-    both_bool = is_boolean_dtype(a.get_dtype()) and is_boolean_dtype(b.get_dtype())
+    both_bool = is_boolean_type(a) and is_boolean_type(b)
     if both_bool:
         return logical_and(a, b)
     else:
