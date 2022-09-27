@@ -205,7 +205,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked.argmax": {f16, f32, f64, i32, i64},
     "masked.argmin": {f16, f32, f64, i32, i64},
     "masked.cumprod": {f32, f64},
-    "masked.logsumexp": {f16, f32, i32, i64},
+    "masked.logsumexp": {f16, f32, f64, i32, i64},
     "masked.mean": {b8, f16, f32, f64, i32, i64},
     "masked.norm": {f16, f32, f64},
     "masked.normalize": {f16, f32, f64},
