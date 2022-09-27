@@ -277,7 +277,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     """Main entrypoint to a compile given FX graph"""
 
     if not is_aot_autograd_safe_to_run(model_, example_inputs_):
-        log.debug("Aot Autograd is not safe to run, so falling back to eager")
+        log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
 
     functorch.compile.config.use_functionalize = True

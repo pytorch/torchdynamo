@@ -39,18 +39,27 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     """
     import functorch.compile
 
-    safe = True
-    # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+    # 1) Return if no inputs
+    gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
+    if len(gm_inputs) == 0:
+        log.warning("Unable to use Aot Autograd because module has no inputs")
+        return False
+
+    # 2) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
     for submod in gm.modules():
         if submod.__class__.__name__ == "LSTM":
-            safe = False
+            log.warning("Unable to use Aot Autograd because of presence of LSTM")
+            return False
 
-    # 2) set_grad_enabled
-    has_set_grad_enabled = False
+    # 3) set_grad_enabled
     for node in gm.graph.nodes:
         if node.target == torch._C._set_grad_enabled:
-            has_set_grad_enabled = True
+            log.warning(
+                "Unable to use Aot Autograd because of presence of set_grad_enabled call"
+            )
+            return False
 
+    # 4) Mutation in the graph
     if functorch.compile.config.use_functionalize:
         # There are two problematic classes we still exclude for now with
         # functionalization:
@@ -64,11 +73,11 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     else:
         mutated = has_mutation(gm, example_inputs)
 
-    gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
+    if mutated:
+        log.warning("Unable to use Aot Autograd because of presence of mutation")
+        return False
 
-    if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
-        safe = False
-    return safe
+    return True
 
 
 class AotAutogradStrategy(object):
