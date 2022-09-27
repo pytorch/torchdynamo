@@ -38,9 +38,12 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
     """
 
-    def raise_and_false():
+    def raise_or_warn(reason):
+        msg = f"Unable to use Aot Autograd because of presence of {reason}"
         if config.raise_on_unsafe_aot_autograd:
-            raise NotImplementedError("Aot Autograd is unsafe")
+            raise NotImplementedError(msg)
+        else:
+            log.warning(msg)
         return False
 
     import functorch.compile
@@ -48,16 +51,12 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
     for submod in gm.modules():
         if submod.__class__.__name__ == "LSTM":
-            log.warning("Unable to use Aot Autograd because of presence of LSTM")
-            return raise_and_false()
+            return raise_or_warn("LSTM")
 
     # 2) set_grad_enabled
     for node in gm.graph.nodes:
         if node.target == torch._C._set_grad_enabled:
-            log.warning(
-                "Unable to use Aot Autograd because of presence of set_grad_enabled call"
-            )
-            return raise_and_false()
+            return raise_or_warn("set_grad_enabled")
 
     # 3) Mutation in the graph
     if functorch.compile.config.use_functionalize:
@@ -74,8 +73,7 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
         mutated = has_mutation(gm, example_inputs)
 
     if mutated:
-        log.warning("Unable to use Aot Autograd because of presence of mutation")
-        return raise_and_false()
+        return raise_or_warn("mutation")
 
     return True
 
