@@ -16,6 +16,7 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..utils import make_cell
+from ..utils import proxy_args_kwargs
 from .base import VariableTracker
 from .base import typestr
 
@@ -82,7 +83,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         super(UserFunctionVariable, self).__init__(**kwargs)
         assert isinstance(
             fn, types.FunctionType
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        ) or fn in tensor_dunder_fns, f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torchdynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         # unpack torch.jit.script_if_tracing
@@ -195,6 +196,37 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
 
+
+tensor_dunder_fns = [
+    torch.Tensor.__rmatmul__,
+]
+
+class TorchDunderFunction(UserFunctionVariable):
+    def __init__(self, fn, **kwargs):
+        assert fn in tensor_dunder_fns
+        super(TorchDunderFunction, self).__init__(fn, **kwargs)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate([self])
+
+        return variables.TensorVariable.create(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.fn,
+                *proxy_args_kwargs(args, kwargs),
+                current_tx=tx,
+            ),
+            **options,
+        )
+
+    def get_name(self):
+        return self.fn.__name__
+
+    def get_filename(self):
+        return self.fn.__file__
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""

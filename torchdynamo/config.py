@@ -24,13 +24,13 @@ except ImportError:
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
-log_level = logging.WARNING
+log_level = logging.DEBUG
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
+verbose = True
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -90,7 +90,6 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
     torch.testing,
-    torch
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
