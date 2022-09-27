@@ -1422,6 +1422,15 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    def test_lgamma(self):
+        def fn(x):
+            return aten.lgamma(x) + 2, aten.cos(x + 1)
+
+        self.common(
+            fn,
+            (torch.randn([16, 16]),),
+        )
+
     def test_cos(self):
         def fn(x):
             return aten.cos(x) + 2, aten.cos(x + 1)
