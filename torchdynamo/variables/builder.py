@@ -367,15 +367,16 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.BuiltinFunctionType)
-            and type(getattr(value, '__self__', None)) is torch.autograd.function.FunctionMeta
-            and getattr(value, '__name__', "") == "apply"
+            and type(getattr(value, "__self__", None))
+            is torch.autograd.function.FunctionMeta
+            and getattr(value, "__name__", "") == "apply"
         ):
             # handle aliased autograd function `apply` calls
             return GetAttrVariable(
                 AutogradFunctionVariable(
                     value.__self__, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
                 ),
-                "apply"
+                "apply",
             )
         elif isinstance(value, (int, float, np.number)):
             return self.wrap_unspecialized_primitive(value)

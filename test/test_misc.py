@@ -30,6 +30,7 @@ mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 def my_custom_function(x):
     return x + 1
 
+
 class MiscTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -2534,10 +2535,10 @@ class MiscTests(torchdynamo.testing.TestCase):
         def f2():
             m2(torch.ones(2, 3))
 
-        f2()  
+        f2()
 
     def test_object_classmethod(self):
-        class C():
+        class C:
             @classmethod
             def fn(cls, x):
                 return x + 1
@@ -2549,7 +2550,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         f()
 
     def test_object_staticmethod(self):
-        class C():
+        class C:
             @staticmethod
             def fn(x):
                 return x + 1
@@ -2570,12 +2571,14 @@ class CustomFunc(torch.autograd.Function):
     def backward(ctx, grad_output):
         return grad_output
 
+
 class Module1(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
     def forward(self, foo):
         return CustomFunc().apply(foo)
+
 
 class Module2(torch.nn.Module):
     def __init__(self):
