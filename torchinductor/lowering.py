@@ -2916,6 +2916,16 @@ def div(a, b):
     )
 
 
+@register_lowering([aten.mul], broadcast=True)
+def mul(a, b):
+    both_bool = is_boolean_dtype(a.get_dtype()) and is_boolean_dtype(b.get_dtype())
+    if both_bool:
+        return logical_and(a, b)
+    else:
+        fn = ops_wrapper(aten.mul.__name__)
+        return make_pointwise(fn)(a, b)
+
+
 # TODO(lezcano) I believe the casting behaviour of prims.div is wrong
 # https://github.com/pytorch/pytorch/issues/84412
 # div prim performs truncation division on integer inputs
@@ -2969,7 +2979,6 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(aten.add, allow_alpha=True)
 exp = register_pointwise(aten.exp)
 floor = register_pointwise(aten.floor)
-mul = register_pointwise(aten.mul)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
@@ -3006,9 +3015,10 @@ register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
-register_lowering(aten.__and__, type_promote=False)(
-    register_pointwise(aten.logical_and, type_promote=False, override_dtype=torch.bool)
+logical_and = register_pointwise(
+    aten.logical_and, type_promote=False, override_dtype=torch.bool
 )
+register_lowering(aten.__and__, type_promote=False)(logical_and)
 register_lowering(aten.__or__, type_promote=False)(
     register_pointwise(aten.logical_or, type_promote=False, override_dtype=torch.bool)
 )
