@@ -81,9 +81,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(self, fn, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
-        assert isinstance(
-            fn, types.FunctionType
-        ) or fn in tensor_dunder_fns, f"expected FunctionType found {typestr(fn)} {fn}"
+        assert (
+            isinstance(fn, types.FunctionType) or fn in tensor_dunder_fns
+        ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torchdynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         # unpack torch.jit.script_if_tracing
@@ -201,6 +201,7 @@ tensor_dunder_fns = [
     torch.Tensor.__rmatmul__,
 ]
 
+
 class TorchDunderFunction(UserFunctionVariable):
     def __init__(self, fn, **kwargs):
         assert fn in tensor_dunder_fns
@@ -227,6 +228,7 @@ class TorchDunderFunction(UserFunctionVariable):
 
     def get_filename(self):
         return self.fn.__file__
+
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""

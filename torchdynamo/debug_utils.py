@@ -317,6 +317,7 @@ def wrap_compiler_debug(compiler, compiler_name: str):
     abstration, where all the params are lifted as graph inputs, making it easy
     to save the graph as a string.
     """
+
     @functools.wraps(compiler)
     def debug_wrapper(gm, example_inputs, **kwargs):
         orig_graph = copy.deepcopy(gm.graph)

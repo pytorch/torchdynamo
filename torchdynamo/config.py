@@ -24,13 +24,13 @@ except ImportError:
 # WARN print warnings (including graph breaks)
 # ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
-log_level = logging.DEBUG
+log_level = logging.WARNING
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = True
+verbose = False
 
 # verify the correctness of optimized backend
 verify_correctness = False

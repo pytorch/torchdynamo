@@ -49,7 +49,9 @@ from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
 from .dicts import DefaultDictVariable
 from .dicts import HFPretrainedConfigVariable
-from .functions import UserFunctionVariable, tensor_dunder_fns, TorchDunderFunction
+from .functions import TorchDunderFunction
+from .functions import UserFunctionVariable
+from .functions import tensor_dunder_fns
 from .lists import ListIteratorVariable
 from .lists import ListVariable
 from .lists import NamedTupleVariable
@@ -91,6 +93,7 @@ class GraphArg:
 
     def erase(self):
         self.example = None
+
 
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
