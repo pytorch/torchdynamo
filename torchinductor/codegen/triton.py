@@ -934,6 +934,8 @@ class TritonKernel(Kernel):
 
         argdefs, _ = self.args.python_argdefs()
 
+        # we used to put tl.constexpr annotations for rnumel and xnumel for static shapes,
+        # but looks like it sometimes lead to triton codegen bugs, so pass xnumel and rnumel as vars
         maybe_const = ""
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
