@@ -570,7 +570,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     "linalg.cholesky": {f32, f64},
-    "_maksed.cumprod": {f32, f64},
+    "_masked.cumprod": {f32, f64},
     "bfloat16": {f32, f64},
     "cholesky": {f32, f64},
     "linalg.eig": {f32, f64},
