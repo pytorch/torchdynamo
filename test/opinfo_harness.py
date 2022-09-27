@@ -1,6 +1,5 @@
 import os
 import subprocess
-import sys
 
 from torch.testing._internal.common_methods_invocations import op_db
 

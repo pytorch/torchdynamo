@@ -16,6 +16,8 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_utils import skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_utils import suppress_warnings
 
+import torchdynamo
+
 from .test_torchinductor import check_model
 from .test_torchinductor import check_model_cuda
 
@@ -108,7 +110,6 @@ inductor_skips["cpu"] = {
     "_masked.std": {b8, f16, f32, f64, i32, i64},  # segfault
     "histc": {b8, f16, f32, f64, i32, i64},  # segfault
     "empty_like": {b8, f16, f32, f64, i32, i64},  # flaky
-    "reciprocal": {b8},  # flaky
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.vander": {f32, f64},  # flaky
@@ -739,8 +740,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "zero_": {b8},
 }
 
-import torchdynamo
-
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
@@ -765,8 +764,10 @@ class TestInductorOpInfo(TestCase):
         assert device_type in ("cuda", "cpu")
 
         # with open("test_output.txt", "a") as f:
-        #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |  {inductor_skips[device_type].get(op_name, set())}", flush=True, file=f)
-        #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |  {inductor_skips[device_type].get(op_name, set())}", flush=True)
+        #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
+        # {inductor_skips[device_type].get(op_name, set())}", flush=True, file=f)
+        #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
+        # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
             test_expect = TestExpect.SKIP
             # with open("test_output.txt", "a") as f:
