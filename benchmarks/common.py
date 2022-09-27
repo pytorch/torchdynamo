@@ -1179,7 +1179,7 @@ class BenchmarkRunner:
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
-                print(e)
+                log.exception(e)
                 return record_status(accuracy_status)
 
             if not same(
