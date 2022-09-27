@@ -50,7 +50,6 @@ from .dicts import DataClassVariable
 from .dicts import DefaultDictVariable
 from .dicts import HFPretrainedConfigVariable
 from .functions import UserFunctionVariable
-from .functions import tensor_dunder_fns
 from .lists import ListIteratorVariable
 from .lists import ListVariable
 from .lists import NamedTupleVariable
@@ -71,6 +70,7 @@ from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
+from .torch import tensor_dunder_fns
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 

@@ -81,8 +81,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(self, fn, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
-        assert (
-            isinstance(fn, types.FunctionType) or fn in tensor_dunder_fns
+        assert isinstance(
+            fn, types.FunctionType
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torchdynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
@@ -195,11 +195,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             unimplemented("copy.copy/copy.deepcopy called on non-tensor")
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
-
-
-tensor_dunder_fns = [
-    torch.Tensor.__rmatmul__,
-]
 
 
 class UserMethodVariable(UserFunctionVariable):
