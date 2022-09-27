@@ -16,7 +16,6 @@ from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GetItemSource
 from ..utils import make_cell
-from ..utils import proxy_args_kwargs
 from .base import VariableTracker
 from .base import typestr
 
