@@ -2536,6 +2536,30 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         f2()  
 
+    def test_object_classmethod(self):
+        class C():
+            @classmethod
+            def fn(cls, x):
+                return x + 1
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f():
+            C().fn(torch.ones(2, 3))
+
+        f()
+
+    def test_object_staticmethod(self):
+        class C():
+            @staticmethod
+            def fn(x):
+                return x + 1
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f():
+            C().fn(torch.ones(2, 3))
+
+        f()
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod

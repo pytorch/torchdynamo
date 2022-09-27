@@ -775,7 +775,6 @@ class InstructionTranslatorBase(object):
 
     def LOAD_ATTR(self, inst):
         obj = self.pop()
-        # import pdb; pdb.set_trace()
         result = BuiltinVariable(getattr).call_function(
             self, [obj, ConstantVariable(inst.argval)], {}
         )

@@ -164,7 +164,6 @@ class VariableBuilder:
         return {source.create_guard(guard) for guard in guards}
 
     def _wrap(self, value):
-        # import pdb; pdb.set_trace()
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
@@ -372,7 +371,6 @@ class VariableBuilder:
             and getattr(value, '__name__', "") == "apply"
         ):
             # handle aliased autograd function `apply` calls
-            # import pdb; pdb.set_trace()
             return GetAttrVariable(
                 AutogradFunctionVariable(
                     value.__self__, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
@@ -405,7 +403,6 @@ class VariableBuilder:
                 ),
             )
         else:
-            # import pdb; pdb.set_trace()
             result = UserDefinedObjectVariable(
                 value,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
