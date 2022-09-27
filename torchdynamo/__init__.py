@@ -2,6 +2,7 @@ from . import allowed_functions
 from . import convert_frame
 from . import eval_frame
 from . import resume_execution
+from .convert_frame import replay
 from .eval_frame import disable
 from .eval_frame import explain
 from .eval_frame import export
@@ -20,6 +21,7 @@ __all__ = [
     "export",
     "explain",
     "run",
+    "replay",
     "disable",
     "reset",
     "list_backends",
