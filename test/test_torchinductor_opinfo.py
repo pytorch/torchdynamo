@@ -106,6 +106,7 @@ inductor_skips["cpu"] = {
     "mvlgamma.mvlgamma_p_3": {f32, f64, i32, i64},  # flaky
     "mvlgamma.mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
     "cumprod": {f32, f64},  # flaky
+    "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.prod": {f32, f64},  # flaky
     "masked.std": {b8, f16, f32, f64, i32, i64},  # segfault
     "histc": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -199,10 +200,18 @@ inductor_expected_failures_single_sample["cpu"] = {
     "__rpow__": {f16, f32, f64, i32, i64},
     "__rsub__": {f16, f32, f64, i32, i64},
     "__rxor__": {b8, i32, i64},
+    "masked.amax": {f16, f32, f64},
+    "masked.amin": {f16, f32, f64},
     "masked.argmax": {f16, f32, f64, i32, i64},
     "masked.argmin": {f16, f32, f64, i32, i64},
-    "masked.norm": {f16},
     "masked.cumprod": {f32, f64},
+    "masked.logsumexp": {f16, f32, i32, i64},
+    "masked.mean": {b8, f16, f32, f64, i32, i64},
+    "masked.norm": {f16, f32, f64},
+    "masked.normalize": {f16, f32, f64},
+    "masked.softmax": {f16, f32, f64},
+    "masked.softmin": {f16, f32, f64},
+    "masked.var": {f16, f32, f64, i32, i64},
     "abs": {i32},
     "addmm": {f32, f64, i32, i64},
     "addr": {f16},
