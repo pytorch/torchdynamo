@@ -2541,7 +2541,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         class C:
             @classmethod
             def fn(cls, x):
-                return x + 1
+                return x + x
 
         @torchdynamo.optimize("eager", nopython=True)
         def f():
@@ -2553,14 +2553,13 @@ class MiscTests(torchdynamo.testing.TestCase):
         class C:
             @staticmethod
             def fn(x):
-                return x + 1
+                return x + x
 
         @torchdynamo.optimize("eager", nopython=True)
         def f():
             return C().fn(torch.ones(2, 3))
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
-
 
 
 class CustomFunc(torch.autograd.Function):
