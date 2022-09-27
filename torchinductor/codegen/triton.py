@@ -953,16 +953,16 @@ class TritonKernel(Kernel):
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                if config.dynamic_shapes and not isinstance(tree.numel, sympy.Integer):
-                    triton_meta["signature"][len(argdefs)] = signature_of(
-                        SizeArg(f"{tree.prefix}numel", tree.numel)
-                    )
-                    argdefs.append(f"{tree.prefix}numel")
-                else:
-                    triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
-                        tree.numel
-                    )
-                    argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+                triton_meta["signature"][len(argdefs)] = signature_of(
+                    SizeArg(f"{tree.prefix}numel", tree.numel)
+                )
+                argdefs.append(f"{tree.prefix}numel")
+                # constexpr version causes issues, see
+                # https://github.com/pytorch/torchdynamo/pull/1362
+                # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
+                #     tree.numel
+                # )
+                # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
