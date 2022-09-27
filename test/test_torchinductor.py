@@ -3427,6 +3427,7 @@ class CommonTemplate:
         out = compiled(torch.randn(12, 4, device=self.device))
         self.assertEqual(out[0].shape, (24, 2))
 
+    @requires_cuda()
     @patch.object(config.triton, "cudagraphs", True)
     def test_unspec_variable(self):
         def fn(x, y):
