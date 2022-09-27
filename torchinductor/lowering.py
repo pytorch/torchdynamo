@@ -432,7 +432,7 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift])
+@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift, prims.view_of])
 def nop(x):
     return x  # AOT autograd handles this for us
 
@@ -2733,7 +2733,10 @@ def make_reduction(reduction_type: str, override_dtype=None):
                 reduction_type, reduction_type
             ),
         )
-        result.realize()
+        if isinstance(
+            result.data.data, Reduction
+        ):  # Only realize if reduction isn't unrolled
+            result.realize()
         return result
 
     return inner
@@ -2984,6 +2987,7 @@ register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
+register_pointwise(aten.lgamma)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)

@@ -84,6 +84,11 @@ raise_on_assertion_error = False
 # Propagate backend exceptions up to torchdynamo.optimize
 raise_on_backend_error = True
 
+# Record and write an execution record of the current frame to a file
+# if an exception is encountered
+replay_record_enabled = False
+replay_record_dir_name = "./torchdynamo_error_records"
+
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
 skipfiles_inline_module_allowlist = {
