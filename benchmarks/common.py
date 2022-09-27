@@ -80,6 +80,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "mobilenet_v3_large",  # INCORRECT - Variation in Eager runs itself
     "pytorch_CycleGAN_and_pix2pix",  # INCORRECT - Variation in Eager runs itself
     "pytorch_unet",  # INCORRECT - Variation in Eager runs itself
+    "pytorch_struct",
     "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     "Super_SloMo",  # INCORRECT - Variation in Eager runs itself
     "tacotron2",  # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation
@@ -213,6 +214,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "levit_128",
     "mobilevit_s",
     "rexnet_100",
+    "swin_base_patch4_window7_224",
     "twins_pcpvt_base",
     # OOM with batch_size = 2
     "swsl_resnext101_32x16d",
