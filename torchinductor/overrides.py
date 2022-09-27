@@ -1,14 +1,15 @@
+import copy
+import itertools
 import logging
 import random
 import weakref
-import copy
-import itertools
 
 import torch
 import torch.nn as nn
 from torch import _prims
+from torch.fx.experimental.optimization import matches_module_pattern
+from torch.fx.experimental.optimization import replace_node_module
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
-from torch.fx.experimental.optimization import matches_module_pattern, replace_node_module
 from torch.overrides import TorchFunctionMode
 
 log = logging.getLogger(__name__)
@@ -49,9 +50,21 @@ class EltwiseFusionOp:
 
 
 class LinearEltwise(nn.Linear):
-    def __init__(self, linear, eltwise, op_name, op_info, in_features, out_features, bias, device, dtype):
-        super(LinearEltwise, self).__init__(in_features, out_features, bias=bias,
-                                            device=device, dtype=dtype)
+    def __init__(
+        self,
+        linear,
+        eltwise,
+        op_name,
+        op_info,
+        in_features,
+        out_features,
+        bias,
+        device,
+        dtype,
+    ):
+        super(LinearEltwise, self).__init__(
+            in_features, out_features, bias=bias, device=device, dtype=dtype
+        )
         self._update_module_params(linear, eltwise, op_name, op_info)
 
     def _update_module_params(self, linear, eltwise, op_name, op_info):
@@ -70,42 +83,52 @@ class LinearEltwise(nn.Linear):
 
     def forward(self, input):
         y = torch.ops.mkldnn_prepacked.linear_eltwise(
-            input, self.weight, self.bias, self.attr, self.scalars, self.algorithm)
+            input, self.weight, self.bias, self.attr, self.scalars, self.algorithm
+        )
         return y
 
 
 def fuse_linear_eltwise_eval(linear, eltwise, op_name, op_info):
-    return LinearEltwise(linear,
-                         eltwise,
-                         op_name,
-                         op_info,
-                         linear.in_features,
-                         linear.out_features,
-                         linear.bias is not None,
-                         linear.weight.device,
-                         linear.weight.dtype)
+    return LinearEltwise(
+        linear,
+        eltwise,
+        op_name,
+        op_info,
+        linear.in_features,
+        linear.out_features,
+        linear.bias is not None,
+        linear.weight.device,
+        linear.weight.dtype,
+    )
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    is_cpu = all(example_input.device == torch.device('cpu') for example_input in example_inputs)
+    is_cpu = all(
+        example_input.device == torch.device("cpu") for example_input in example_inputs
+    )
     if not is_cpu:
         return gm
     modules = dict(gm.named_modules())
 
-    for (pointwise_name, pointwise_info), (computation_name, fuse_func) in itertools.product(
-        pointwise_op_map.items(), computation_op_map.items()
-    ):
+    for (pointwise_name, pointwise_info), (
+        computation_name,
+        fuse_func,
+    ) in itertools.product(pointwise_op_map.items(), computation_op_map.items()):
         pattern = (computation_name, pointwise_info.post_op)
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
-                if len(node.args[0].users) > 1:  # Output of linear is used by other nodes
+                if (
+                    len(node.args[0].users) > 1
+                ):  # Output of linear is used by other nodes
                     continue
                 linear = modules[node.args[0].target]
                 eltwise = modules[node.target]
                 eval_mode = all(not n.training for n in [linear, eltwise])
                 if not eval_mode:
                     continue
-                fused_linear = fuse_func(linear, eltwise, pointwise_name, pointwise_info)
+                fused_linear = fuse_func(
+                    linear, eltwise, pointwise_name, pointwise_info
+                )
                 replace_node_module(node.args[0], modules, fused_linear)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
@@ -240,9 +263,7 @@ def rand_like(x, **kwargs):
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
-computation_op_map = {
-    nn.Linear: fuse_linear_eltwise_eval
-}
+computation_op_map = {nn.Linear: fuse_linear_eltwise_eval}
 
 pointwise_op_map = {
     "relu": EltwiseFusionOp(nn.ReLU),

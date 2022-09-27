@@ -2840,6 +2840,7 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
+
 class LinearEltwise(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
 
@@ -2857,7 +2858,7 @@ class LinearEltwise(ExternKernelAlloc):
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
-    
+
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
         kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
@@ -2879,10 +2880,12 @@ class LinearEltwise(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,)
-    
+            kernel=kernel,
+        )
+
     def apply_constraint(self):
         pass
+
 
 class Convolution(ExternKernelAlloc):
     kernel = "aten.convolution"

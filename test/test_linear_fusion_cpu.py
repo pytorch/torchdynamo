@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
+from torch.testing._internal.common_quantization import NodeSpec as ns
+from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.common_quantization import NodeSpec as ns, QuantizationTestCase
 
 import torchdynamo
 from torchdynamo.testing import same
-from torchinductor.overrides import fuse_fx, LinearEltwise
+from torchinductor.overrides import LinearEltwise
+from torchinductor.overrides import fuse_fx
 
 torchdynamo.config.raise_on_backend_error = False
 
@@ -23,6 +25,7 @@ def _eltwise_list():
     ]
     return eltwise_list
 
+
 # Inherit the QuantizationTestCase class
 # to leverage the checkGraphModuleNodes function
 class TestFuseFx(QuantizationTestCase):
@@ -30,7 +33,9 @@ class TestFuseFx(QuantizationTestCase):
         class M(nn.Module):
             def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
                 super(M, self).__init__()
-                self.linear = torch.nn.Linear(in_channels, out_channels, bias=bias, **kwargs)
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
                 self.eltwise = eltwise_fn
 
             def forward(self, x):
@@ -47,12 +52,8 @@ class TestFuseFx(QuantizationTestCase):
         v = torch.randn(input_shape)
 
         fused_gm = fuse_fx(torch.fx.symbolic_trace(mod), [v])
-        expected_nodes = [
-            ns.call_module(LinearEltwise)
-        ]
-        self.checkGraphModuleNodes(
-            fused_gm,
-            expected_node_list=expected_nodes)
+        expected_nodes = [ns.call_module(LinearEltwise)]
+        self.checkGraphModuleNodes(fused_gm, expected_node_list=expected_nodes)
 
         result = fn(v)
         assert same(result, mod(v))
@@ -64,5 +65,5 @@ class TestFuseFx(QuantizationTestCase):
                     self._test_linear_eltwise(eltwise_fn, bias, input_shape)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

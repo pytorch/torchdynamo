@@ -758,6 +758,7 @@ def bmm(a: TensorBox, b: TensorBox):
 def linear_eltwise(x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm):
     return TensorBox.create(ir.LinearEltwise.create(x, w, b, attr, scalars, algorithm))
 
+
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 
