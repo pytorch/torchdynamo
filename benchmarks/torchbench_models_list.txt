@@ -12,7 +12,7 @@ hf_T5,4
 mnasnet1_0,256
 mobilenet_v2,128
 mobilenet_v3_large,256
-nvidia_deeprecommender,512
+nvidia_deeprecommender,256
 pytorch_unet,8
 resnet18,512
 resnet50,128
