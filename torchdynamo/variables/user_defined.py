@@ -231,6 +231,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        # import pdb; pdb.set_trace()
         from .builder import VariableBuilder
 
         if (

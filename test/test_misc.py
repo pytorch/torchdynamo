@@ -30,7 +30,6 @@ mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 def my_custom_function(x):
     return x + 1
 
-
 class MiscTests(torchdynamo.testing.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -2519,6 +2518,48 @@ class MiscTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize("eager")(fn)
         res = opt_fn()
         self.assertTrue(same(ref, res))
+
+    def test_autograd_function_equivalence(self):
+        m1 = Module1()
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f1():
+            m1(torch.ones(2, 3))
+
+        f1()
+
+        m2 = Module2()
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f2():
+            m2(torch.ones(2, 3))
+
+        f2()  
+
+
+class CustomFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+class Module1(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc().apply(foo)
+
+class Module2(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
 
 
 class TestTracer(JitTestCase):

@@ -623,6 +623,7 @@ class BuiltinVariable(VariableTracker):
     def call_getattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, default=None
     ):
+        # import pdb; pdb.set_trace()
         from . import ConstantVariable
         from . import GetAttrVariable
         from . import PythonModuleVariable

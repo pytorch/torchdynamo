@@ -450,6 +450,10 @@ class AutogradFunctionVariable(VariableTracker):
             self.fn_cls.forward, **options
         ).call_function(tx, args, kwargs)
 
+    def call_function(self, tx, args, kwargs):
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return AutogradFunctionVariable(self.fn_cls, **options)
+
 
 class BlackHoleVariable(VariableTracker):
     """A autograd.function context that just ignores everything (for forward extraction)"""
@@ -510,6 +514,7 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        # import pdb; pdb.set_trace()
 
         # This variable is True when it corresponds to user code such as
         #
@@ -564,6 +569,7 @@ class GetAttrVariable(VariableTracker):
                         f"GetAttrVariable.call_function original __torch_function__ {args}"
                     )
 
+        # import pdb; pdb.set_trace()
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
         return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)

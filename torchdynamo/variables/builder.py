@@ -56,6 +56,7 @@ from .lists import RangeVariable
 from .lists import SliceVariable
 from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
+from .misc import GetAttrVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
 from .misc import NumpyVariable
@@ -163,6 +164,7 @@ class VariableBuilder:
         return {source.create_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        # import pdb; pdb.set_trace()
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
@@ -364,6 +366,19 @@ class VariableBuilder:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
+        elif (
+            isinstance(value, types.BuiltinFunctionType)
+            and type(getattr(value, '__self__', None)) is torch.autograd.function.FunctionMeta
+            and getattr(value, '__name__', "") == "apply"
+        ):
+            # handle aliased autograd function `apply` calls
+            # import pdb; pdb.set_trace()
+            return GetAttrVariable(
+                AutogradFunctionVariable(
+                    value.__self__, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                ),
+                "apply"
+            )
         elif isinstance(value, (int, float, np.number)):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
@@ -390,6 +405,7 @@ class VariableBuilder:
                 ),
             )
         else:
+            # import pdb; pdb.set_trace()
             result = UserDefinedObjectVariable(
                 value,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
