@@ -214,6 +214,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "levit_128",
     "mobilevit_s",
     "rexnet_100",
+    "swin_base_patch4_window7_224",
     "twins_pcpvt_base",
     # OOM with batch_size = 2
     "swsl_resnext101_32x16d",
