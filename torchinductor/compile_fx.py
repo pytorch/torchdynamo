@@ -191,7 +191,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
     assert isinstance(inputs, (list, tuple))
     inputs = [
-        x.to("cuda") if x.dim() == 0 else x for x in inputs
+        x.to("cuda") if x.device.type == "cpu" and x.dim() == 0 else x for x in inputs
     ]
 
     static_inputs = []
