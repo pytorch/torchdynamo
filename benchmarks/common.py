@@ -1174,10 +1174,7 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
                 accuracy_status = "fail_to_run"
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
-                print(e)
+                log.exception("TorchDynamo optimized model failed to run because of following error: %s", e)
                 return record_status(accuracy_status)
 
             if not same(
