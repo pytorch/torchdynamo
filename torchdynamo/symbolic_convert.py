@@ -63,7 +63,6 @@ from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import BaseUserFunctionVariable
 from .variables.functions import NestedUserFunctionVariable
-from .variables.functions import TorchDunderFunction
 from .variables.functions import UserFunctionVariable
 from .variables.lists import BaseListVariable
 from .variables.lists import ListIteratorVariable
@@ -1508,7 +1507,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(parent, func, args, kwargs):
         assert isinstance(
             func,
-            (TorchDunderFunction, UserFunctionVariable, NestedUserFunctionVariable),
+            (UserFunctionVariable, NestedUserFunctionVariable),
         )
         if func.has_self():
             unimplemented("inline with __self__")
@@ -1516,11 +1515,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
 
-        if (
-            not isinstance(func, TorchDunderFunction)
-            and skipfiles.check(func.get_filename())
-            and not skipfiles.is_torch_inline_allowed(func.get_filename())
-        ):
+        if skipfiles.check(
+            func.get_filename()
+        ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
                 f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
             )

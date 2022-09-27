@@ -49,7 +49,6 @@ from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
 from .dicts import DefaultDictVariable
 from .dicts import HFPretrainedConfigVariable
-from .functions import TorchDunderFunction
 from .functions import UserFunctionVariable
 from .functions import tensor_dunder_fns
 from .lists import ListIteratorVariable
@@ -355,7 +354,7 @@ class VariableBuilder:
             )
         elif istype(value, types.FunctionType):
             if value in tensor_dunder_fns:
-                return TorchDunderFunction(
+                return TorchVariable(
                     value,
                     guards=make_guards(GuardBuilder.FUNCTION_MATCH),
                 )

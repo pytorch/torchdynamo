@@ -202,34 +202,6 @@ tensor_dunder_fns = [
 ]
 
 
-class TorchDunderFunction(UserFunctionVariable):
-    def __init__(self, fn, **kwargs):
-        assert fn in tensor_dunder_fns
-        super(TorchDunderFunction, self).__init__(fn, **kwargs)
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        options = VariableTracker.propagate([self])
-
-        return variables.TensorVariable.create(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.fn,
-                *proxy_args_kwargs(args, kwargs),
-                current_tx=tx,
-            ),
-            **options,
-        )
-
-    def get_name(self):
-        return self.fn.__name__
-
-    def get_filename(self):
-        return self.fn.__file__
-
-
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
