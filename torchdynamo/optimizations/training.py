@@ -38,8 +38,6 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
     """
 
-    print(gm)
-
     def raise_and_false():
         if config.raise_on_unsafe_aot_autograd:
             raise NotImplementedError("Aot Autograd is unsafe")

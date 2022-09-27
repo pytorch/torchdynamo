@@ -3,6 +3,7 @@ import os
 from collections import defaultdict
 from enum import Enum
 from functools import partial
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_device_type import OpDTypes
@@ -478,6 +479,7 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @_ops(op_db[START:END])
+    @patch("torchdynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
         torchdynamo.reset()
         with torch.no_grad():
