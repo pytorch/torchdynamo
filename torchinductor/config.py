@@ -62,7 +62,7 @@ class cpp:
         "g++-12",
         "g++-11",
         "g++-10",
-        "clang++",
+        # "clang++",
         "g++",
     )
 
@@ -104,7 +104,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = True
 
     # Save python logger call >=logging.DEBUG
     debug_log = True

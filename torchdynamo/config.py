@@ -90,6 +90,7 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
     torch.testing,
+    torch
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {

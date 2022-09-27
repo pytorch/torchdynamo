@@ -72,6 +72,8 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
 ):
+    import pdb
+    pdb.set_trace()
     log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
     V.debug.fx_graph(gm, example_inputs)
 
@@ -239,6 +241,9 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         model_ = overrides.replace_fx(model_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
+
+    import pdb
+    pdb.set_trace()
 
     @dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):

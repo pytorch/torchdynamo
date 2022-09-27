@@ -315,6 +315,8 @@ def wrap_compiler_debug(compiler, compiler_name: str):
     abstration, where all the params are lifted as graph inputs, making it easy
     to save the graph as a string.
     """
+    import pdb
+    pdb.set_trace()
 
     @functools.wraps(compiler)
     def debug_wrapper(gm, example_inputs, **kwargs):

@@ -570,6 +570,16 @@ inductor_expected_failures_single_sample["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     "linalg.cholesky": {f32, f64},
+    "_maksed.cumprod": {f32, f64}, 
+    "bfloat16": {f32, f64}, 
+    "cholesky": {f32, f64}, 
+    "linalg.eig": {f32, f64}, 
+    "linalg.eigh": {f32, f64}, 
+    "linalg.eigvals": {f32, f64}, 
+    "linalg.eigvalsh": {f32, f64}, 
+    "linalg.lstsq": {f32, f64}, 
+    "linalg.lstsq.grad": {f32, f64}, 
+    "linalg.pinv.hermitian": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
     "linalg.cross": {f16},
     "linalg.ldl_factor": {f32, f64},
@@ -748,7 +758,7 @@ class TestInductorOpInfo(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @skipCUDAMemoryLeakCheckIf(
-        True
+        False
     )  # inductor kernels failing this test intermittently
     @_ops(op_db[START:END])
     def test_comprehensive(self, device, dtype, op):
