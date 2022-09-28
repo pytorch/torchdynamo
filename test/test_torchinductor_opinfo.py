@@ -106,8 +106,9 @@ inductor_skips["cpu"] = {
     "mvlgamma.mvlgamma_p_3": {f32, f64, i32, i64},  # flaky
     "mvlgamma.mvlgamma_p_5": {f32, f64, i32, i64},  # flaky
     "cumprod": {f32, f64},  # flaky
-    "_masked.prod": {f32, f64},  # flaky
-    "_masked.std": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.prod": {f32, f64},  # flaky
+    "masked.std": {b8, f16, f32, f64, i32, i64},  # segfault
     "histc": {b8, f16, f32, f64, i32, i64},  # segfault
     "empty_like": {b8, f16, f32, f64, i32, i64},  # flaky
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -128,7 +129,7 @@ inductor_skips["cuda"] = {
     "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
     "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "cumprod": {f16, f32, f64},
-    "_masked.prod": {f16, f32, f64},
+    "masked.prod": {f16, f32, f64},
     "empty_like": {f16, f32, f64, i32, i64},
     "reciprocal": {b8},
     "linalg.vander": {f32, f64},
@@ -136,7 +137,7 @@ inductor_skips["cuda"] = {
     "nn.functional.conv_transpose1d": {f16},
     "nn.functional.conv_transpose2d": {f16},
     # Call parameter type does not match function signature!
-    "_masked.logsumexp": {f64},
+    "masked.logsumexp": {f64},
     "cos": {b8, f64, i32, i64},
     "erf": {f64, i32, i64},
     "exp": {b8, f64, i32, i64},
@@ -167,8 +168,8 @@ inductor_skips["cuda"] = {
     "tanh": {f64},
     "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
     "roll": {b8, f16, f32, f64, i32, i64},  # segfault
-    "_masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "_masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
@@ -199,10 +200,18 @@ inductor_expected_failures_single_sample["cpu"] = {
     "__rpow__": {f16, f32, f64, i32, i64},
     "__rsub__": {f16, f32, f64, i32, i64},
     "__rxor__": {b8, i32, i64},
-    "_masked.argmax": {f16, f32, f64, i32, i64},
-    "_masked.argmin": {f16, f32, f64, i32, i64},
-    "_masked.norm": {f16},
-    "_masked.cumprod": {f32, f64},
+    "masked.amax": {f16, f32, f64},
+    "masked.amin": {f16, f32, f64},
+    "masked.argmax": {f16, f32, f64, i32, i64},
+    "masked.argmin": {f16, f32, f64, i32, i64},
+    "masked.cumprod": {f32, f64},
+    "masked.logsumexp": {f16, f32, f64, i32, i64},
+    "masked.mean": {b8, f16, f32, f64, i32, i64},
+    "masked.norm": {f16, f32, f64},
+    "masked.normalize": {f16, f32, f64},
+    "masked.softmax": {f16, f32, f64},
+    "masked.softmin": {f16, f32, f64},
+    "masked.var": {f16, f32, f64, i32, i64},
     "abs": {i32},
     "addmm": {f32, f64, i32, i64},
     "addr": {f16},
@@ -478,19 +487,19 @@ inductor_expected_failures_single_sample["cuda"] = {
     "__rpow__": {f16, f32, f64, i32, i64},
     "__rsub__": {f16, f32, f64, i32, i64},
     "__rxor__": {b8, i32, i64},
-    "_masked.amax": {f16, f32, f64},
-    "_masked.amin": {f16, f32, f64},
-    "_masked.argmax": {f16, f32, f64, i32, i64},
-    "_masked.argmin": {f16, f32, f64, i32, i64},
-    "_masked.cumprod": {f16},
-    "_masked.logsumexp": {f16, f32, i32, i64},
-    "_masked.mean": {b8, f16, f32, f64, i32, i64},
-    "_masked.norm": {f16, f32, f64},
-    "_masked.normalize": {f16, f32, f64},
-    "_masked.softmax": {f16, f32, f64},
-    "_masked.softmin": {f16, f32, f64},
-    "_masked.std": {f16, f32, f64, i32, i64},
-    "_masked.var": {f16, f32, f64, i32, i64},
+    "masked.amax": {f16, f32, f64},
+    "masked.amin": {f16, f32, f64},
+    "masked.argmax": {f16, f32, f64, i32, i64},
+    "masked.argmin": {f16, f32, f64, i32, i64},
+    "masked.cumprod": {f16},
+    "masked.logsumexp": {f16, f32, i32, i64},
+    "masked.mean": {b8, f16, f32, f64, i32, i64},
+    "masked.norm": {f16, f32, f64},
+    "masked.normalize": {f16, f32, f64},
+    "masked.softmax": {f16, f32, f64},
+    "masked.softmin": {f16, f32, f64},
+    "masked.std": {f16, f32, f64, i32, i64},
+    "masked.var": {f16, f32, f64, i32, i64},
     "add": {b8, f16, f32, f64, i32, i64},
     "addbmm": {f16},
     "addcmul": {f16, f32, f64, i32, i64},
@@ -570,6 +579,16 @@ inductor_expected_failures_single_sample["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     "linalg.cholesky": {f32, f64},
+    "_maksed.cumprod": {f32, f64},
+    "bfloat16": {f32, f64},
+    "cholesky": {f32, f64},
+    "linalg.eig": {f32, f64},
+    "linalg.eigh": {f32, f64},
+    "linalg.eigvals": {f32, f64},
+    "linalg.eigvalsh": {f32, f64},
+    "linalg.lstsq": {f32, f64},
+    "linalg.lstsq.grad": {f32, f64},
+    "linalg.pinv.hermitian": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
     "lgamma": {b8, i32, i64},
     "linalg.cross": {f16},

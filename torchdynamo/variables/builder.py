@@ -14,6 +14,7 @@ import torch
 from functorch.experimental.ops import PyOperator
 
 import torchdynamo
+from torchdynamo import replay_record
 
 from .. import config
 from .. import mutation_guard
@@ -69,6 +70,7 @@ from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
+from .torch import tensor_dunder_fns
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -255,6 +257,12 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
+            elif issubclass(
+                value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
+            ):
+                return UnspecializedNNModuleVariable(
+                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                )
             else:
                 return self.tx.output.add_submodule(
                     value,
@@ -351,11 +359,16 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif istype(value, types.FunctionType):
+            if value in tensor_dunder_fns:
+                return TorchVariable(
+                    value,
+                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                )
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, types.ModuleType):
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             return PythonModuleVariable(
                 value,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),

@@ -31,6 +31,10 @@ from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 
+tensor_dunder_fns = [
+    torch.Tensor.__rmatmul__,
+]
+
 
 class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""

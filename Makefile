@@ -9,9 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220921
-# TODO: merge with PYTORCH_VERSION after the nightly issue in core is fixed
-PYTORCH_VERSION_CPU ?= dev20220916
+PYTORCH_VERSION ?= dev20220927
 TRITON_VERSION ?= 998fd5f9afe166247f441999c605dfe624ca9331
 
 
@@ -53,7 +51,7 @@ setup:
 
 setup_nightly:
 	$(PIP) install ninja
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION_CPU) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	$(PIP) install -r requirements.txt
 
 setup_nightly_gpu:
