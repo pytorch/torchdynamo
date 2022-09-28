@@ -171,6 +171,8 @@ inductor_skips["cuda"] = {
     "roll": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
