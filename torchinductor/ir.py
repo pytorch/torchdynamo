@@ -1518,6 +1518,12 @@ class Layout(IRNode):
                 return False
         return True
 
+    def is_channels_last_stride_ordered(self):
+        # create channels_last order(NCHW, NCDHW, the C is the first order).
+        order = [0] + list(reversed(range(1, len(self.stride) - 1)))
+        order = [len(order)] + order
+        return self.is_stride_ordered(order)
+
     def as_fixed(self):
         return FixedLayout(
             self.device,
@@ -3103,7 +3109,13 @@ class Convolution(ExternKernelAlloc):
                 x.get_dtype(),
             )
         else:
-            output_layout_str = "torch.contiguous_format"
+            # if x or weight have one channels_last format, it will call channels_last path,
+            # which align with aten.convolutuion path(only support 2d case).
+            if len(x.get_size()) == 4 and (x.get_layout().is_channels_last_stride_ordered() or \
+                weight.get_layout().is_channels_last_stride_ordered()):
+                output_layout_str = "torch.channels_last"
+            else:
+                output_layout_str = "torch.contiguous_format"
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))

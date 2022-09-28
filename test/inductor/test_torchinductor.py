@@ -1376,6 +1376,30 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_conv2d_channels_last(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(3, 3, 1, 1),
+            ToTuple(),
+        )
+        m = m.to(memory_format=torch.channels_last)
+        x = torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last)
+        self.common(
+            m,
+            (torch.randn([2, 3, 16, 16]),),
+        )
+
+    def test_conv3d_channels_last(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv3d(3, 3, 1, 1),
+            ToTuple(),
+        )
+        m = m.to(memory_format=torch.channels_last_3d)
+        x = torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d)
+        self.common(
+            m,
+            (x,),
+        )
+
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
