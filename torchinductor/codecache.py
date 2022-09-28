@@ -41,9 +41,7 @@ def code_hash(code):
 
 def write(source_code, ext, extra=""):
     basename = code_hash(source_code + extra)
-    if not os.path.exists(os.path.join(cache_dir(), "locks")):
-        os.makedirs(os.path.join(cache_dir(), "locks"), exist_ok=True)
-    lock = FileLock(os.path.join(cache_dir(), "locks", basename + ".lock"))
+    lock = FileLock(os.path.join(cache_dir(), basename + ".lock"))
     with lock:
         subdir = os.path.join(cache_dir(), basename[1:3])
         if not os.path.exists(subdir):
@@ -68,9 +66,7 @@ def cpp_compiler():
 
 @functools.lru_cache(1)
 def cpp_compiler_search(search):
-    if not os.path.exists(os.path.join(cache_dir(), "locks")):
-        os.makedirs(os.path.join(cache_dir(), "locks"), exist_ok=True)
-    lock = FileLock(os.path.join(cache_dir(), "locks", "g++.lock"))
+    lock = FileLock(os.path.join(cache_dir(), "g++.lock"))
     with lock:
         for cxx in search:
             try:
@@ -148,7 +144,7 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
-        lock = FileLock(os.path.join(cache_dir(), "locks", key + ".lock"))
+        lock = FileLock(os.path.join(cache_dir(), key + ".lock"))
         with lock:
             if key not in cls.cache:
                 output_path = input_path[:-3] + "so"
