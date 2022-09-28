@@ -86,7 +86,7 @@ class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(patch.object(config, "debug", False))
+        cls._stack.enter_context(patch.object(config, "debug", True))
         cls._stack.enter_context(patch.object(config.cpp, "min_chunk_size", 1))
 
     @classmethod
@@ -138,7 +138,6 @@ def check_model(
     model,
     example_inputs,
     kwargs={},
-    tol=1e-4,
     *,
     atol=None,
     rtol=None,
@@ -253,7 +252,6 @@ def check_model_cuda(
             model,
             example_inputs,
             kwargs,
-            2e-3,
             atol=atol,
             rtol=rtol,
             exact_dtype=exact_dtype,
@@ -3277,7 +3275,7 @@ class CommonTemplate:
             (torch.Size([1, 512, 1]), torch.float32),
         ]
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
-        self.common(forward, inps, atol=1e-05, rtol=6e-06)
+        self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):

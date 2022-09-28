@@ -40,7 +40,7 @@ _ops = partial(
 TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
-FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "0") == "1"
+FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
 ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
@@ -159,6 +159,7 @@ inductor_skips["cuda"] = {
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f64},
+    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "rsqrt": {b8, i32, i64},
     "sigmoid": {b8, f64, i32, i64},
     "sin": {b8, f64, i32, i64},
@@ -665,6 +666,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.one_hot": {i64},
     "nn.functional.pad.constant": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pairwise_distance": {f16, f32, f64, i32, i64},
+    "nn.functional.pixel_shuffle": {f16, f32, f64, i32, i64},
+    "nn.functional.pixel_unshuffle": {f16, f32, f64, i32, i64},
     "nn.functional.poisson_nll_loss": {f16, f32},
     "nn.functional.prelu": {f16},
     "nn.functional.relu": {f16, f32, f64},
