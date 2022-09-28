@@ -1454,6 +1454,8 @@ def full(size, fill_value, **kwargs):
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
     assert isinstance(dim, int)
+    if dim < 0:
+        dim = len(x.get_size()) + dim
     assert "int" in str(index.get_dtype())
     assert 0 <= dim < len(x.get_size())
 

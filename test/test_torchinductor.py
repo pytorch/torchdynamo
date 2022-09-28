@@ -1110,7 +1110,10 @@ class CommonTemplate:
 
     def test_gather(self):
         def fn(a, b):
-            return (torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),)
+            return (
+                torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),
+                torch.gather(a.expand([4, 5, 10, 6]), -1, b + 1)
+            )
 
         self.common(
             fn,
