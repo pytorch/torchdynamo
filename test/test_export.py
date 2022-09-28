@@ -928,3 +928,181 @@ class ExportTests(torchdynamo.testing.TestCase):
         make_fx_result = opt_func(inp)
 
         self.assertTrue(torchdynamo.utils.same(make_fx_result, export_result))
+
+    def test_export_with_constant_method_on_module(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torchdynamo.eval_frame.assume_constant_result
+            def helper_fn(self, x):
+                return torch.nonzero(x)
+
+            def forward(self, x):
+                res = {}
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = self.helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    def test_export_with_constant_method_on_module_invoke_twice(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torchdynamo.eval_frame.assume_constant_result
+            def helper_fn(self, x):
+                return torch.nonzero(x)
+
+            def forward(self, x):
+                res = {}
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = self.helper_fn(x) + self.helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    def test_export_with_constant_free_function(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torchdynamo.eval_frame.assume_constant_result
+            def helper_fn(self, x):
+                return torch.nonzero(x)
+
+            def forward(self, x):
+                res = {}
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = helper_fn(x) + self.helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    def test_export_with_constant_free_function_and_class_method(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                res = {}
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    def test_export_with_constant_free_function_and_class_method_multiarg(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x, z):
+                res = {}
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = helper_fn(x) + helper_fn(z)
+                return y
+
+        module = MyModule()
+        real_result = module(
+            torch.tensor([[1.0, 0], [0, 0]]), torch.tensor([[1.0, 0], [0, 0]])
+        )
+        module = MyModule()
+        graph, _ = torchdynamo.export(
+            module, torch.tensor([[0.0, 0], [0, 0]]), torch.tensor([[1.0, 0], [0, 0]])
+        )
+        result = graph(
+            torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[1.0, 0.0], [0, 0]])
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(
+            torch.tensor([[1, 0], [0.25, 0.25]]), torch.tensor([[1, 0], [0.25, 0.25]])
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    def test_export_with_constant_free_function_and_class_method_multiarg_diff(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, z):
+                y = helper_fn(x) + helper_fn(z)
+                return y
+
+        module = MyModule()
+        real_result = module(
+            torch.tensor([[1.0, 0], [0, 0]]), torch.tensor([[1.0, 0], [0, 0]])
+        )
+        module = MyModule()
+        graph, _ = torchdynamo.export(
+            module, torch.tensor([[0.0, 0], [0, 0]]), torch.tensor([[0.0, 0], [0.5, 0]])
+        )
+        result = graph(
+            torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[0.0, 1.0], [0, 0]])
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(
+            torch.tensor([[1, 0], [0.25, 0.25]]),
+            torch.tensor([[0.33, 0.33], [0.25, 0.25]]),
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))

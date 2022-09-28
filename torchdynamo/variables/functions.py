@@ -15,6 +15,7 @@ from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GetItemSource
+from ..source import NNModuleSource
 from ..utils import make_cell
 from .base import VariableTracker
 from .base import typestr
@@ -188,8 +189,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if self.is_constant:
-            import pdb
-            pdb.set_trace()
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return invoke_and_store_as_constant(
+                tx, self.fn, self.get_name(), self.source, options, args, kwargs
+            )
+
         # handle copy.copy and copy.deepcopy on tensors
         if self.fn is copy.copy or self.fn is copy.deepcopy:
             if len(args) != 1:
@@ -225,12 +229,14 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if isinstance(self.obj, variables.NNModuleVariable) and getattr(
-            self.fn, "__module__", ""
-        ).startswith("torch.nn.") or self.is_constant:
-            return self.obj.call_method(tx, self.fn.__name__, args, kwargs, constant=True).add_options(
-                self
-            )
+        if (
+            isinstance(self.obj, variables.NNModuleVariable)
+            and getattr(self.fn, "__module__", "").startswith("torch.nn.")
+            or self.is_constant
+        ):
+            return self.obj.call_method(
+                tx, self.fn.__name__, args, kwargs, constant=True
+            ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
@@ -271,6 +277,23 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
         return result
+
+
+def invoke_and_store_as_constant(tx, fn, name, source, options, args, kwargs):
+    def convert(x):
+        if isinstance(x, variables.TensorVariable):
+            return x.proxy.node.meta["example_value"]
+        return x.as_python_constant()
+
+    args = [convert(x) for x in args]
+    kwargs = {k: convert(x) for k, v in kwargs.items()}
+    res = fn(*args, **kwargs)
+    return tx.output.add_submodule(
+        res,
+        name,
+        source=NNModuleSource(GetItemSource(source, name)),
+        **options,
+    )
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
