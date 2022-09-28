@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import cdll
 from typing import Any
 from typing import Dict
+from filelock import Timeout, FileLock
 
 import torch
 from torch.utils import cpp_extension
@@ -40,16 +41,20 @@ def code_hash(code):
 
 def write(source_code, ext, extra=""):
     basename = code_hash(source_code + extra)
-    subdir = os.path.join(cache_dir(), basename[1:3])
-    if not os.path.exists(subdir):
-        os.makedirs(subdir, exist_ok=True)
-    path = os.path.join(subdir, f"{basename}.{ext}")
-    if not os.path.exists(path):
-        # use a temp file for thread safety
-        fd, tmp_path = tempfile.mkstemp(dir=subdir)
-        with os.fdopen(fd, "w") as f:
-            f.write(source_code)
-        os.rename(tmp_path, path)
+    if not os.path.exists(os.path.join(cache_dir(), "locks")):
+        os.makedirs(os.path.join(cache_dir(), "locks"), exist_ok=True)
+    lock = FileLock(os.path.join(cache_dir(), "locks", basename + ".lock"))
+    with lock:
+        subdir = os.path.join(cache_dir(), basename[1:3])
+        if not os.path.exists(subdir):
+            os.makedirs(subdir, exist_ok=True)
+        path = os.path.join(subdir, f"{basename}.{ext}")
+        if not os.path.exists(path):
+            # use a temp file for thread safety
+            fd, tmp_path = tempfile.mkstemp(dir=subdir)
+            with os.fdopen(fd, "w") as f:
+                f.write(source_code)
+            os.rename(tmp_path, path)
     return basename, path
 
 
@@ -63,15 +68,19 @@ def cpp_compiler():
 
 @functools.lru_cache(1)
 def cpp_compiler_search(search):
-    for cxx in search:
-        try:
-            if cxx is None:
-                cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
-            return cxx
-        except (subprocess.SubprocessError, FileNotFoundError):
-            continue
-    raise exc.InvalidCxxCompiler()
+    if not os.path.exists(os.path.join(cache_dir(), "locks")):
+        os.makedirs(os.path.join(cache_dir(), "locks"), exist_ok=True)
+    lock = FileLock(os.path.join(cache_dir(), "locks", "g++.lock"))
+    with lock:
+        for cxx in search:
+            try:
+                if cxx is None:
+                    cxx = install_gcc_via_conda()
+                subprocess.check_output([cxx, "--version"])
+                return cxx
+            except (subprocess.SubprocessError, FileNotFoundError):
+                continue
+        raise exc.InvalidCxxCompiler()
 
 
 def install_gcc_via_conda():
@@ -139,19 +148,21 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
-        if key not in cls.cache:
-            output_path = input_path[:-3] + "so"
-            if not os.path.exists(output_path):
-                cmd = cpp_compile_command(input=input_path, output=output_path).split(
-                    " "
-                )
-                try:
-                    subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError as e:
-                    raise exc.CppCompileError(cmd, e.output)
+        lock = FileLock(os.path.join(cache_dir(), "locks", key + ".lock"))
+        with lock:
+            if key not in cls.cache:
+                output_path = input_path[:-3] + "so"
+                if not os.path.exists(output_path):
+                    cmd = cpp_compile_command(input=input_path, output=output_path).split(
+                        " "
+                    )
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output)
 
-            cls.cache[key] = cdll.LoadLibrary(output_path)
-            cls.cache[key].key = key
+                cls.cache[key] = cdll.LoadLibrary(output_path)
+                cls.cache[key].key = key
 
         return cls.cache[key]
 
