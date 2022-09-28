@@ -194,7 +194,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if self.is_constant:
             options = VariableTracker.propagate(self, args, kwargs.values())
             return invoke_and_store_as_constant(
-                tx, self.fn, self.get_name(), self.source, options, args, kwargs
+                tx, self.fn, self.get_name(), options, args, kwargs
             )
 
         # handle copy.copy and copy.deepcopy on tensors
@@ -282,7 +282,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
 
-def invoke_and_store_as_constant(tx, fn, name, source, options, args, kwargs):
+def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
             return x.proxy.node.meta["example_value"]
@@ -294,7 +294,6 @@ def invoke_and_store_as_constant(tx, fn, name, source, options, args, kwargs):
     return tx.output.add_submodule(
         res,
         name,
-        source=NNModuleSource(GetItemSource(source, name)),
         **options,
     )
 

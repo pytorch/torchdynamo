@@ -30,7 +30,7 @@
   } else {                                                                     \
   }
 
-#ifdef TORCHDYNAMO_DEBUG
+// #ifdef TORCHDYNAMO_DEBUG
 
 #define DEBUG_CHECK(cond) CHECK(cond)
 #define DEBUG_NULL_CHECK(val) NULL_CHECK(val)
@@ -39,14 +39,14 @@
 #define DEBUG_TRACE0(msg)                                                      \
   fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__)
 
-#else
+// #else
 
-#define DEBUG_CHECK(cond)
-#define DEBUG_NULL_CHECK(val)
-#define DEBUG_TRACE(msg, ...)
-#define DEBUG_TRACE0(msg)
+// #define DEBUG_CHECK(cond)
+// #define DEBUG_NULL_CHECK(val)
+// #define DEBUG_TRACE(msg, ...)
+// #define DEBUG_TRACE0(msg)
 
-#endif
+// #endif
 
 // Flag to just run a frame normally
 #define SKIP_CODE ((void *)0x1)

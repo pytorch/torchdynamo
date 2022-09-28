@@ -82,7 +82,7 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-        if "guards" in options:
+        if "guards" in options and options["guards"] is not None:
             tx.output.guards.update(options["guards"])
 
         assert "example_value" not in proxy.node.meta
@@ -264,6 +264,9 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
+        elif proxy.node.op == "get_attr" and isinstance(example_value, numbers.Number):
+            proxy.node.meta["example_value"] = example_value
+            return variables.ConstantVariable(example_value, **options)
         else:
             assert (
                 False

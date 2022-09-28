@@ -24,6 +24,7 @@ from ..exc import Unsupported
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
+from ..source import is_constant_source
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
@@ -456,7 +457,7 @@ class BuiltinVariable(VariableTracker):
             )
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
-            if obj.source:
+            if obj.source and not is_constant_source(obj.source):
                 guards.add(obj.source.create_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),

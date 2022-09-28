@@ -30,6 +30,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import LocalSource
 from .source import Source
+from .source import ConstantSource
 from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
@@ -39,6 +40,8 @@ from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
+from .variables.builder import VariableBuilder
+from .variables.constant import ConstantVariable
 
 log = logging.getLogger(__name__)
 
@@ -195,9 +198,10 @@ class OutputGraph(fx.Tracer):
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options["source"]
+        source: Source = options.get("source", None)
         if isinstance(mod, torch.Tensor):
-            options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
+            if source:
+                options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 return TensorVariable.create(
@@ -207,13 +211,32 @@ class OutputGraph(fx.Tracer):
                     **options,
                 )
 
-        else:
+        elif isinstance(mod, torch.nn.Module):
             assert isinstance(mod, torch.nn.Module)
             options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
 
+        # elif ConstantVariable.is_literal
+        else:
+                    # if isinstance(mod, (list, tuple, )):
+            # import pdb
+            # pdb.set_trace()
+            # options["guards"].add(source.create_guard(GuardBuilder.LIST_LENGTH))
+
+            def wrap_name(module_key):
+                # return TensorVariable.create(
+                #     self,
+                #     self.create_proxy("get_attr", module_key, tuple(), {}),
+                #     example_value=mod,
+                #     **options,
+                # )
+                self.root_globals[module_key] = mod
+                return VariableBuilder(self, ConstantSource(source_name=module_key))(mod)
+                # globals()[module_key] = mod
+                # return out
+            # return VariableBuilder(mod, source)
         for k, v in self.nn_modules.items():
             if v is mod:
                 # it already exists

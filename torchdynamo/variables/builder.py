@@ -23,7 +23,7 @@ from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin_callable
 from ..allowed_functions import is_numpy
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, GuardSource
 from ..side_effects import SideEffects
 from ..source import AttrSource
 from ..source import GetItemSource
@@ -31,7 +31,7 @@ from ..source import GlobalSource
 from ..source import GlobalWeakRefSource
 from ..source import RandomValueSource
 from ..source import Source
-from ..source import TupleIteratorGetItemSource
+from ..source import TupleIteratorGetItemSource, ConstantSource
 from ..utils import getfile
 from ..utils import global_key_name
 from ..utils import is_namedtuple
@@ -162,6 +162,8 @@ class VariableBuilder:
 
     def make_guards(self, *guards):
         source = self.get_source()
+        if isinstance(source, ConstantSource) or source.guard_source() == GuardSource.CONSTANT:
+            return None
         return {source.create_guard(guard) for guard in guards}
 
     def _wrap(self, value):
