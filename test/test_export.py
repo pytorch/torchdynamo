@@ -929,6 +929,7 @@ class ExportTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torchdynamo.utils.same(make_fx_result, export_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -956,6 +957,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_method_on_module_invoke_twice(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -983,6 +985,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function(self):
         @torchdynamo.eval_frame.assume_constant_result
         def helper_fn(x):
@@ -1014,6 +1017,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function_and_class_method(self):
         @torchdynamo.eval_frame.assume_constant_result
         def helper_fn(x):
@@ -1041,6 +1045,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function_and_class_method_multiarg(self):
         @torchdynamo.eval_frame.assume_constant_result
         def helper_fn(x):
@@ -1076,6 +1081,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         )
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function_and_class_method_multiarg_diff(self):
         @torchdynamo.eval_frame.assume_constant_result
         def helper_fn(x):

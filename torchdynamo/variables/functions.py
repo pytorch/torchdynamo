@@ -238,7 +238,7 @@ class UserMethodVariable(UserFunctionVariable):
             or self.is_constant
         ):
             return self.obj.call_method(
-                tx, self.fn.__name__, args, kwargs, constant=True
+                tx, self.fn.__name__, args, kwargs, constant=self.is_constant
             ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
