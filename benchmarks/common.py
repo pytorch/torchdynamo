@@ -184,8 +184,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "tnt_s_patch16_224",
     "volo_d1_224",
     "xcit_large_24_p8_224",
-    # https://github.com/pytorch/torchdynamo/issues/1365
-    "swin_base_patch4_window7_224",
 ]
 
 
