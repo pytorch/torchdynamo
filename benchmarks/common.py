@@ -54,99 +54,58 @@ output_filename = None
 
 CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
-    "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
-    "pyhpc_isoneutral_mixing",  # INCORRECT - Variation in Eager runs itself
-    "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
     "demucs",  # OOM
+    "speech_transformer",
     # Huggingface
-    "AllenaiLongformerBase",  # AssertionError: Could not find common device for aten.div.Tensor_mode
+    "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
-    # TIMM
-    "coat_lite_mini",  # INCORRECT
-    "pit_b_224",  # INCORRECT
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
-    "Background_Matting",  # INCORRECT - Variation in Eager runs itself
-    "demucs",  # OOM
-    "dlrm",  # OOM
-    "fastNLP_Bert",  # INCORRECT, can't be reproduced locally
-    "hf_Albert",  # INCORRECT, can't be reproduced locally
-    "hf_Reformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
-    "LearningToPaint",  # INCORRECT - Variation in Eager runs itself
-    "mobilenet_v2",  # INCORRECT - Variation in Eager runs itself
-    "mobilenet_v3_large",  # INCORRECT - Variation in Eager runs itself
-    "pytorch_CycleGAN_and_pix2pix",  # INCORRECT - Variation in Eager runs itself
-    "pytorch_unet",  # INCORRECT - Variation in Eager runs itself
-    "speech_transformer",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
-    "Super_SloMo",  # INCORRECT - Variation in Eager runs itself
-    "tacotron2",  # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation
-    "timm_efficientnet",  # INCORRECT, can't be reproduced locally
-    "vision_maskrcnn",  # Attempted to enable_torch_dispatch_mode, but there is already an active mode
+    "Background_Matting",  # fp64_OOM
+    "pytorch_struct",
+    "speech_transformer",
+    "vision_maskrcnn",
     # Huggingface
     "AlbertForMaskedLM",  # OOM
     "AlbertForQuestionAnswering",  # OOM
-    "BartForConditionalGeneration",  # OOM
-    "BigBird",  # INCORRECT - Variation in Eager runs itself
-    "DebertaForMaskedLM",  # INCORRECT, can't be reproduced locally
-    "DebertaForQuestionAnswering",  # INCORRECT
+    "AllenaiLongformerBase",
+    "BartForConditionalGeneration",
+    "BigBird",
     "M2M100ForConditionalGeneration",  # OOM
     "MBartForConditionalGeneration",  # OOM
+    "MT5ForConditionalGeneration",  # OOM
     "MegatronBertForCausalLM",  # OOM
     "MegatronBertForQuestionAnswering",  # OOM
-    "MT5ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
-    "YituTechConvBert",  # pandas.errors.ParserError: Error tokenizing data
     # TIMM
-    "cait_m36_384",  # OOM
-    "eca_botnext26ts_256",  # OOM
-    "eca_halonext26ts",  # OOM
-    "jx_nest_base",  # OOM
-    "levit_128",  # RuntimeError: Trying to backward through the graph a second time
-    "dm_nfnet_f0",  # INCORRECT, can't be reproduced locally
-    "rexnet_100",  # INCORRECT, can't be reproduced locally
-    "sebotnet33ts_256",  # INCORRECT, can't be reproduced locally
-    "tf_mixnet_l",  # INCORRECT, can't be reproduced locally
-    "tf_efficientnet_b0",  # INCORRECT, can't be reproduced locally
+    "cait_m36_384",  # fp64_OOM
+    "convit_base",  # fp64_OOM
+    "mobilevit_s",  # Accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
-    "coat_lite_mini",  # INCORRECT
-    "convit_base",  # INCORRECT
-    "gmixer_24_224",  # INCORRECT
-    "mobilevit_s",  # INCORRECT
-    "nfnet_l0",  # INCORRECT
-    "pit_b_224",  # INCORRECT
-    "tinynet_a",  # INCORRECT
-    "twins_pcpvt_base",  # INCORRECT
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
-    "DALLE2_pytorch",
     "detectron2",
-    "dlrm",
-    "DALLE2_pytorch",
-    "fambench_dlrm",
-    "fastNLP_Bert",
     "hf_Reformer",
-    "moco",
-    "pyhpc_",
-    "Super_SloMo",
+    "pyhpc_equation_of_state",  # Accuracy
+    "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
-    "pytorch_unet",
-    "yolov3",
+    "yolov3",  # Accuracy
     # Huggingface
-    "AllenaiLongformerBase",
-    "BartForCausalLM",
-    "BertForQuestionAnswering",
+    "AllenaiLongformerBase",  # OOM
     "BartForConditionalGeneration",  # OOM
     "BigBird",
     # TIMM
-    "tnt_s_patch16_224",
+    "cait_m36_384",  # Accuracy
+    "ghostnet_100",  # Accuracy
+    "swin_base_patch4_window7_224",  # Accuracy
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
@@ -213,6 +172,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "levit_128",
     "mobilevit_s",
     "rexnet_100",
+    "swin_base_patch4_window7_224",
     "twins_pcpvt_base",
     # OOM with batch_size = 2
     "swsl_resnext101_32x16d",
@@ -1177,7 +1137,7 @@ class BenchmarkRunner:
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
                 )
-                print(e)
+                log.exception(e)
                 return record_status(accuracy_status)
 
             if not same(
