@@ -40,7 +40,7 @@ _ops = partial(
 TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
-FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
+FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "0") == "1"
 ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
@@ -160,6 +160,8 @@ inductor_skips["cuda"] = {
     "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f64},
     "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "rsqrt": {b8, i32, i64},
     "sigmoid": {b8, f64, i32, i64},
     "sin": {b8, f64, i32, i64},
@@ -516,6 +518,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "cumulative_trapezoid": {f16, f32, f64, i32, i64},
     "empty": {b8, f16, f32, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
+    "erf": {b8, f16, f32},
     "fft.fft": {f16, f32, f64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
@@ -523,8 +526,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.hfft2": {b8, f16, f32, f64, i32, i64},
     "fft.hfftn": {b8, f16, f32, f64, i32, i64},
     "fft.ifft": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft2": {f16, f32, f64},
-    "fft.ifftn": {f16, f32, f64},
+    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
+    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
     "fft.ihfft": {b8, f16, f32, f64, i32, i64},
     "fft.ihfft2": {b8, f16, f32, f64, i32, i64},
     "fft.ihfftn": {b8, f16, f32, f64, i32, i64},
