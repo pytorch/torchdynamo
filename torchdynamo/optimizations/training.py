@@ -34,8 +34,7 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     Issues
     1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
     2) LSTM - https://github.com/pytorch/functorch/issues/586
-    3) TODO - Add an issue for set_grad_enabled
-    4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
+    3) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
     """
 
     def raise_or_warn(reason):
@@ -53,12 +52,7 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
         if submod.__class__.__name__ == "LSTM":
             return raise_or_warn("LSTM")
 
-    # 2) set_grad_enabled
-    for node in gm.graph.nodes:
-        if node.target == torch._C._set_grad_enabled:
-            return raise_or_warn("set_grad_enabled")
-
-    # 3) Mutation in the graph
+    # 2) Mutation in the graph
     if functorch.compile.config.use_functionalize:
         # There are two problematic classes we still exclude for now with
         # functionalization:
