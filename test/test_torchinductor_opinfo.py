@@ -833,9 +833,9 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
-                    self.check_model_cuda(fn, args, kwargs, check_lowp=False)
+                    self.check_model_cuda(fn, args, kwargs, check_lowp=False, nopython=True)
                 elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False)
+                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
 
             except Exception as e:
 
