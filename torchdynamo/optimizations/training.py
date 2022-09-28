@@ -161,7 +161,6 @@ def mem_efficient_fusion_kwargs(use_decomps):
         "fw_compiler": ts_compile,
         "bw_compiler": ts_compile,
         "partition_fn": min_cut_rematerialization_partition,
-        "hasher_type": "StaticShapeHasher",
     }
 
     if use_decomps:
@@ -283,7 +282,6 @@ class AotPrimsNvfuser(AotAutogradStrategy):
             self.example_inputs,
             fw_compiler=wrap_compiler_debug(self.nvfuser, "nvfuser"),
             partition_fn=self.min_cut_rematerialization_partition,
-            hasher_type="StaticShapeHasher",
             decompositions=self.aten2aten_decompositions,
         )
 
@@ -320,7 +318,6 @@ def create_nvprims_backend(*, executor):
                 self.example_inputs,
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
-                hasher_type="StaticShapeHasher",
             )
 
     return NvPrims
@@ -456,7 +453,6 @@ def raw_aot_autograd_cudagraphs(model, inputs):
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
-        "hasher_type": "StaticShapeHasher",
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
