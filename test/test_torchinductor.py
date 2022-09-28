@@ -2640,7 +2640,7 @@ class CommonTemplate:
         )
 
     @patch.object(config, "fallback_random", True)
-    def test_bernoulli(self):
+    def test_bernoulli1(self):
         def fn(a):
             b = torch.empty_like(a)
             return aten.bernoulli_(b), b
@@ -2650,6 +2650,15 @@ class CommonTemplate:
             [
                 torch.randn([100]),
             ],
+        )
+
+    def test_bernoulli2(self):
+        def fn(a):
+            return aten.bernoulli(a)
+
+        self.common(
+            fn,
+            [torch.tensor([1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0])],
         )
 
     def test_narrow(self):
