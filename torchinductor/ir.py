@@ -3188,6 +3188,11 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    def is_input_buffer(self):
+        if isinstance(self.data, (InputBuffer, ReinterpretView)):
+            return self.data.get_name() in V.graph.graph_inputs
+        return False
+
     def realize(self):
         if isinstance(
             self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
