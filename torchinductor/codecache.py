@@ -15,15 +15,16 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import cdll
 from typing import Any
 from typing import Dict
-from filelock import Timeout, FileLock
 
 import torch
+from filelock import FileLock
 from torch.utils import cpp_extension
 
 from . import config
 from . import exc
 
 log = logging.getLogger(__name__)
+logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
 def cache_dir():
@@ -41,7 +42,7 @@ def code_hash(code):
 
 def write(source_code, ext, extra=""):
     basename = code_hash(source_code + extra)
-    lock = FileLock(os.path.join(cache_dir(), basename + ".lock"))
+    lock = FileLock(os.path.join(cache_dir(), basename + ".lock"), timeout=600)
     with lock:
         subdir = os.path.join(cache_dir(), basename[1:3])
         if not os.path.exists(subdir):
@@ -66,7 +67,7 @@ def cpp_compiler():
 
 @functools.lru_cache(1)
 def cpp_compiler_search(search):
-    lock = FileLock(os.path.join(cache_dir(), "g++.lock"))
+    lock = FileLock(os.path.join(cache_dir(), "g++.lock"), timeout=600)
     with lock:
         for cxx in search:
             try:
@@ -144,14 +145,14 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
-        lock = FileLock(os.path.join(cache_dir(), key + ".lock"))
+        lock = FileLock(os.path.join(cache_dir(), key + ".lock"), timeout=600)
         with lock:
             if key not in cls.cache:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
-                    cmd = cpp_compile_command(input=input_path, output=output_path).split(
-                        " "
-                    )
+                    cmd = cpp_compile_command(
+                        input=input_path, output=output_path
+                    ).split(" ")
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
@@ -170,15 +171,17 @@ class PyCodeCache:
     @classmethod
     def load(cls, source_code):
         key, path = write(source_code, "py")
-        if key not in cls.cache:
-            with open(path) as f:
-                code = compile(f.read(), path, "exec")
-                mod = types.ModuleType(f"{__name__}.{key}")
-                mod.__file__ = path
-                mod.key = key
-                exec(code, mod.__dict__, mod.__dict__)
-                # another thread might set this first
-                cls.cache.setdefault(key, mod)
+        lock = FileLock(os.path.join(cache_dir(), key + ".lock"), timeout=600)
+        with lock:
+            if key not in cls.cache:
+                with open(path) as f:
+                    code = compile(f.read(), path, "exec")
+                    mod = types.ModuleType(f"{__name__}.{key}")
+                    mod.__file__ = path
+                    mod.key = key
+                    exec(code, mod.__dict__, mod.__dict__)
+                    # another thread might set this first
+                    cls.cache.setdefault(key, mod)
         return cls.cache[key]
 
 
