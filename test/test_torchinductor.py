@@ -2443,7 +2443,8 @@ class CommonTemplate:
 
     def test_input_mutation4(self):
         def fn(a):
-            return torch.relu_(a)
+            torch.relu_(a)
+            return a
 
         arg1 = torch.randn([1, 64], device=self.device)
         arg2 = arg1.clone()
