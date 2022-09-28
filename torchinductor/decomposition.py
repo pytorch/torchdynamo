@@ -282,31 +282,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-@register_decomposition([aten.index_put])
-def index_put(self, indices, values, accumulate=False):
-    return aten.index_put_(self.clone(), indices, values, accumulate)
-
-
-@register_decomposition([aten.scatter])
-def scatter(self, dim: int, index, src, **kwargs):
-    return self.clone().scatter_(dim, index, src, **kwargs)
-
-
-@register_decomposition([aten.scatter_add])
-def scatter_add(self, dim: int, index, src):
-    return self.clone().scatter_add_(dim, index, src)
-
-
-@register_decomposition([aten.scatter_add_])
-def scatter_add_(self, dim: int, index, src):
-    return self.scatter_reduce_(dim, index, src, "sum")
-
-
-@register_decomposition([aten.scatter_reduce])
-def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
-    return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
-
-
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
