@@ -3109,13 +3109,21 @@ class Convolution(ExternKernelAlloc):
                 x.get_dtype(),
             )
         else:
-            # if x or weight have one channels_last format, it will call channels_last path,
-            # which align with aten.convolutuion path(only support 2d case).
-            if len(x.get_size()) == 4 and (x.get_layout().is_channels_last_stride_ordered() or \
-                weight.get_layout().is_channels_last_stride_ordered()):
+            output_layout_str = "torch.contiguous_format"
+            # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
+            # which align with aten.convolutuion path(cpu only support 2d case now).
+            # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
+            # TODO: the gpu channels_last path depend on cudnn version, see
+            # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
+            if (
+                x.get_device().type == "cpu"
+                and len(x.get_size()) == 4
+                and (
+                    x.get_layout().is_channels_last_stride_ordered()
+                    or weight.get_layout().is_channels_last_stride_ordered()
+                )
+            ):
                 output_layout_str = "torch.channels_last"
-            else:
-                output_layout_str = "torch.contiguous_format"
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
