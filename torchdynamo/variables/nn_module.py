@@ -253,21 +253,6 @@ class NNModuleVariable(VariableTracker):
             return invoke_and_store_as_constant(
                 tx, fn, name, self.source, options, args, kwargs
             )
-            # def convert(x):
-            #     if isinstance(x, variables.TensorVariable):
-            #         return x.proxy.node.meta['example_value']
-            #     return x.as_python_constant()
-
-            # args = [convert(x) for x in args]
-            # kwargs = {k: convert(x) for k,v in kwargs.items()}
-            # res = getattr(module, name)(*args, **kwargs)
-            # name = f"{module.__class__.__name__}_{name}_result"
-            # return tx.output.add_submodule(
-            #     res,
-            #     name,
-            #     source=NNModuleSource(GetItemSource(self.source, name)),
-            #     **options,
-            # )
 
         if not all(
             x.is_python_constant() for x in itertools.chain(args, kwargs.values())
