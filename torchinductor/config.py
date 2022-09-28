@@ -132,6 +132,9 @@ class trace:
     # Store cProfile (see snakeviz to view)
     compile_profile = False
 
+    # Generate Buck TARGETS file to run generate code in fbcode
+    buck_targets = False
+
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None

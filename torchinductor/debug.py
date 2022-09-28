@@ -327,3 +327,23 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+        V.debug.buck_targets()
+
+    def buck_targets(self):
+        with self.fopen("TARGETS") as fd:
+            fd.write("""
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "output_code",
+    srcs = [ "output_code.py"],
+    base_module = "",
+    main_module = "output_code",
+    deps = [
+        "//caffe2:torch",
+        "//triton:triton",
+        "//pytorch/torchdynamo/torchinductor:inductor",
+        "//pytorch/torchdynamo/torchdynamo:dynamo",
+    ],
+)
+""")
