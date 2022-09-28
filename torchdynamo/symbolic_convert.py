@@ -1505,7 +1505,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
-        assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
         if func.has_self():
             unimplemented("inline with __self__")
 

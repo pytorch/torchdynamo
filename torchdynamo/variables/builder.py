@@ -70,6 +70,7 @@ from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
+from .torch import tensor_dunder_fns
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -358,6 +359,11 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif istype(value, types.FunctionType):
+            if value in tensor_dunder_fns:
+                return TorchVariable(
+                    value,
+                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                )
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
