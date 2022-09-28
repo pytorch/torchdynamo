@@ -9,7 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220927
+PYTORCH_VERSION ?= dev20220928
 TRITON_VERSION ?= 998fd5f9afe166247f441999c605dfe624ca9331
 
 

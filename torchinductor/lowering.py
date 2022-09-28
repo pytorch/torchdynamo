@@ -1562,6 +1562,18 @@ def index(x, indices):
     )
 
 
+# This is moved from decomposition to lowering because this decomp introduced
+# mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
+# code elimination and common subexpression elimination optimizations, which
+# assume graphs to be side-effect free. More details at
+# https://github.com/pytorch/torchdynamo/issues/1235.
+# Moving such reinplacing type of decomps to lowering ensures that AotAutograd
+# gets good graphs.
+@register_lowering([aten.index_put])
+def index_put(x, indices, values, accumulate=False):
+    return index_put_(clone(x), indices, values, accumulate)
+
+
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
@@ -1610,6 +1622,11 @@ def index_put_(self, indices, values, accumulate=False):
     return self
 
 
+@register_lowering(aten.scatter, type_promote=False)
+def scatter(x, dim: int, index, src, **kwargs):
+    return scatter_(clone(x), dim, index, src, **kwargs)
+
+
 @register_lowering(aten.scatter_, type_promote=False)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
     if reduce == "add":
@@ -1620,6 +1637,21 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
     else:
         assert reduce is None
     return scatter_reduce_(self, dim, index, src, reduce)
+
+
+@register_lowering(aten.scatter_add, type_promote=False)
+def scatter_add(x, dim: int, index, src):
+    return scatter_add_(clone(x), dim, index, src)
+
+
+@register_lowering(aten.scatter_add_, type_promote=False)
+def scatter_add_(x, dim: int, index, src):
+    return scatter_reduce_(clone(x), dim, index, src, "sum")
+
+
+@register_lowering(aten.scatter_reduce, type_promote=False)
+def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
+    return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)

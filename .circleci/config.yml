@@ -168,7 +168,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/torchbench.py --accuracy --ci --training --use-eval-mode --amp --backend=aot_eager -d cuda --output=aot_eager_torchbench_training.csv
+            python benchmarks/torchbench.py --accuracy --ci --training --amp --backend=aot_eager -d cuda --output=aot_eager_torchbench_training.csv
       - store_artifacts:
           path: aot_eager_torchbench_training.csv
       - run:
@@ -189,7 +189,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --training --use-eval-mode --amp --backend=aot_eager -d cuda --output=aot_eager_hf_training.csv
+            python benchmarks/huggingface.py --accuracy --ci --training --amp --backend=aot_eager -d cuda --output=aot_eager_hf_training.csv
       - store_artifacts:
           path: aot_eager_hf_training.csv
       - run:
@@ -210,7 +210,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --training --use-eval-mode --amp --backend=aot_eager -d cuda --output=aot_eager_timm_training.csv
+            python benchmarks/timm_models.py --accuracy --ci --training --amp --backend=aot_eager -d cuda --output=aot_eager_timm_training.csv
       - store_artifacts:
           path: aot_eager_timm_training.csv
       - run:
@@ -296,7 +296,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 2 --partition-id 0 --output=inductor_hf_inference_0.csv
       - store_artifacts:
           path: inductor_hf_inference_0.csv
@@ -318,7 +318,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 2 --partition-id 1 --output=inductor_hf_inference_1.csv
       - store_artifacts:
           path: inductor_hf_inference_1.csv
@@ -407,7 +407,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 0 --output=inductor_timm_inference_0.csv
       - store_artifacts:
           path: inductor_timm_inference_0.csv
@@ -430,7 +430,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 1 --output=inductor_timm_inference_1.csv
       - store_artifacts:
           path: inductor_timm_inference_1.csv
@@ -453,7 +453,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 2 --output=inductor_timm_inference_2.csv
       - store_artifacts:
           path: inductor_timm_inference_2.csv
@@ -476,7 +476,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 \
               --total-partitions 4 --partition-id 3 --output=inductor_timm_inference_3.csv
       - store_artifacts:
           path: inductor_timm_inference_3.csv
