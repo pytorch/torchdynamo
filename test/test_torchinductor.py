@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import importlib
 import random
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -38,7 +39,8 @@ try:
     assert get_decompositions([torch.ops.aten.trace])
     # Requires functorch
     from torchinductor.compile_fx import compile_fx_inner
-except (ImportError, ModuleNotFoundError, AssertionError):
+except (ImportError, ModuleNotFoundError, AssertionError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
     raise unittest.SkipTest("requires sympy/functorch")
 
 

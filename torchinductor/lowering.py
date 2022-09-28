@@ -1383,6 +1383,8 @@ ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
+register_lowering(aten.zero)(zeros_like)
+
 
 def new_constant(fill_value):
     def _new_constant(
