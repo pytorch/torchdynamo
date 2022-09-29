@@ -2671,6 +2671,55 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put_as_masked_fill(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            [
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                True,
+            ],
+        )
+
+    def test_index_put_fallback1(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            [
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                random.choice([True, False]),
+            ],
+        )
+
+    def test_index_put_fallback2(self):
+        def fn(a, b, c, d, e):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [None, b, c], d, e)
+            return a
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                random.choice([True, False]),
+            ],
+        )
+
     @patch.object(config, "fallback_random", True)
     def test_bernoulli1(self):
         def fn(a):
