@@ -451,7 +451,7 @@ class VariableBuilder:
                     GraphArg(self.get_source(), value, False)
                 )
             # Disable __torch_function__ to prevent cloning of `value` to hit
-            # user code.
+            # us
             with torch._C.DisableTorchFunction():
                 if is_constant_source(self.get_source()):
                     return self.tx.output.register_attr_or_module(
@@ -460,13 +460,11 @@ class VariableBuilder:
                         source=None,
                         # Guards are added inside register_attr_or_module
                     )
-                else:
-                    proxy = self.tx.output.create_graph_input(
-                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                    )
                 tensor_variable = TensorVariable.create(
                     tx=self.tx,
-                    proxy=proxy,
+                    proxy=self.tx.output.create_graph_input(
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                    ),
                     example_value=value,
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                 )

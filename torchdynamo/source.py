@@ -26,8 +26,11 @@ _GUARD_SOURCE_NOT_NN_MODULE = {
 def is_constant_source(source):
     if isinstance(source, ConstantSource):
         return True
-    if source.guard_source() == GuardSource.CONSTANT:
-        return True
+    try:
+        if source.guard_source() == GuardSource.CONSTANT:
+            return True
+    except:
+        return False
 
     return False
 
