@@ -5,7 +5,6 @@ import inspect
 import itertools
 import operator
 from typing import Any
-from unittest.mock import patch
 
 import torch
 from torch import sub
