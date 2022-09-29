@@ -356,6 +356,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "zero_": {b8},
 }
 
+
 inductor_expected_failures_single_sample["cuda"] = {
    "H": {b8, f16, f32, f64, i32, i64},
    "T": {b8, f16, f32, f64, i32, i64},
@@ -381,6 +382,7 @@ inductor_expected_failures_single_sample["cuda"] = {
    "bincount": {i32, i64},
    "ceil": {i32, i64},
    "chalf": {b8, f16, f32, f64, i32, i64},
+   "cholesky": {f32, f64},
    "chunk": {b8},
    "combinations": {b8, f16, f32, f64, i32, i64},
    "complex": {f16, f32, f64},
@@ -421,9 +423,16 @@ inductor_expected_failures_single_sample["cuda"] = {
    "lgamma": {b8, i32, i64},
    "linalg.cholesky": {f32, f64},
    "linalg.cholesky_ex": {f32, f64},
+   "linalg.eig": {f32, f64},
+   "linalg.eigh": {f32, f64},
+   "linalg.eigvals": {f32, f64},
+   "linalg.eigvalsh": {f32, f64},
    "linalg.ldl_factor": {f32, f64},
+   "linalg.lstsq": {f32, f64},
+   "linalg.lstsq.grad_oriented": {f32, f64},
    "linalg.matrix_rank": {f32, f64},
    "linalg.matrix_rank.hermitian": {f32, f64},
+   "linalg.pinv.hermitian": {f32, f64},
    "linalg.svd": {f32, f64},
    "logical_and": {f16, f32, f64, i32, i64},
    "logical_not": {f16, f32, f64, i32, i64},
@@ -585,8 +594,8 @@ class TestInductorOpInfo(TestCase):
                     self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
 
             except Exception as e:
-                with open("test_output_929.txt", "a") as f:
-                    print(f"FAILED OP {op_name} on {device_type} with {dtype}, {e}", flush=True, file=f)
+                # with open("test_output_929.txt", "a") as f:
+                #     print(f"FAILED OP {op_name} on {device_type} with {dtype}, {e}", flush=True, file=f)
 
                 if test_expect is TestExpect.XFAILURE:
                     return
