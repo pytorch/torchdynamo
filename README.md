@@ -39,13 +39,13 @@ Python 3.8 is recommended.
 Python 3.7 through 3.10 are supported and tested.
 Make sure to have a development version of python installed locally as well.
 
-To use GPU back ends (and in particular Triton), please make sure to have cuda
-11.7 installed locally.
-
 ### Install nightly binaries
 
 TorchDynamo is evolving very quickly and so we only provide binaries based
 on a nightly version of PyTorch.
+To use GPU back ends (and in particular Triton), please make sure that the cuda
+that you have installed locally matches the PyTorch version you are running. For
+the command below, you will need CUDA 11.7.
 
 ```shell
 pip3 install --pre torch==1.13.0.dev20220929+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
@@ -58,6 +58,7 @@ pip install -U "git+https://github.com/pytorch/torchdynamo"
 You can also install PyTorch, Triton and or Dynamo from source at the same
 commits as the ones listed above. The Makefile target `make setup_nightly_gpu`
 contain the commands used by our CI to setup dependencies.
+Note that only CUDA 11.6+ is officially supported.
 
 Other development requirements can be installed with:
 ```shell
