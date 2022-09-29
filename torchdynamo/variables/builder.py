@@ -440,9 +440,6 @@ class VariableBuilder:
             # user code.
             with torch._C.DisableTorchFunction():
                 if is_constant_source(self.get_source()):
-                    import pdb
-
-                    pdb.set_trace()
                     return self.tx.output.add_submodule(
                         value,
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
