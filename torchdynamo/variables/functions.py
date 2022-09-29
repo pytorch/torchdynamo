@@ -178,7 +178,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         pass
 
     @staticmethod
-    def _copy_parameter(tx, param):
+    def _deepcopy_parameter(tx, param):
         # equivalent to
         # torch.nn.Parameter(
         #     args[0].clone(memory_format=torch.preserve_format)), args[0].requires_grad)
@@ -213,7 +213,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     return args[0]
                 elif self.fn is copy.deepcopy:
                     if type(args[0].parameter_value) is torch.nn.Parameter:
-                        return self._copy_parameter(tx, args[0])
+                        return self._deepcopy_parameter(tx, args[0])
                     elif args[0].class_type is torch.Tensor:
                         return args[0].call_method(tx, "clone", [], {})
             unimplemented("copy.copy/copy.deepcopy called on non-tensor")

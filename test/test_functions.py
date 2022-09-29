@@ -741,7 +741,16 @@ class FunctionTests(torchdynamo.testing.TestCase):
         def f(x):
             return copy.deepcopy(x)
 
+        @torchdynamo.optimize("eager", nopython=True)
+        def g(x):
+            return copy.copy(x), x + 1
+
         t1 = torch.nn.Parameter(torch.rand(10))
         t2 = f(t1)
         self.assertIsInstance(t2, type(t1))
-        self.assertIsNot(t2.data, t1.data)
+        self.assertNotEqual(t2.data_ptr(), t1.data_ptr())
+
+        t3 = torch.nn.Parameter(torch.rand(10))
+        t4, _ = g(t3)
+        self.assertIsInstance(t4, type(t3))
+        self.assertEqual(t4.data_ptr(), t3.data_ptr())
