@@ -5,4 +5,6 @@ mypy==0.960
 click>=8.1
 expecttest
 ninja
+numpy
 pytest
+pyyaml
