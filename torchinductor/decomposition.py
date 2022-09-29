@@ -309,6 +309,12 @@ def fill_tensor(self, value: Tensor):
     return torch.full_like(self, value.item())
 
 
+@register_decomposition([aten.bernoulli.default])
+def bernoulli(self, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < self
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow

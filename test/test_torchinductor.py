@@ -145,6 +145,7 @@ def check_model(
     rtol=None,
     check_lowp=True,
     exact_dtype=True,
+    nopython=True,
 ):
     torchdynamo.reset()
 
@@ -175,12 +176,26 @@ def check_model(
 
     torchinductor.metrics.reset()
 
-    @torchdynamo.optimize_assert(compile_fx)
+    called = False
+
+    def compile_fx_wrapper(model_, example_inputs_):
+        nonlocal called
+        called = True
+        return compile_fx(model_, example_inputs_)
+
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
+    run = torchdynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
+
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
+    # if not called:
+    #     exp = torchdynamo.explain(run, *example_inputs)
+    #     print("Explain:", exp[0])
+    #     for graph in exp[2]:
+    #         print("Graph", graph)
+    assert called, "Ran graph without calling compile_fx"
 
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
@@ -201,6 +216,7 @@ def check_model(
         equal_nan=True,
         exact_dtype=exact_dtype,
     )
+    torchdynamo.reset()
 
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
@@ -214,6 +230,7 @@ def check_model_cuda(
     rtol=None,
     check_lowp=True,
     exact_dtype=True,
+    nopython=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -235,6 +252,7 @@ def check_model_cuda(
         atol=atol,
         rtol=rtol,
         exact_dtype=exact_dtype,
+        nopython=nopython,
     )
 
     if check_lowp:
@@ -257,6 +275,7 @@ def check_model_cuda(
             atol=atol,
             rtol=rtol,
             exact_dtype=exact_dtype,
+            nopython=nopython,
         )
 
 
@@ -333,16 +352,10 @@ class TestIndexingSimplification(unittest.TestCase):
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
 
-        # always-zero terms should be removed from IndexingDiv too
+        # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
             sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
-            IndexingDiv(i1, 32),
-        )
-        self.assertEqual(
-            sizevars.simplify_with_ranges(
-                IndexingDiv(r3 + 2 * i2 + i1, 32), var_ranges
-            ),
-            IndexingDiv(i1 + 2 * i2, 32),
+            IndexingDiv(r3 + i2 + i1, 32),
         )
 
         expr = ModularIndexing(2 * i2 + r3, 1, 64)
@@ -618,6 +631,13 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_expanded_reduction(self):
+        def fn(x, y):
+            z = x * y
+            return z.sum((0, 1))
+
+        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -1108,9 +1128,12 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_gather(self):
+    def test_gather1(self):
         def fn(a, b):
-            return (torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),)
+            return (
+                torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),
+                torch.gather(a.expand([4, 5, 10, 6]), -1, b + 1),
+            )
 
         self.common(
             fn,
@@ -1119,6 +1142,15 @@ class CommonTemplate:
                 torch.randint(5, [4, 5, 10, 1], dtype=torch.int64),
             ),
         )
+
+    def test_gather2(self):
+        # 0d tensor
+        def fn(a, b):
+            return torch.gather(a, 0, b) + torch.gather(a, -1, b)
+
+        x = torch.tensor(123)
+        y = torch.tensor(0)
+        self.assertEqual(fn(x, y), x + x)
 
     def test_slice1(self):
         def fn(a):
@@ -2441,6 +2473,20 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    def test_input_mutation4(self):
+        def fn(a):
+            torch.relu_(a)
+            return a
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        correct1 = fn(arg1)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(arg1, arg2))
+
     @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
@@ -2640,7 +2686,7 @@ class CommonTemplate:
         )
 
     @patch.object(config, "fallback_random", True)
-    def test_bernoulli(self):
+    def test_bernoulli1(self):
         def fn(a):
             b = torch.empty_like(a)
             return aten.bernoulli_(b), b
@@ -2650,6 +2696,15 @@ class CommonTemplate:
             [
                 torch.randn([100]),
             ],
+        )
+
+    def test_bernoulli2(self):
+        def fn(a):
+            return aten.bernoulli(a)
+
+        self.common(
+            fn,
+            [torch.tensor([1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0])],
         )
 
     def test_narrow(self):

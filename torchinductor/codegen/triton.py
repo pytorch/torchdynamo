@@ -47,14 +47,15 @@ def signature_of(arg):
 
 
 def config_of(args):
-    from triton.runtime.jit import JITFunction
+    from ..compile_fx import ALIGNMENT
 
-    divisible_by_16 = [
-        i
-        for i, arg in enumerate(args)
-        if isinstance(arg, TensorArg)
-        or V.graph.sizevars.maybe_guard_multiple_of(arg.expr, JITFunction.divisibility)
-    ]
+    def is_aligned(x):
+        if isinstance(x, TensorArg):
+            return x.buffer not in V.graph.unaligned_buffers
+        assert isinstance(x, SizeArg)
+        return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+
+    divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     return instance_descriptor(tuple(divisible_by_16), ())
 
 
@@ -990,6 +991,7 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
+            self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -1002,6 +1004,21 @@ class TritonKernel(Kernel):
         wrapper.splice(code.getvalue(), strip=True)
         wrapper.writeline("''')")
         return wrapper.getvalue()
+
+    def codegen_static_numels(self, code):
+        """
+        We get a small speedup from hard coding numels if they are static.
+        """
+        for tree in self.range_trees:
+            if tree.prefix != "r" or self.inside_reduction:
+                if isinstance(V.graph.sizevars.simplify(tree.numel), sympy.Integer):
+                    code.writeline(
+                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}"
+                    )
+                elif not config.dynamic_shapes:
+                    code.writeline(
+                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
+                    )
 
     def reshape_size_str(self, i=None, x=None):
         sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
