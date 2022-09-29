@@ -9,6 +9,7 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
+# Also update the "Install nightly binaries" section of the README when updating these
 PYTORCH_VERSION ?= dev20220929
 TRITON_VERSION ?= 998fd5f9afe166247f441999c605dfe624ca9331
 
