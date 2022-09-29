@@ -177,6 +177,30 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def export_freevars(self, parent, child):
         pass
 
+    @staticmethod
+    def _copy_parameter(tx, param):
+        # equivalent to
+        # torch.nn.Parameter(
+        #     args[0].clone(memory_format=torch.preserve_format)), args[0].requires_grad)
+        # )
+        memory_format = variables.BuiltinVariable(getattr).call_function(
+            tx,
+            [
+                variables.TorchVariable(torch),
+                variables.ConstantVariable("preserve_format"),
+            ],
+            {},
+        )
+        clone = param.call_method(tx, "clone", [], {"memory_format": memory_format})
+        requires_grad = variables.BuiltinVariable(getattr).call_function(
+            tx,
+            [param, variables.ConstantVariable("requires_grad")],
+            {},
+        )
+        return variables.TorchVariable(torch.nn.Parameter).call_function(
+            tx, [clone, requires_grad], {}
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -191,45 +215,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     if args[0].class_type is torch.Tensor:
                         return args[0].call_method(tx, "clone", [], {})
                     elif args[0].class_type is torch.nn.Parameter:
-                        # equivalent to
-                        # torch.nn.Parameter(
-                        #     args[0].clone(memory_format=torch.preserve_format)), args[0].requires_grad)
-                        # )
-                        return variables.TorchVariable(
-                            torch.nn.Parameter
-                        ).call_function(
-                            tx,
-                            [
-                                args[0].call_method(
-                                    tx,
-                                    "clone",
-                                    [],
-                                    {
-                                        "memory_format": variables.BuiltinVariable(
-                                            getattr
-                                        ).call_function(
-                                            tx,
-                                            [
-                                                variables.TorchVariable(torch),
-                                                variables.ConstantVariable(
-                                                    "preserve_format"
-                                                ),
-                                            ],
-                                            {},
-                                        )
-                                    },
-                                ),
-                                variables.BuiltinVariable(getattr).call_function(
-                                    tx,
-                                    [
-                                        args[0],
-                                        variables.ConstantVariable("requires_grad"),
-                                    ],
-                                    {},
-                                ),
-                            ],
-                            {},
-                        )
+                        return self._copy_parameter(tx, args[0])
             unimplemented("copy.copy/copy.deepcopy called on non-tensor")
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
