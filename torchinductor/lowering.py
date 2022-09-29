@@ -2888,7 +2888,7 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox):
+    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data

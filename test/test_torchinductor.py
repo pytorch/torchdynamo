@@ -2473,6 +2473,20 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    def test_input_mutation4(self):
+        def fn(a):
+            torch.relu_(a)
+            return a
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        correct1 = fn(arg1)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(arg1, arg2))
+
     @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
