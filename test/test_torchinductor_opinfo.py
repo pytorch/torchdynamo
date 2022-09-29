@@ -324,7 +324,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sign": {b8, i32, i64},
     "slice": {b8, f16, f32, f64, i32, i64},
     "slice_scatter": {b8},
-    "sparse.sampled.addmm": {f32, f64},
+    "sparse.sampled_addmm": {f32, f64},
     "split": {b8},
     "split.list_args": {b8},
     "split_with_sizes": {b8},
