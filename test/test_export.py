@@ -1113,6 +1113,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         )
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_tuple_nonzero(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result
@@ -1137,6 +1138,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_list_nonzero(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result
@@ -1161,6 +1163,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_dict_values(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result
@@ -1183,6 +1186,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_none_control_flow(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result
@@ -1210,6 +1214,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_not_none_control_flow(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result

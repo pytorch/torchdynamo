@@ -438,7 +438,7 @@ def apply_cuda_graphs(gm):
             submod = gm.get_submodule(n.target)
             gm.delete_submodule(n.target)
             mutated_inputs = find_input_mutations(submod.graph)
-            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
+            gm.register_attr_or_module(n.target, CudaGraphModule(submod, mutated_inputs))
     # NB: we didn't actually change the graph, no need for recompile
 
 

@@ -291,7 +291,7 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     args = [convert(x) for x in args]
     kwargs = {k: convert(x) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
-    return tx.output.add_submodule(
+    return tx.output.register_attr_or_module(
         res,
         name,
         **options,

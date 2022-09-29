@@ -272,11 +272,11 @@ class VariableBuilder:
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
             else:
-                return self.tx.output.add_submodule(
+                return self.tx.output.register_attr_or_module(
                     value,
                     self.name,
                     source=self.get_source(),
-                    # Guards are added inside add_submodule
+                    # Guards are added inside register_attr_or_module
                 )
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
@@ -424,11 +424,11 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
-            return self.tx.output.add_submodule(
+            return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
                 source=self.get_source(),
-                # Guards are done inside add_submodule
+                # Guards are done inside register_attr_or_module
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
@@ -440,11 +440,11 @@ class VariableBuilder:
             # user code.
             with torch._C.DisableTorchFunction():
                 if is_constant_source(self.get_source()):
-                    return self.tx.output.add_submodule(
+                    return self.tx.output.register_attr_or_module(
                         value,
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                         source=None,
-                        # Guards are added inside add_submodule
+                        # Guards are added inside register_attr_or_module
                     )
                     # proxy = self.tx.create_proxy("get_attr", re.sub(r"[^a-zA-Z0-9]+", "_", self.name), tuple(), {})
                 else:

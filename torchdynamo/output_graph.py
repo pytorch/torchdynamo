@@ -168,8 +168,6 @@ class OutputGraph(fx.Tracer):
                     name = f"{name}_{i}"
                     break
 
-        # import pdb
-        # pdb.set_trace()
         if placeholders:
             ctx = self.graph.inserting_after(placeholders[-1])
         else:
@@ -194,7 +192,7 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def add_submodule(self, mod: torch.nn.Module, *names, **options):
+    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
@@ -219,30 +217,14 @@ class OutputGraph(fx.Tracer):
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
-
-        # elif ConstantVariable.is_literal
         else:
-            # if isinstance(mod, (list, tuple, )):
-            # import pdb
-            # pdb.set_trace()
-            # options["guards"].add(source.create_guard(GuardBuilder.LIST_LENGTH))
-
             def wrap_name(module_key):
-                # return TensorVariable.create(
-                #     self,
-                #     self.create_proxy("get_attr", module_key, tuple(), {}),
-                #     example_value=mod,
-                #     **options,
-                # )
                 self.output.update_co_names(module_key)
                 self.root_globals[module_key] = mod
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
                     mod
                 )
-                # globals()[module_key] = mod
-                # return out
 
-            # return VariableBuilder(mod, source)
         for k, v in self.nn_modules.items():
             if v is mod:
                 # it already exists
@@ -439,8 +421,6 @@ class OutputGraph(fx.Tracer):
 
     def example_inputs(self):
         result = []
-        # import pdb
-        # pdb.set_trace()
         for arg in self.graphargs:
             result.extend(arg.get_examples())
         return result

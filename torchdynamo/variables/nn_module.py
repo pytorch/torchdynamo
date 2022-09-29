@@ -58,7 +58,7 @@ class NNModuleVariable(VariableTracker):
         result = []
         for idx, submod in enumerate(base):
             result.append(
-                tx.output.add_submodule(
+                tx.output.register_attr_or_module(
                     submod,
                     self.module_key,
                     idx,
@@ -180,7 +180,7 @@ class NNModuleVariable(VariableTracker):
                 (arg,) = args
                 for idx, submod in enumerate(mod):
                     tx.call_function(
-                        tx.output.add_submodule(
+                        tx.output.register_attr_or_module(
                             submod,
                             self.module_key,
                             idx,
@@ -274,7 +274,7 @@ class NNModuleVariable(VariableTracker):
                 name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
                 src = NNModuleSource(getsource(self.source, name))
                 result.append(
-                    tx.output.add_submodule(
+                    tx.output.register_attr_or_module(
                         submod,
                         key,
                         name,
@@ -288,7 +288,7 @@ class NNModuleVariable(VariableTracker):
             return TupleVariable(
                 [
                     ConstantVariable(name, **options),
-                    tx.output.add_submodule(
+                    tx.output.register_attr_or_module(
                         obj,
                         key,
                         name,
@@ -357,7 +357,7 @@ class NNModuleVariable(VariableTracker):
                     key = keys[idx]
                     src = NNModuleSource(GetItemSource(self.source, key))
                     result.append(
-                        tx.output.add_submodule(
+                        tx.output.register_attr_or_module(
                             submod,
                             key,
                             source=src,
@@ -368,7 +368,7 @@ class NNModuleVariable(VariableTracker):
 
             key = args[0].as_python_constant()
             submod = module[key]
-            return tx.output.add_submodule(
+            return tx.output.register_attr_or_module(
                 submod,
                 key,
                 args[0].as_python_constant(),
