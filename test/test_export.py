@@ -1164,6 +1164,31 @@ class ExportTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_list_nonzero(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            return [torch.nonzero(x), torch.nonzero(x)]
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                elements = helper_fn(x)
+                all_y = []
+                for element in elements:
+                    for item in element:
+                        all_y.append(y * item)
+                return all_y
+
+        module = MyModule()
+        real_result = module(torch.tensor([1.0, 1.0]))
+        graph, guards = torchdynamo.export(module, torch.tensor([1.0, 1.0]))
+
+        # Tensor input can be almost anything here, and the result will capture what we
+        # made constant at compile time.
+        result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_dict_values(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result
@@ -1227,6 +1252,90 @@ class ExportTests(torchdynamo.testing.TestCase):
             def forward(self, x):
                 y = torch.tensor([0.5])
                 x = self.helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([2]))
+
+        # X is positive, so .item() > 0, which means we return y * x
+        self.assertEqual(real_result, torch.tensor([1]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([2]))
+        result = graph(torch.tensor([-0.5]))
+        # X is negative, but we compiled helper_fn to return x, so it will still return y * x
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_none_control_flow_free_func(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            if x.item() < 0:
+                return None
+            else:
+                return x
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([-1]))
+
+        # X is negative, so .item() < 0, which means we return y
+        self.assertEqual(real_result, torch.tensor([0.5]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([-1]))
+        result = graph(torch.tensor([2]))
+        # X is positive, but we compiled helper_fn to return None, so it will still return y
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_not_none_control_flow(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.eval_frame.assume_constant_result
+            def helper_fn(self, x):
+                if x.item() < 0:
+                    return None
+                else:
+                    return x
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = self.helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([2]))
+
+        # X is positive, so .item() > 0, which means we return y * x
+        self.assertEqual(real_result, torch.tensor([1]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([2]))
+        result = graph(torch.tensor([-0.5]))
+        # X is negative, but we compiled helper_fn to return x, so it will still return y * x
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_not_none_control_flow_free_func(self):
+        @torchdynamo.eval_frame.assume_constant_result
+        def helper_fn(x):
+            if x.item() < 0:
+                return None
+            else:
+                return x
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = helper_fn(x)
                 if x is None:
                     return y
                 return y * x

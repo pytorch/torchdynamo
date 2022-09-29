@@ -373,7 +373,7 @@ class TensorVariable(VariableTracker):
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
-            result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
+            result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
         if result is None:
             raise NotImplementedError()

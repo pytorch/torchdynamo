@@ -44,13 +44,8 @@ class Source:
         raise NotImplementedError()
 
     # TODO(voz): Dedup these two??
-    def create_guard(self, fn, is_volatile=False):
-        if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
-        return Guard(self.name(), self.guard_source(), fn, is_volatile)
-
     def make_guard(self, fn, is_volatile=False):
-        if self.guard_source() is GuardSource.constant:
+        if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
         return Guard(self.name(), self.guard_source(), fn, is_volatile)
 
@@ -257,7 +252,4 @@ class ConstantSource(Source):
         return self.source_name
 
     def make_guard(self, fn, is_volatile=False):
-        raise NotImplementedError()
-
-    def create_guard(self, fn, is_volatile=False):
         raise NotImplementedError()

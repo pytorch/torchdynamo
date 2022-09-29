@@ -458,7 +458,7 @@ class BuiltinVariable(VariableTracker):
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
-                guards.add(obj.source.create_guard(GuardBuilder.LIST_LENGTH))
+                guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),

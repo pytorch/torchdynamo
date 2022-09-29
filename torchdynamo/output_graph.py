@@ -201,7 +201,7 @@ class OutputGraph(fx.Tracer):
         source: Source = options.get("source", None)
         if isinstance(mod, torch.Tensor):
             if source:
-                options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
+                options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 return TensorVariable.create(
@@ -213,11 +213,13 @@ class OutputGraph(fx.Tracer):
 
         elif isinstance(mod, torch.nn.Module):
             assert isinstance(mod, torch.nn.Module)
-            options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
+            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
+
         else:
+
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
                 self.root_globals[module_key] = mod

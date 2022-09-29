@@ -73,7 +73,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         return variables.ConstantVariable(result, **options).add_guard(
-            NNModuleSource(AttrSource(self.source, name)).create_guard(
+            NNModuleSource(AttrSource(self.source, name)).make_guard(
                 GuardBuilder.HASATTR
             )
         )
@@ -470,7 +470,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if method is torch.nn.Module.parameters:
                 assert not args or kwargs
                 options["guards"].add(
-                    self.source.create_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
+                    self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
                 items = []
                 for name, value in self.value.named_parameters():

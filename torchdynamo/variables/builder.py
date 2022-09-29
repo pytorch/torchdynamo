@@ -170,7 +170,7 @@ class VariableBuilder:
             or source.guard_source() == GuardSource.CONSTANT
         ):
             return None
-        return {source.create_guard(guard) for guard in guards}
+        return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
         make_guards = self.make_guards
@@ -446,7 +446,6 @@ class VariableBuilder:
                         source=None,
                         # Guards are added inside register_attr_or_module
                     )
-                    # proxy = self.tx.create_proxy("get_attr", re.sub(r"[^a-zA-Z0-9]+", "_", self.name), tuple(), {})
                 else:
                     proxy = self.tx.output.create_graph_input(
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
@@ -478,7 +477,7 @@ class VariableBuilder:
                     GraphArg(self.get_source(), wrapped_value, True)
                 )
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = {self.get_source().create_guard(GuardBuilder.TYPE_MATCH, True)}
+                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
             else:
                 options = {}
