@@ -216,6 +216,7 @@ def check_model(
         equal_nan=True,
         exact_dtype=exact_dtype,
     )
+    torchdynamo.reset()
 
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
@@ -251,7 +252,7 @@ def check_model_cuda(
         atol=atol,
         rtol=rtol,
         exact_dtype=exact_dtype,
-        nopython=nopython
+        nopython=nopython,
     )
 
     if check_lowp:
@@ -274,7 +275,7 @@ def check_model_cuda(
             atol=atol,
             rtol=rtol,
             exact_dtype=exact_dtype,
-            nopython=nopython
+            nopython=nopython,
         )
 
 
