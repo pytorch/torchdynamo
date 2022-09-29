@@ -28,7 +28,6 @@ from . import convert_frame
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
-from .exc import unimplemented
 from .mutation_guard import install_generation_tagging_init
 
 log = logging.getLogger(__name__)
