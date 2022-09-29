@@ -450,6 +450,10 @@ class AutogradFunctionVariable(VariableTracker):
             self.fn_cls.forward, **options
         ).call_function(tx, args, kwargs)
 
+    def call_function(self, tx, args, kwargs):
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return AutogradFunctionVariable(self.fn_cls, **options)
+
 
 class BlackHoleVariable(VariableTracker):
     """A autograd.function context that just ignores everything (for forward extraction)"""

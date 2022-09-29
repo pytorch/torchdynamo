@@ -90,7 +90,7 @@ class TritonTemplateKernel(TritonKernel):
         # get extra_argdefs from fusable triton kernels
         self.extra_argdefs = []
         self.extra_call_args = []
-        argdefs, call_args = self.args.python_argdefs()
+        argdefs, call_args, _ = self.args.python_argdefs()
         # add extra args if it is different from
         # current TritonTemplateKernel args
         for (argdef, call_arg) in zip(argdefs, call_args):

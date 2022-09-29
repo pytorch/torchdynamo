@@ -10,7 +10,7 @@ PIP ?= python -m pip
 
 # versions used in CI
 PYTORCH_VERSION ?= dev20220928
-TRITON_VERSION ?= 889d9e34a114b1fe2e8871d21e713794344d12d3
+TRITON_VERSION ?= 998fd5f9afe166247f441999c605dfe624ca9331
 
 
 default: develop

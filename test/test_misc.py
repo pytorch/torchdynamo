@@ -2520,6 +2520,74 @@ class MiscTests(torchdynamo.testing.TestCase):
         res = opt_fn()
         self.assertTrue(same(ref, res))
 
+    def test_autograd_function_equivalence(self):
+        m1 = Module1()
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f1():
+            return m1(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f1(), torch.tensor([2.0])))
+
+        m2 = Module2()
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f2():
+            return m2(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f2(), torch.tensor([2.0])))
+
+    def test_object_classmethod(self):
+        class C:
+            @classmethod
+            def fn(cls, x):
+                return x + x
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f():
+            return C().fn(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+    def test_object_staticmethod(self):
+        class C:
+            @staticmethod
+            def fn(x):
+                return x + x
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f():
+            return C().fn(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+
+class CustomFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+
+class Module1(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc().apply(foo)
+
+
+class Module2(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

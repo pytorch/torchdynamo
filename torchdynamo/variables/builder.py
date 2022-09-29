@@ -57,6 +57,7 @@ from .lists import RangeVariable
 from .lists import SliceVariable
 from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
+from .misc import GetAttrVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
 from .misc import NumpyVariable
@@ -376,6 +377,19 @@ class VariableBuilder:
         elif type(value) is torch.autograd.function.FunctionMeta:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif (
+            isinstance(value, types.BuiltinFunctionType)
+            and type(getattr(value, "__self__", None))
+            is torch.autograd.function.FunctionMeta
+            and getattr(value, "__name__", "") == "apply"
+        ):
+            # handle aliased autograd function `apply` calls
+            return GetAttrVariable(
+                AutogradFunctionVariable(
+                    value.__self__, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                ),
+                "apply",
             )
         elif isinstance(value, (int, float, np.number)):
             return self.wrap_unspecialized_primitive(value)
