@@ -5,7 +5,9 @@ import os
 import re
 import subprocess
 import sys
+import time
 import warnings
+from urllib.error import HTTPError
 
 import torch
 from common import BenchmarkRunner
@@ -194,21 +196,31 @@ class TimmRunnner(BenchmarkRunner):
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
-        model = create_model(
-            model_name,
-            in_chans=3,
-            scriptable=False,
-            num_classes=None,
-            drop_rate=0.0,
-            drop_path_rate=None,
-            drop_block_rate=None,
-            pretrained=True,
-            # global_pool=kwargs.pop('gp', 'fast'),
-            # num_classes=kwargs.pop('num_classes', None),
-            # drop_rate=kwargs.pop('drop', 0.),
-            # drop_path_rate=kwargs.pop('drop_path', None),
-            # drop_block_rate=kwargs.pop('drop_block', None),
-        )
+        retries = 1
+        success = False
+        while not success and retries < 4:
+            try:
+                model = create_model(
+                    model_name,
+                    in_chans=3,
+                    scriptable=False,
+                    num_classes=None,
+                    drop_rate=0.0,
+                    drop_path_rate=None,
+                    drop_block_rate=None,
+                    pretrained=True,
+                    # global_pool=kwargs.pop('gp', 'fast'),
+                    # num_classes=kwargs.pop('num_classes', None),
+                    # drop_rate=kwargs.pop('drop', 0.),
+                    # drop_path_rate=kwargs.pop('drop_path', None),
+                    # drop_block_rate=kwargs.pop('drop_block', None),
+                )
+                success = True
+            except HTTPError:
+                wait = retries * 30
+                time.sleep(wait)
+                retries += 1
+
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,

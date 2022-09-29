@@ -106,13 +106,8 @@ class NewGlobalVariable(VariableTracker):
 
 
 class ContextWrappingVariable(VariableTracker):
-    """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
-
-    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
-
     def __init__(self, target_values, initial_values=None, **kwargs):
         super(ContextWrappingVariable, self).__init__(**kwargs)
-        self.guards = self.guards | self._guards_singleton
         self.target_values = target_values
         self.initial_values = initial_values
 
@@ -256,6 +251,10 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GradModeVariable(ContextWrappingVariable):
+    """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
+
+    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
+
     @staticmethod
     def create(tx, target_value, **kwargs):
         var = GradModeVariable(
@@ -270,6 +269,7 @@ class GradModeVariable(ContextWrappingVariable):
         super(GradModeVariable, self).__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
@@ -449,6 +449,10 @@ class AutogradFunctionVariable(VariableTracker):
         return variables.UserFunctionVariable(
             self.fn_cls.forward, **options
         ).call_function(tx, args, kwargs)
+
+    def call_function(self, tx, args, kwargs):
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return AutogradFunctionVariable(self.fn_cls, **options)
 
 
 class BlackHoleVariable(VariableTracker):

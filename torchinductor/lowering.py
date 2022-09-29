@@ -949,10 +949,13 @@ make_fallback(aten.cumsum)
 make_fallback(aten._embedding_bag)
 make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
+make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
+make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
 make_fallback(aten.unfold_backward)
@@ -1383,6 +1386,8 @@ ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
+register_lowering(aten.zero)(zeros_like)
+
 
 def new_constant(fill_value):
     def _new_constant(
@@ -1451,16 +1456,17 @@ def full(size, fill_value, **kwargs):
 @register_lowering(aten.gather, type_promote=False)
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
-    assert isinstance(dim, int)
-    assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(x.get_size())
+    assert index.get_dtype() == torch.int64
+    offset = len(x.get_size()) == 0
+    dim = _validate_dim(x, dim, offset)
 
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
     def fn(idx):
         idx = list(idx)
-        idx[dim] = ops.indirect_indexing(index_loader(idx))
+        if len(idx) != 0:
+            idx[dim] = ops.indirect_indexing(index_loader(idx))
         return x_loader(idx)
 
     return Pointwise.create(
@@ -2882,7 +2888,7 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox):
+    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data

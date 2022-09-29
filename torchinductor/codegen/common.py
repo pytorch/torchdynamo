@@ -6,6 +6,7 @@ import math
 import re
 import textwrap
 import typing
+from collections import namedtuple
 from io import StringIO
 from itertools import chain
 
@@ -21,6 +22,9 @@ from ..virtualized import V
 from ..virtualized import ops
 
 log = logging.getLogger(__name__)
+
+TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
+SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
 
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
@@ -358,9 +362,17 @@ class KernelArgs:
     def python_argdefs(self):
         arg_defs = []
         call_args = []
+        precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
+            precompile_args.append(
+                TensorArg(
+                    inplaced.inner_name,
+                    inplaced.other_names[-1],
+                    V.graph.get_dtype(inplaced.other_names[-1]),
+                )
+            )
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
@@ -368,10 +380,12 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
+            precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-        return arg_defs, call_args
+            precompile_args.append(SizeArg(inner, sympy.expand(outer)))
+        return arg_defs, call_args, precompile_args
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):

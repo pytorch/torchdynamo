@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import functools
 import hashlib
 from itertools import count
 from typing import Any
@@ -186,9 +187,10 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 import random
                 from torch import empty_strided, as_strided, device
-                from {codecache.__name__} import CppCodeCache, TritonCodeCache
+                from {codecache.__name__} import AsyncCompile
 
                 aten = torch.ops.aten
+                async_compile = AsyncCompile()
 
             """
         )
@@ -196,13 +198,10 @@ class WrapperCodeGen(CodeGen):
         if has_triton():
             self.header.splice(
                 """
-                    import triton
-                    import triton.language as tl
-
-                    from torchinductor.triton_ops.autotune import pointwise_heuristics
-                    from torchinductor.triton_ops.autotune import reduction_heuristics
-                    from torchinductor.triton_ops.autotune import grid
-
+                import triton
+                import triton.language as tl
+                from torchinductor.triton_ops.autotune import grid
+                from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
 
@@ -228,8 +227,14 @@ class WrapperCodeGen(CodeGen):
                     "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
 
-        self.prefix.writelines(
-            ["", "", f"def call({', '.join(V.graph.graph_inputs.keys())}):"]
+        self.prefix.splice(
+            f"""
+
+            async_compile.wait(globals())
+            del async_compile
+
+            def call({', '.join(V.graph.graph_inputs.keys())}):
+            """
         )
         with self.prefix.indent():
             for name in V.graph.randomness_seeds:
@@ -245,6 +250,14 @@ class WrapperCodeGen(CodeGen):
 
         self.allocated = set()
         self.freed = set()
+        self.write_get_cuda_stream = functools.lru_cache(None)(
+            self.write_get_cuda_stream
+        )
+
+    def write_get_cuda_stream(self, index):
+        name = f"stream{index}"
+        self.writeline(f"{name} = get_cuda_stream({index})")
+        return name
 
     def next_kernel_name(self):
         return f"kernel{next(self._names_iter)}"
@@ -260,6 +273,8 @@ class WrapperCodeGen(CodeGen):
             return
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
+            if not layout.maybe_guard_aligned():
+                V.graph.unaligned_buffers.add(name)
             self.codegen_allocation(layout.view.data)
             allocation = DeferredLine(
                 name, f"{name} = {layout.view.codegen_reference()}  # alias"

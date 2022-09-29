@@ -1,3 +1,4 @@
+import collections
 import functools
 import operator
 import time
@@ -221,3 +222,8 @@ def has_incompatible_cudagraph_ops(gm):
         if str(node.target) in forbidden_list:
             return True
     return False
+
+
+instance_descriptor = collections.namedtuple(
+    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+)
