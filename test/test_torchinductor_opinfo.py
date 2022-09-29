@@ -196,6 +196,10 @@ inductor_skips["cuda"] = {
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
+    "H": {b8, f16, f32, f64, i32, i64},
+    "T": {b8, f16, f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64},
+    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__radd__": {b8, f16, f32, f64, i32, i64},
     "__rand__": {b8, i32, i64},
@@ -338,7 +342,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "ne": {b8, f16, f32, f64, i32, i64},
     "neg": {f16, f32, f64, i32, i64},
     "new_empty": {b8, f16, f32, i32, i64},
-    "new_empty_strided": {b8, f16, i32, f32, i64},
+    "new_empty_strided": {b8, f16, i32, f32, i64, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f32, f64},
     "nn.functional.avg_pool1d": {f32, f64, i64},
@@ -483,6 +487,10 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
+    "H": {b8, f16, f32, f64, i32, i64},
+    "T": {b8, f16, f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64},
+    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__radd__": {b8, f16, f32, f64, i32, i64},
     "__rand__": {b8, i32, i64},
@@ -587,7 +595,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "mul": {b8, f16, f32, f64, i32, i64},
     "multinomial": {f16, f32, f64},
     "mv": {f16, f32, f64},
-    "nan_to_num": {b8},
+    "nan_to_num": {f16, f32, f64},
     "nanmean": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "native_layer_norm": {f16, f32, f64},
@@ -632,6 +640,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.instance_norm": {f16, f32, f64},
     "nn.functional.interpolate.area": {f16, f32, f64},
+    "nn.functional.interpolate.bicubic": {f16, f32, f64},
     "nn.functional.interpolate.bilinear": {f16, f32, f64},
     "nn.functional.l1_loss": {f16, f32, f64},
     "nn.functional.layer_norm": {f16, f32, f64},
@@ -804,9 +813,11 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
-                    self.check_model_cuda(fn, args, kwargs, check_lowp=False)
+                    self.check_model_cuda(
+                        fn, args, kwargs, check_lowp=False, nopython=True
+                    )
                 elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False)
+                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
 
             except Exception as e:
 
