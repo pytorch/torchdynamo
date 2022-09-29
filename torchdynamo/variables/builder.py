@@ -24,14 +24,17 @@ from ..allowed_functions import is_builtin_callable
 from ..allowed_functions import is_numpy
 from ..exc import unimplemented
 from ..guards import GuardBuilder
+from ..guards import GuardSource
 from ..side_effects import SideEffects
 from ..source import AttrSource
+from ..source import ConstantSource
 from ..source import GetItemSource
 from ..source import GlobalSource
 from ..source import GlobalWeakRefSource
 from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
+from ..source import is_constant_source
 from ..utils import getfile
 from ..utils import global_key_name
 from ..utils import is_namedtuple
@@ -163,7 +166,12 @@ class VariableBuilder:
 
     def make_guards(self, *guards):
         source = self.get_source()
-        return {source.create_guard(guard) for guard in guards}
+        if (
+            isinstance(source, ConstantSource)
+            or source.guard_source() == GuardSource.CONSTANT
+        ):
+            return None
+        return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
         make_guards = self.make_guards
@@ -265,11 +273,11 @@ class VariableBuilder:
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
             else:
-                return self.tx.output.add_submodule(
+                return self.tx.output.register_attr_or_module(
                     value,
                     self.name,
                     source=self.get_source(),
-                    # Guards are added inside add_submodule
+                    # Guards are added inside register_attr_or_module
                 )
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
@@ -430,23 +438,35 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
-            return self.tx.output.add_submodule(
+            return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
                 source=self.get_source(),
-                # Guards are done inside add_submodule
+                # Guards are done inside register_attr_or_module
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), value, False)
+                )
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # user code.
             with torch._C.DisableTorchFunction():
+                if is_constant_source(self.get_source()):
+                    return self.tx.output.register_attr_or_module(
+                        value,
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                        source=None,
+                        # Guards are added inside register_attr_or_module
+                    )
+                else:
+                    proxy = self.tx.output.create_graph_input(
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                    )
                 tensor_variable = TensorVariable.create(
                     tx=self.tx,
-                    proxy=self.tx.output.create_graph_input(
-                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                    ),
+                    proxy=proxy,
                     example_value=value,
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                 )
@@ -466,11 +486,12 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
         else:
             wrapped_value = torch.tensor(value)
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), wrapped_value, True)
-            )
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), wrapped_value, True)
+                )
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = {self.get_source().create_guard(GuardBuilder.TYPE_MATCH, True)}
+                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
             else:
                 options = {}
