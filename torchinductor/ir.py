@@ -1629,6 +1629,14 @@ class AliasedLayout(Layout):
     def make_indexer(self):
         return self.as_fixed().make_indexer()
 
+    def maybe_guard_aligned(self):
+        offset = self.view.get_layout().offset
+        if offset == 0:
+            return True
+        from .compile_fx import ALIGNMENT
+
+        return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
+
 
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
