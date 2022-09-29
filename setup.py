@@ -51,7 +51,7 @@ setup(
         "sympy",
         "dill",
         "jinja2",
-        "networkx"
+        "networkx",
     ],
     packages=find_packages(include=package_include),
     package_data={
