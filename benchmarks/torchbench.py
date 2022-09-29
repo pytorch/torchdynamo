@@ -7,17 +7,19 @@ import re
 import sys
 import warnings
 from os.path import abspath
-from os.path import dirname
 from os.path import exists
-from unittest.mock import patch
 
 import torch
+from torch.testing._internal.common_utils import IS_FBCODE
 
 from torchdynamo.testing import collect_results
 from torchdynamo.testing import reduce_to_scalar_loss
 from torchdynamo.utils import clone_inputs
 
-with patch.object(sys, "path", [abspath(dirname(__file__))] + sys.path):
+if IS_FBCODE:
+    from .common import BenchmarkRunner
+    from .common import main
+else:
     from common import BenchmarkRunner
     from common import main
 
