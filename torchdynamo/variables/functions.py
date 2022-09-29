@@ -212,10 +212,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 if self.fn is copy.copy:
                     return args[0]
                 elif self.fn is copy.deepcopy:
-                    if args[0].class_type is torch.Tensor:
-                        return args[0].call_method(tx, "clone", [], {})
-                    elif args[0].class_type is torch.nn.Parameter:
+                    if type(args[0].parameter_value) is torch.nn.Parameter:
                         return self._copy_parameter(tx, args[0])
+                    elif args[0].class_type is torch.Tensor:
+                        return args[0].call_method(tx, "clone", [], {})
             unimplemented("copy.copy/copy.deepcopy called on non-tensor")
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)

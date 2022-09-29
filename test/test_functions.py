@@ -734,9 +734,6 @@ class FunctionTests(torchdynamo.testing.TestCase):
         with self.assertRaises(torchdynamo.exc.Unsupported):
             h(torch.rand(10))
 
-    # test does not work with fake_tensor_propagation set to False since
-    # the Parameter gets silently converted to a tensor before the deepcopy call
-    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_copy_parameter(self):
         import copy
 
