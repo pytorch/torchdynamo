@@ -342,7 +342,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "ne": {b8, f16, f32, f64, i32, i64},
     "neg": {f16, f32, f64, i32, i64},
     "new_empty": {b8, f16, f32, i32, i64},
-    "new_empty_strided": {b8, f16, i32, f32, i64},
+    "new_empty_strided": {b8, f16, i32, f32, i64, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f32, f64},
     "nn.functional.avg_pool1d": {f32, f64, i64},
