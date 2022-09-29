@@ -130,11 +130,14 @@ class SizeVarAllocator(object):
             for v in base.free_symbols:
                 if v in var_ranges:
                     # var smaller than divisor can be removed
+                    # if the rest is guaranteed to be multiple of divisor
                     rest = sympy.Wild("_rest", exclude=[v])
                     m = base.match(v + rest)
                     if m and v not in m[rest].free_symbols:
-                        if self.maybe_guard_leq(var_ranges[v], divisor):
-                            base = m[rest]
+                        gcd = sympy.gcd(m[rest], divisor)
+                        if gcd == divisor:
+                            if self.maybe_guard_leq(var_ranges[v], divisor):
+                                base = m[rest]
             return base
 
         def visit_indexing_div(base, divisor):
