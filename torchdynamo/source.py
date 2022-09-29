@@ -22,17 +22,18 @@ _GUARD_SOURCE_NOT_NN_MODULE = {
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL,
 }
 
+
 def is_constant_source(source):
     if isinstance(source, ConstantSource):
         return True
     if source.guard_source() == GuardSource.CONSTANT:
         return True
-    
+
     return False
+
 
 @dataclasses.dataclass
 class Source:
-
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -41,7 +42,7 @@ class Source:
 
     def name(self):
         raise NotImplementedError()
-    
+
     # TODO(voz): Dedup these two??
     def create_guard(self, fn, is_volatile=False):
         if self.guard_source() is GuardSource.CONSTANT:
@@ -241,13 +242,14 @@ class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]
 
+
 @dataclasses.dataclass
 class ConstantSource(Source):
     source_name: str
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.source_name, add=True)]
-    
+        return [codegen.create_load_global(self.source_name, add=False)]
+
     def guard_source(self):
         return GuardSource.CONSTANT
 
@@ -259,4 +261,3 @@ class ConstantSource(Source):
 
     def create_guard(self, fn, is_volatile=False):
         raise NotImplementedError()
-

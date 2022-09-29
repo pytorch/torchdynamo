@@ -250,9 +250,7 @@ class NNModuleVariable(VariableTracker):
         if constant:
             fn = getattr(module, name)
             name = f"{module.__class__.__name__}_{name}_result"
-            return invoke_and_store_as_constant(
-                tx, fn, name, options, args, kwargs
-            )
+            return invoke_and_store_as_constant(tx, fn, name, options, args, kwargs)
 
         if not all(
             x.is_python_constant() for x in itertools.chain(args, kwargs.values())

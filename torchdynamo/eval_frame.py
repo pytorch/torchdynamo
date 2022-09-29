@@ -462,6 +462,8 @@ def export(f, *args, aten_graph=False, **kwargs):
                         False
                     ), "Dynamo input/output is not consistent with traced input/output"
             else:
+                # import pdb
+                # pdb.set_trace()
                 assert (
                     id(arg) in dict_of_source_args
                 ), "Dynamo input and output is a strict subset of traced input/output"
@@ -485,6 +487,8 @@ def export(f, *args, aten_graph=False, **kwargs):
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
+            # import pdb
+            # pdb.set_trace()
 
             graph_captured_input = graph_inputs
             graph_captured_result = graph(*graph_inputs)
@@ -508,12 +512,16 @@ def export(f, *args, aten_graph=False, **kwargs):
 
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
+    # import pdb
+    # pdb.set_trace()
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     flat_both = list(graph_captured_result) + flat_args
+    # import pdb
+    # pdb.set_trace()
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
     class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
@@ -559,7 +567,9 @@ def export(f, *args, aten_graph=False, **kwargs):
 
 def assume_constant_result(fn):
     setattr(fn, "DYNAMO_MARKED_CONSTANT", True)
-    assert not config.fake_tensor_propagation, "Constant result capture is not supported with fake tensors."
+    assert (
+        not config.fake_tensor_propagation
+    ), "Constant result capture is not supported with fake tensors."
     return fn
 
 

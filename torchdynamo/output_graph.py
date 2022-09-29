@@ -28,20 +28,20 @@ from .exc import unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
+from .source import ConstantSource
 from .source import LocalSource
 from .source import Source
-from .source import ConstantSource
 from .utils import CleanupHook
 from .utils import count_calls
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import format_graph_tabular
+from .variables.builder import VariableBuilder
+from .variables.constant import ConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import UnspecializedNumpyVariable
 from .variables.tensor import UnspecializedPythonVariable
-from .variables.builder import VariableBuilder
-from .variables.constant import ConstantVariable
 
 log = logging.getLogger(__name__)
 
@@ -168,6 +168,8 @@ class OutputGraph(fx.Tracer):
                     name = f"{name}_{i}"
                     break
 
+        # import pdb
+        # pdb.set_trace()
         if placeholders:
             ctx = self.graph.inserting_after(placeholders[-1])
         else:
@@ -220,7 +222,7 @@ class OutputGraph(fx.Tracer):
 
         # elif ConstantVariable.is_literal
         else:
-                    # if isinstance(mod, (list, tuple, )):
+            # if isinstance(mod, (list, tuple, )):
             # import pdb
             # pdb.set_trace()
             # options["guards"].add(source.create_guard(GuardBuilder.LIST_LENGTH))
@@ -232,10 +234,14 @@ class OutputGraph(fx.Tracer):
                 #     example_value=mod,
                 #     **options,
                 # )
+                self.output.update_co_names(module_key)
                 self.root_globals[module_key] = mod
-                return VariableBuilder(self, ConstantSource(source_name=module_key))(mod)
+                return VariableBuilder(self, ConstantSource(source_name=module_key))(
+                    mod
+                )
                 # globals()[module_key] = mod
                 # return out
+
             # return VariableBuilder(mod, source)
         for k, v in self.nn_modules.items():
             if v is mod:
@@ -433,6 +439,8 @@ class OutputGraph(fx.Tracer):
 
     def example_inputs(self):
         result = []
+        # import pdb
+        # pdb.set_trace()
         for arg in self.graphargs:
             result.extend(arg.get_examples())
         return result
