@@ -32,8 +32,6 @@ i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
 
-torchdynamo.config.raise_on_assertion_error = True
-
 _ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
 )
@@ -711,4 +709,5 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
+    torchdynamo.config.raise_on_assertion_error = True
     run_tests()
