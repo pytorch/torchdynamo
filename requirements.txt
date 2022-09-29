@@ -8,3 +8,4 @@ ninja
 numpy
 pytest
 pyyaml
+torch>=1.12.0
