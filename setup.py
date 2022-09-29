@@ -38,11 +38,8 @@ install_requires = [
     "dill",
     "jinja2",
     "networkx",
+    "sympy"
 ]
-
-if sys.version_info >= (3, 8):
-    install_requires.append("sympy")
-
 
 setup(
     name="torchdynamo",
