@@ -432,7 +432,7 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift])
+@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift, prims.view_of])
 def nop(x):
     return x  # AOT autograd handles this for us
 
@@ -1383,6 +1383,8 @@ ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
 
+register_lowering(aten.zero)(zeros_like)
+
 
 def new_constant(fill_value):
     def _new_constant(
@@ -1560,6 +1562,18 @@ def index(x, indices):
     )
 
 
+# This is moved from decomposition to lowering because this decomp introduced
+# mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
+# code elimination and common subexpression elimination optimizations, which
+# assume graphs to be side-effect free. More details at
+# https://github.com/pytorch/torchdynamo/issues/1235.
+# Moving such reinplacing type of decomps to lowering ensures that AotAutograd
+# gets good graphs.
+@register_lowering([aten.index_put])
+def index_put(x, indices, values, accumulate=False):
+    return index_put_(clone(x), indices, values, accumulate)
+
+
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
@@ -1608,6 +1622,11 @@ def index_put_(self, indices, values, accumulate=False):
     return self
 
 
+@register_lowering(aten.scatter, type_promote=False)
+def scatter(x, dim: int, index, src, **kwargs):
+    return scatter_(clone(x), dim, index, src, **kwargs)
+
+
 @register_lowering(aten.scatter_, type_promote=False)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
     if reduce == "add":
@@ -1618,6 +1637,21 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
     else:
         assert reduce is None
     return scatter_reduce_(self, dim, index, src, reduce)
+
+
+@register_lowering(aten.scatter_add, type_promote=False)
+def scatter_add(x, dim: int, index, src):
+    return scatter_add_(clone(x), dim, index, src)
+
+
+@register_lowering(aten.scatter_add_, type_promote=False)
+def scatter_add_(x, dim: int, index, src):
+    return scatter_reduce_(clone(x), dim, index, src, "sum")
+
+
+@register_lowering(aten.scatter_reduce, type_promote=False)
+def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
+    return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)
@@ -2733,7 +2767,10 @@ def make_reduction(reduction_type: str, override_dtype=None):
                 reduction_type, reduction_type
             ),
         )
-        result.realize()
+        if isinstance(
+            result.data.data, Reduction
+        ):  # Only realize if reduction isn't unrolled
+            result.realize()
         return result
 
     return inner
@@ -2916,6 +2953,16 @@ def div(a, b):
     )
 
 
+@register_lowering([aten.mul], broadcast=True)
+def mul(a, b):
+    both_bool = is_boolean_type(a) and is_boolean_type(b)
+    if both_bool:
+        return logical_and(a, b)
+    else:
+        fn = ops_wrapper(aten.mul.__name__)
+        return make_pointwise(fn)(a, b)
+
+
 # TODO(lezcano) I believe the casting behaviour of prims.div is wrong
 # https://github.com/pytorch/pytorch/issues/84412
 # div prim performs truncation division on integer inputs
@@ -2969,7 +3016,6 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(aten.add, allow_alpha=True)
 exp = register_pointwise(aten.exp)
 floor = register_pointwise(aten.floor)
-mul = register_pointwise(aten.mul)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
@@ -2984,6 +3030,7 @@ register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
+register_pointwise(aten.lgamma)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)
@@ -3006,9 +3053,10 @@ register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
-register_lowering(aten.__and__, type_promote=False)(
-    register_pointwise(aten.logical_and, type_promote=False, override_dtype=torch.bool)
+logical_and = register_pointwise(
+    aten.logical_and, type_promote=False, override_dtype=torch.bool
 )
+register_lowering(aten.__and__, type_promote=False)(logical_and)
 register_lowering(aten.__or__, type_promote=False)(
     register_pointwise(aten.logical_or, type_promote=False, override_dtype=torch.bool)
 )

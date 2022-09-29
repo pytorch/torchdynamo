@@ -9,7 +9,11 @@ import subprocess
 import sysconfig
 import tempfile
 import types
+from concurrent.futures import Future
+from concurrent.futures import ThreadPoolExecutor
 from ctypes import cdll
+from typing import Any
+from typing import Dict
 
 from torch.utils import cpp_extension
 
@@ -160,9 +164,10 @@ class PyCodeCache:
                 code = compile(f.read(), path, "exec")
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
+                mod.key = key
                 exec(code, mod.__dict__, mod.__dict__)
-                cls.cache[key] = mod
-                cls.cache[key].key = key
+                # another thread might set this first
+                cls.cache.setdefault(key, mod)
         return cls.cache[key]
 
 
@@ -174,7 +179,54 @@ def patch_triton_dir():
 
 
 class TritonCodeCache:
+    @staticmethod
+    def get_name(mod):
+        (name,) = [n for n in dir(mod) if n.startswith("kernel")]
+        return name
+
     @classmethod
     def load(cls, source_code):
         patch_triton_dir()
-        return PyCodeCache.load(source_code)
+        mod = PyCodeCache.load(source_code)
+        return getattr(mod, cls.get_name(mod))
+
+
+class AsyncCompile:
+    @staticmethod
+    @functools.lru_cache(1)
+    def pool():
+        assert config.compile_threads > 1
+        return ThreadPoolExecutor(config.compile_threads)
+
+    @classmethod
+    def submit(cls, task):
+        if config.compile_threads <= 1:
+            return task()
+        return cls.pool().submit(task)
+
+    @classmethod
+    def map(cls, fn, seq):
+        if config.compile_threads <= 1 or len(seq) <= 1:
+            return list(map(fn, seq))
+        return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
+
+    def triton(self, source_code):
+        kernel = TritonCodeCache.load(source_code)
+
+        def task():
+            kernel.precompile()
+            return kernel
+
+        return self.submit(task)
+
+    def cpp(self, source_code):
+        def task():
+            return CppCodeCache.load(source_code).kernel
+
+        return self.submit(task)
+
+    def wait(self, scope: Dict[str, Any]):
+        if config.compile_threads > 1:
+            for key, result in list(scope.items()):
+                if isinstance(result, Future):
+                    scope[key] = result.result()

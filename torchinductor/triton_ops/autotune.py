@@ -1,11 +1,14 @@
 import builtins
+import copy
 import hashlib
 import json
 import logging
+import multiprocessing
 import os.path
-import time
+import threading
 from typing import List
 
+import torch
 import triton
 from triton import Config
 from triton import cdiv
@@ -13,58 +16,148 @@ from triton import heuristics
 from triton import next_power_of_2
 from triton.ops.matmul import get_configs_io_bound
 from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
+from triton.runtime.jit import KernelInterface
+from triton.runtime.jit import get_cuda_stream
+from triton.testing import do_bench
 
 from torchinductor import config
 from torchinductor.ir import ReductionHint
 from torchinductor.triton_ops.mm_perf_model import estimate_matmul_time
 from torchinductor.utils import conditional_product
 
+from ..codecache import AsyncCompile
 from .conv_perf_model import early_config_prune as conv_early_config_prune
 from .conv_perf_model import estimate_conv_time
 
 log = logging.getLogger(__name__)
 
 
-class CachingAutotuner(triton.code_gen.Autotuner):
+class CachingAutotuner(KernelInterface):
     """
-    Simplified version of Triton autotuner that has no invalidation key
-    and caches the best config to disk.
+    Simplified version of Triton autotuner that has no invalidation
+    key and caches the best config to disk to improve cold start times.
+    Unlike the main triton Autotuner, this version can precompile all
+    configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, kernel, arg_names, configs, save_cache_hook):
-        super().__init__(kernel, arg_names, configs, [], None, None)
-        assert not self.early_config_prune
-        assert not self.perf_model
+    def __init__(self, fn, meta, configs, save_cache_hook):
+        super().__init__()
+        self.fn = fn
+        self.meta = meta
         self.save_cache_hook = save_cache_hook
+        self.configs = configs
+        self.launchers = []
+        self.lock = threading.Lock()
 
-    def _bench(self, *args, config, **kwargs):
-        try:
-            return super()._bench(*args, config=config, **kwargs)
-        except triton.code_gen.OutOfResources as e:
-            log.warning("OutOfResources: %s %s", e, config)
-            return (float("inf"), float("inf"), float("inf"))
+    def precompile(self):
+        with self.lock:
+            if self.launchers:
+                return
+            self.launchers = AsyncCompile.map(self._precompile_config, self.configs)
+            self.configs = None
 
-    def __call__(self, *args, **kwargs):
-        if len(self.configs) > 1:
-            bench_start = time.time()
-            timings = {
-                config: self._bench(*args, config=config, **kwargs)
-                for config in self.configs
-            }
-            self.bench_time = time.time() - bench_start
-            self.configs = [builtins.min(timings, key=timings.get)]
-            if self.save_cache_hook:
-                self.save_cache_hook(self.configs[0])
+    def _precompile_config(self, cfg: triton.runtime.autotuner.Config):
+        """Ahead of time compile a given autotuner config."""
+        torch.cuda.set_device(torch.cuda.current_device())
+        compile_meta = copy.deepcopy(self.meta)
+        for k, v in cfg.kwargs.items():
+            compile_meta["constants"][self.fn.arg_names.index(k)] = v
+        compile_meta["num_warps"] = cfg.num_warps
+        compile_meta["num_stages"] = cfg.num_stages
 
-        config = self.configs[0]
-        if config.pre_hook is not None:
-            config.pre_hook(dict(zip(self.arg_names, args)))
-        return self.kernel(
+        if config.compile_threads > 1:
+            major, minor = torch.cuda.get_device_capability(compile_meta["device"])
+            compile_meta["cc"] = major * 10 + minor
+            try:
+                p = multiprocessing.Process(
+                    target=triton.compile,
+                    args=(self.fn,),
+                    kwargs={**compile_meta, "warm_cache_only": True},
+                )
+                p.start()
+                p.join()
+            except Exception:
+                log.exception("Error in async Triton compile")
+                # continue on to hopefully get a better error message below
+
+        binary = triton.compile(
+            self.fn,
+            **compile_meta,
+        )
+
+        call_args = [
+            arg
+            for i, arg in enumerate(self.fn.arg_names)
+            if i not in self.fn.constexprs
+        ]
+        def_args = list(self.fn.arg_names)
+        while def_args and def_args[-1] in cfg.kwargs:
+            def_args.pop()
+
+        scope = {
+            "grid_meta": cfg.kwargs,
+            "bin": binary,
+            "torch": torch,
+            "set_device": torch.cuda.set_device,
+            "current_device": torch.cuda.current_device,
+        }
+        exec(
+            f"""
+            def launcher({', '.join(def_args)}, grid, stream):
+                # set_device(current_device())  # TODO(jansel): is this needed?
+                grid_0, grid_1, grid_2 = grid(grid_meta)
+                bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
+                              stream, bin.cu_function, {', '.join(call_args)})
+            """.lstrip(),
+            scope,
+        )
+        launcher = scope["launcher"]
+        launcher.config = cfg
+        return launcher
+
+    def bench(self, launcher, *args, grid):
+        """Measure the performance of a given launcher"""
+        stream = get_cuda_stream(torch.cuda.current_device())
+
+        def kernel_call():
+            if launcher.config.pre_hook is not None:
+                launcher.config.pre_hook(
+                    {**zip(self.arg_names, args), **launcher.config.kwargs}
+                )
+            launcher(
+                *args,
+                grid=grid,
+                stream=stream,
+            )
+
+        return do_bench(kernel_call)
+
+    def autotune_to_one_config(self, *args, **kwargs):
+        """Do the actual autotuning"""
+        timings = {
+            launcher: self.bench(launcher, *args, **kwargs)
+            for launcher in self.launchers
+        }
+        self.launchers = [builtins.min(timings, key=timings.get)]
+        if self.save_cache_hook:
+            self.save_cache_hook(self.launchers[0].config)
+
+    def run(self, *args, grid, stream):
+        if len(self.launchers) != 1:
+            if len(self.launchers) == 0:
+                self.precompile()
+            if len(self.launchers) > 1:
+                self.autotune_to_one_config(*args, grid=grid)
+
+        (launcher,) = self.launchers
+        if launcher.config.pre_hook is not None:
+            launcher.config.pre_hook(
+                {**zip(self.arg_names, args), **launcher.config.kwargs}
+            )
+        return launcher(
             *args,
-            num_warps=config.num_warps,
-            num_stages=config.num_stages,
-            **kwargs,
-            **config.kwargs,
+            grid=grid,
+            stream=stream,
         )
 
 
@@ -108,6 +201,7 @@ def load_cached_autotuning(
 
 def cached_autotune(
     configs: List[Config],
+    meta,
     filename=None,
 ):
     """
@@ -115,6 +209,7 @@ def cached_autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     configs = unique_configs(configs)
+    assert len(configs) == 1 or filename
 
     # on disk caching logic
     if filename is not None and len(configs) > 1:
@@ -132,13 +227,9 @@ def cached_autotune(
         save_cache_hook = None
 
     def decorator(fn):
-        def wrapper(kernel):
-            return CachingAutotuner(
-                kernel, fn.arg_names, configs, save_cache_hook=save_cache_hook
-            )
-
-        fn.kernel_decorators.append(wrapper)
-        return fn
+        return CachingAutotuner(
+            fn, meta=meta, configs=configs, save_cache_hook=save_cache_hook
+        )
 
     return decorator
 
@@ -262,23 +353,15 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def apply_triton_config(config):
-    """
-    Decorator that applies a fixed triton config using triton.heuristics.
-    """
-    # Autotuner with 1-config is no-op
-    return cached_autotune([config])
-
-
-def pointwise_heuristics(size_hints, filename=None):
+def pointwise(size_hints, meta, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
     if len(size_hints) == 1:
-        return apply_triton_config(triton_config(size_hints, 1024))
+        return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
     if len(size_hints) == 2:
         if not config.triton.autotune:
-            return apply_triton_config(triton_config(size_hints, 64, 64))
+            return cached_autotune([triton_config(size_hints, 64, 64)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
@@ -287,11 +370,12 @@ def pointwise_heuristics(size_hints, filename=None):
                 triton_config(size_hints, 1, 1024),
                 triton_config(size_hints, 1024, 1),
             ],
+            meta=meta,
             filename=filename,
         )
     if len(size_hints) == 3:
         if not config.triton.autotune:
-            return apply_triton_config(triton_config(size_hints, 16, 16, 16))
+            return cached_autotune([triton_config(size_hints, 16, 16, 16)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 16, 16, 16),
@@ -302,13 +386,15 @@ def pointwise_heuristics(size_hints, filename=None):
                 triton_config(size_hints, 1, 1024, 1),
                 triton_config(size_hints, 1, 1, 1024),
             ],
+            meta=meta,
             filename=filename,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
+def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     """args to @triton.heuristics()"""
+    assert meta is not None
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
@@ -319,13 +405,15 @@ def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
         )
         if reduction_hint == ReductionHint.INNER:
-            return apply_triton_config(contiguous_config)
+            return cached_autotune([contiguous_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER:
-            return apply_triton_config(outer_config)
+            return cached_autotune([outer_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER_TINY:
-            return apply_triton_config(tiny_config)
+            return cached_autotune([tiny_config], meta=meta)
         if not config.triton.autotune:
-            return apply_triton_config(triton_config_reduction(size_hints, 32, 128))
+            return cached_autotune(
+                [triton_config_reduction(size_hints, 32, 128)], meta=meta
+            )
         return cached_autotune(
             [
                 triton_config_reduction(size_hints, 64, 64),
@@ -337,25 +425,9 @@ def reduction_heuristics(size_hints, reduction_hint=False, filename=None):
                 ),  # this and the next one seem very similar but both are needed for perf
                 contiguous_config,
             ],
+            meta=meta,
             filename=filename,
         )
-    """
-    # This is not tested yet:
-    if len(size_hints) == 3:
-        if not config.triton.autotune:
-            return apply_triton_config(
-                triton_config_tiled_reduction(size_hints, 16, 16, 16)
-            )
-        return cached_autotune(
-            [
-                triton_config_tiled_reduction(size_hints, 16, 16, 16),
-                triton_config_tiled_reduction(size_hints, 1, 32, 128),
-                triton_config_tiled_reduction(size_hints, 32, 1, 128),
-                triton_config_tiled_reduction(size_hints, 1, 1, 2048, num_stages=1),
-            ],
-            filename=filename,
-        )
-    """
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
@@ -560,12 +632,31 @@ def mm_autotune(get_io_bound_configs=False):
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
-    def grid_fn(meta):
-        result = [cdiv(xnumel, meta["XBLOCK"])]
-        if ynumel:
-            result.append(cdiv(ynumel, meta["YBLOCK"]))
-            if znumel:
-                result.append(cdiv(znumel, meta["ZBLOCK"]))
-        return result
+    if ynumel and znumel:
+
+        def grid_fn(meta):
+            return (
+                cdiv(xnumel, meta["XBLOCK"]),
+                cdiv(ynumel, meta["YBLOCK"]),
+                cdiv(znumel, meta["ZBLOCK"]),
+            )
+
+    elif ynumel:
+
+        def grid_fn(meta):
+            return (
+                cdiv(xnumel, meta["XBLOCK"]),
+                cdiv(ynumel, meta["YBLOCK"]),
+                1,
+            )
+
+    else:
+
+        def grid_fn(meta):
+            return (
+                cdiv(xnumel, meta["XBLOCK"]),
+                1,
+                1,
+            )
 
     return grid_fn

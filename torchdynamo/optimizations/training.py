@@ -1,6 +1,8 @@
+import functools
 import logging
 import operator
 from collections import defaultdict
+from functools import partial
 from typing import Set
 
 import torch
@@ -159,7 +161,6 @@ def mem_efficient_fusion_kwargs(use_decomps):
         "fw_compiler": ts_compile,
         "bw_compiler": ts_compile,
         "partition_fn": min_cut_rematerialization_partition,
-        "hasher_type": "StaticShapeHasher",
     }
 
     if use_decomps:
@@ -182,6 +183,33 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+class AotInductorDebug(AotAutogradStrategy):
+    """
+    Uses TorchInductor Aot Autograd decopms and partitioner to isolate aot vs
+    inductor problems.
+    """
+
+    def candidate(self):
+        from functorch.compile import min_cut_rematerialization_partition
+        from functorch.compile import nop
+
+        from torchinductor.compile_fx import select_decomp_table
+
+        kwargs = {
+            # these are taken from memory_efficient_fusion()
+            "fw_compiler": nop,
+            "bw_compiler": nop,
+            "decompositions": select_decomp_table(),
+            "partition_fn": functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
+        }
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+aot_inductor_debug = AotInductorDebug.compile_fn
 
 
 class AOTMemEfficientFusionWithContext:
@@ -254,12 +282,49 @@ class AotPrimsNvfuser(AotAutogradStrategy):
             self.example_inputs,
             fw_compiler=wrap_compiler_debug(self.nvfuser, "nvfuser"),
             partition_fn=self.min_cut_rematerialization_partition,
-            hasher_type="StaticShapeHasher",
             decompositions=self.aten2aten_decompositions,
         )
 
 
 aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
+
+
+def prims_executor(gm, inputs, *, executor):
+    # This function is called once per forward/backward pass of a graph in AOT
+    # Autograd. We use it to set up the nvFuser-specific FX graph and return
+    # execute function.
+    from torch._prims.context import TorchRefsNvfuserCapabilityMode
+    from torch._prims.executor import execute
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    # First we trace the graph conditionally decomposing nodes
+    # that can be sent to the nvfuser executor
+    with TorchRefsNvfuserCapabilityMode():
+        prim_gm = make_fx(gm)(*inputs)
+
+    # Then we return a callable that executes the "prim_gm" graph
+    return partial(execute, prim_gm, executor=executor)
+
+
+def create_nvprims_backend(*, executor):
+    class NvPrims(AotAutogradStrategy):
+        def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+            super(NvPrims, self).__init__(gm, example_inputs)
+            self.executor = executor
+
+        def candidate(self):
+            return BACKENDS["aot_autograd"](
+                self.gm,
+                self.example_inputs,
+                fw_compiler=partial(prims_executor, executor=self.executor),
+                bw_compiler=partial(prims_executor, executor=self.executor),
+            )
+
+    return NvPrims
+
+
+aot_nvprims_nvfuser = create_nvprims_backend(executor="nvfuser").compile_fn
+aot_nvprims_aten = create_nvprims_backend(executor="aten").compile_fn
 
 
 def cloner(t):
@@ -388,7 +453,6 @@ def raw_aot_autograd_cudagraphs(model, inputs):
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
-        "hasher_type": "StaticShapeHasher",
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
@@ -431,6 +495,12 @@ def create_aot_backends():
     # directly lowers to NVFuser without relying no Torchscript.
     BACKENDS["prims_nvfuser"] = aot_prims_nvfuser
 
+    # "nvprims" is a subset of PrimTorch primitives that are guaranteed to be
+    # supported by nvFuser. This is the preferred backend for nvFuser+PrimTorch.
+    BACKENDS["nvprims_nvfuser"] = aot_nvprims_nvfuser
+    # This is useful for debugging. Can be removed later.
+    BACKENDS["nvprims_aten"] = aot_nvprims_aten
+
     # aot_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
     # It uses min cut rematerialization algorithm, and uses nvfuser as the
     # compiler backend. This is the most optimized setting with nvfuser for
@@ -446,3 +516,7 @@ def create_aot_backends():
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
     BACKENDS["aot_cudagraphs"] = aot_cudagraphs
+
+    # aot_inductor_debug just replaces the inductor compiler with nop to help
+    # isolate inductor vs aot_eager errors
+    BACKENDS["aot_inductor_debug"] = aot_inductor_debug

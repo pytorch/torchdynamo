@@ -1,3 +1,4 @@
+
 @conv_heuristics()
 @triton.jit
 def {{kernel_name}}(
@@ -29,15 +30,15 @@ def {{kernel_name}}(
     OUT_H,
     OUT_W,
     # parameters of conv
-    stride_h: tl.constexpr,
-    stride_w: tl.constexpr,
-    padding_h: tl.constexpr,
-    padding_w: tl.constexpr,
-    dilation_h: tl.constexpr,
-    dilation_w: tl.constexpr,
-    output_padding_h: tl.constexpr,
-    output_padding_w: tl.constexpr,
-    groups: tl.constexpr,
+    stride_h,
+    stride_w,
+    padding_h,
+    padding_w,
+    dilation_h,
+    dilation_w,
+    output_padding_h,
+    output_padding_w,
+    groups,
     # pointer inc for x
     delta_xh_ptr,
     delta_xw_ptr,
