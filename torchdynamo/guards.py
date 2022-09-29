@@ -20,6 +20,8 @@ from typing import Set
 import numpy as np
 import torch
 
+from torchdynamo import convert_frame
+
 from . import config
 from . import mutation_guard
 from ._guards import TensorGuards
@@ -105,7 +107,7 @@ class Guard:
 
     def __str__(self):
         s = f"""
-            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}"
+            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}
             {{
                 'guard_types': {self.guard_types},
                 'code': {self.code_list},
@@ -404,11 +406,11 @@ class GuardBuilder:
         mutation_guard.watch(self.get(guard.name), self.guarded_code)
 
     def GRAD_MODE(self, guard: Guard):
-        """Guard on the current value of torch.is_grad_enabled()"""
+        """Guard on the initial grad state"""
         assert guard.name == ""
         assert guard.source is GuardSource.GLOBAL
         code = None
-        if torch.is_grad_enabled():
+        if convert_frame.initial_grad_state:
             code = "___is_grad_enabled()"
         else:
             code = "not ___is_grad_enabled()"

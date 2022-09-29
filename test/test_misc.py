@@ -526,6 +526,24 @@ class MiscTests(torchdynamo.testing.TestCase):
             torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
 
+    def test_grad_mode_guard(self):
+        def fn(a, b):
+            prev_grad = torch.is_grad_enabled()
+            torch.set_grad_enabled(False)
+            a = a + 1
+            a.tolist()  # graph break
+            ret = a + b
+            torch.set_grad_enabled(prev_grad)
+            return ret
+
+        a = torch.randn([3, 4])
+        b = torch.randn([3, 4])
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            opt_fn(a, b)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
