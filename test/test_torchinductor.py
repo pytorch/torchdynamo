@@ -173,22 +173,24 @@ def check_model(
     torchinductor.metrics.reset()
 
     called = False
+
     def compile_fx_wrapper(model_, example_inputs_):
         nonlocal called
         called = True
         return compile_fx(model_, example_inputs_)
-    
+
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
+
     run = torchdynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
 
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
-    if not called:
-        exp = torchdynamo.explain(run, *example_inputs)
-        print("Explain:", exp[0])
-        for graph in exp[2]:
-            print("Graph", graph)
+    # if not called:
+    #     exp = torchdynamo.explain(run, *example_inputs)
+    #     print("Explain:", exp[0])
+    #     for graph in exp[2]:
+    #         print("Graph", graph)
     assert called, "Ran graph without calling compile_fx"
 
     assert type(actual) == type(correct)
@@ -233,7 +235,9 @@ def check_model_cuda(
         ).copy_(x)
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
-    check_model(self, model, example_inputs, kwargs, exact_dtype=exact_dtype, nopython=nopython)
+    check_model(
+        self, model, example_inputs, kwargs, exact_dtype=exact_dtype, nopython=nopython
+    )
 
     if check_lowp:
 
@@ -247,7 +251,15 @@ def check_model_cuda(
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
-        check_model(self, model, example_inputs, kwargs, 2e-3, exact_dtype=exact_dtype, nopython=nopython)
+        check_model(
+            self,
+            model,
+            example_inputs,
+            kwargs,
+            2e-3,
+            exact_dtype=exact_dtype,
+            nopython=nopython,
+        )
 
 
 class SweepInputs2:
