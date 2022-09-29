@@ -23,7 +23,7 @@ from ..virtualized import ops
 
 log = logging.getLogger(__name__)
 
-TensorArg = namedtuple("TensorArg", ["name", "dtype"])
+TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
 
@@ -368,7 +368,9 @@ class KernelArgs:
             call_args.append(inplaced.other_names[-1])
             precompile_args.append(
                 TensorArg(
-                    inplaced.inner_name, V.graph.get_dtype(inplaced.other_names[-1])
+                    inplaced.inner_name,
+                    inplaced.other_names[-1],
+                    V.graph.get_dtype(inplaced.other_names[-1]),
                 )
             )
         for outer, inner in chain(
@@ -378,7 +380,7 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(TensorArg(inner, V.graph.get_dtype(outer)))
+            precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)

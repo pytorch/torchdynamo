@@ -273,6 +273,8 @@ class WrapperCodeGen(CodeGen):
             return
         if isinstance(layout, ir.AliasedLayout):
             assert isinstance(layout.view, ir.ReinterpretView)
+            if not layout.maybe_guard_aligned():
+                V.graph.unaligned_buffers.add(name)
             self.codegen_allocation(layout.view.data)
             allocation = DeferredLine(
                 name, f"{name} = {layout.view.codegen_reference()}  # alias"
