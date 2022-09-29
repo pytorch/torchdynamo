@@ -264,9 +264,6 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
-        elif proxy.node.op == "get_attr" and isinstance(example_value, numbers.Number):
-            proxy.node.meta["example_value"] = example_value
-            return variables.ConstantVariable(example_value, **options)
         else:
             assert (
                 False
