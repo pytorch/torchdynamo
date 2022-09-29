@@ -15,6 +15,7 @@ from ctypes import cdll
 from typing import Any
 from typing import Dict
 
+import torch
 from torch.utils import cpp_extension
 
 from . import config
@@ -192,6 +193,9 @@ class TritonCodeCache:
 
 
 class AsyncCompile:
+    def __init__(self):
+        self._context_keepalive = None
+
     @staticmethod
     @functools.lru_cache(1)
     def pool():
@@ -211,6 +215,9 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(self, source_code):
+        if self._context_keepalive is None:
+            # Workaround `CUDA: Error- context is destroyed`
+            self._context_keepalive = torch.tensor([1], device="cuda")
         kernel = TritonCodeCache.load(source_code)
 
         def task():
