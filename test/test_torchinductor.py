@@ -453,6 +453,28 @@ class CommonTemplate:
             if name.startswith("test_"):
                 setattr(other_cls, f"{name}_{suffix}", value)
 
+    def test_bool(self):
+        def fn(a, b):
+            return (
+                a + b,
+                a * b,
+                a & b,
+                a | b,
+                a ^ b,
+                torch.logical_and(a, b),
+                torch.logical_or(a, b),
+                torch.logical_not(a),
+                torch.sign(b),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor([True, False, True, False]),
+                torch.tensor([False, False, True, True]),
+            ),
+        )
+
     def test_add_const_int(self):
         def fn(a):
             return (a + 1,)
