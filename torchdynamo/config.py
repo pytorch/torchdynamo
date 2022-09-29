@@ -84,9 +84,18 @@ raise_on_assertion_error = False
 # Propagate backend exceptions up to torchdynamo.optimize
 raise_on_backend_error = True
 
+# Record and write an execution record of the current frame to a file
+# if an exception is encountered
+replay_record_enabled = False
+replay_record_dir_name = "./torchdynamo_error_records"
+
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
-skipfiles_inline_module_allowlist = {torch.nn, torch.distributions}
+skipfiles_inline_module_allowlist = {
+    torch.nn,
+    torch.distributions,
+    torch.testing,
+}
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
         torch._refs,
@@ -125,9 +134,13 @@ capture_scalar_outputs = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
+# Automatically split model graph into pieces to match DDP bucket sizes
+# to allow DDP comm/compute overlap
+optimize_ddp = False
+
 
 # If True, raises exception if TorchDynamo is called with a context manager
-raise_on_ctx_manager_usage = False
+raise_on_ctx_manager_usage = True
 
 
 class _AccessLimitingConfig(ModuleType):

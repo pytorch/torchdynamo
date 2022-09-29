@@ -51,6 +51,8 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+compile_threads = 1
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -129,3 +131,7 @@ class trace:
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
+
+    # Upload the .tar.gz file
+    # Needs to be overriden based on specific environment needs
+    upload_tar = None

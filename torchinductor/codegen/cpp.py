@@ -33,6 +33,7 @@ DTYPE_TO_CPP = {
     torch.int8: "signed char",
     torch.uint8: "unsigned char",
     torch.bool: "bool",
+    torch.bfloat16: "bfloat16",
 }
 INDEX_TYPE = "long"
 
@@ -212,6 +213,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def isnan(x):
         return f"std::isnan({x})"
+
+    @staticmethod
+    def lgamma(x):
+        return f"std::lgamma({x})"
 
     @staticmethod
     def relu(x):
@@ -564,9 +569,9 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        codecache_def.writeline("CppCodeCache.load('''")
+        codecache_def.writeline("async_compile.cpp('''")
         codecache_def.splice(code)
-        codecache_def.writeline("''').kernel")
+        codecache_def.writeline("''')")
 
         kernel_name = wrapper.next_kernel_name()
         codecache_str = codecache_def.getvalue()

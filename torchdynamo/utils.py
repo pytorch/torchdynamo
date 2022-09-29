@@ -183,6 +183,20 @@ LOGGING_CONFIG = {
 }
 
 
+tensortype_to_dtype = {
+    torch.FloatTensor: (torch.float32, torch.float),
+    torch.DoubleTensor: (torch.float64, torch.double),
+    torch.HalfTensor: (torch.float16, torch.half),
+    torch.BFloat16Tensor: (torch.bfloat16,),
+    torch.ByteTensor: (torch.uint8,),
+    torch.CharTensor: (torch.int8,),
+    torch.LongTensor: (torch.int64, torch.long),
+    torch.IntTensor: (torch.int32, torch.int),
+    torch.ShortTensor: (torch.int16, torch.short),
+    torch.BoolTensor: (torch.bool,),
+}
+
+
 # initialize torchdynamo loggers
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
@@ -220,9 +234,28 @@ def format_graph_tabular(graph):
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
 
 
-def format_bytecode(prefix, frame, code):
-    return f"{prefix} {frame.f_code.co_name} {frame.f_code.co_filename}\
- line {frame.f_code.co_firstlineno} \n{dis.Bytecode(code).dis()}\n "
+def format_bytecode(prefix, name, filename, line_no, code):
+    return f"{prefix} {name} {filename}\
+ line {line_no} \n{dis.Bytecode(code).dis()}\n "
+
+
+def gen_record_file_name(exc, code):
+    return f"{config.replay_record_dir_name}/\
+{code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
+
+
+def write_record_to_file(filename, exec_record):
+    try:
+        if os.path.exists(filename):
+            log.warning(
+                f"Unable to write execution record {filename}; file already exists."
+            )
+        else:
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            with open(filename, "wb") as f:
+                exec_record.dump(f)
+    except Exception:
+        log.error(f"Unable to write execution record {filename}", exc_info=1)
 
 
 def count_calls(g: fx.Graph):
@@ -738,7 +771,7 @@ def same(
                     exact_dtype=exact_dtype,
                 )
             ):
-                log.info("Accuracy failed for key name", k)
+                log.error(f"Accuracy failed for key name {k}")
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -772,18 +805,19 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 1.1
+                multiplier = 2
 
-                if fp64_ref.numel() < 500:
-                    # In the presence of noise, noise might dominate our error
-                    # metric for smaller tensors.
-                    multiplier = 2
+                # if fp64_ref.numel() < 500:
+                #     # In the presence of noise, noise might dominate our error
+                #     # metric for smaller tensors.
+                #     multiplier = 2.5
 
                 passes_test = res_error <= (multiplier * ref_error + 1e-5)
                 if not passes_test:
-                    log.warning(
+                    log.error(
                         f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
                     )
+                    # import pdb; pdb.set_trace()
                 return passes_test
 
             return False

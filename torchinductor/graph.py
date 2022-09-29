@@ -91,6 +91,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_dynamic_inputs = num_dynamic_inputs
         self.num_static_inputs = None
         self.mutated_inputs = set()
+        self.unaligned_buffers = set()
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
@@ -289,10 +290,17 @@ class GraphLowering(torch.fx.Interpreter):
             assert isinstance(value, TensorBox)
             value = value.data
             assert isinstance(value, ir.StorageBox)
+            value_storage_box = value
             value = value.data
             if not isinstance(value, InputBuffer) or value.get_name() != name:
                 # one of our inputs was mutated, need to turn that into a copy
                 ir.MutationLayout.realize_into(value, self.graph_inputs_original[name])
+                # replace output with mutated input
+                try:
+                    ind = self.graph_outputs.index(value_storage_box)
+                    self.graph_outputs[ind] = self.graph_inputs_original[name]
+                except ValueError:
+                    pass
 
         self.finalize()
 

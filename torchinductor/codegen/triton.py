@@ -19,6 +19,7 @@ from .. import ir
 from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
+from ..utils import instance_descriptor
 from ..utils import sympy_product
 from ..utils import sympy_subs
 from ..virtualized import V
@@ -28,9 +29,34 @@ from .common import ExprPrinter
 from .common import IndentedBuffer
 from .common import Kernel
 from .common import OpOverrides
+from .common import SizeArg
+from .common import TensorArg
 from .common import index_prevent_reordering
 
 log = logging.getLogger(__name__)
+
+
+def signature_of(arg):
+    from triton.runtime.jit import JITFunction
+
+    if isinstance(arg, TensorArg):
+        return JITFunction._type_of(arg.dtype)
+    if isinstance(arg, SizeArg):
+        return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
+    raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
+
+
+def config_of(args):
+    from ..compile_fx import ALIGNMENT
+
+    def is_aligned(x):
+        if isinstance(x, TensorArg):
+            return x.buffer not in V.graph.unaligned_buffers
+        assert isinstance(x, SizeArg)
+        return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+
+    divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
+    return instance_descriptor(tuple(divisible_by_16), ())
 
 
 class TritonPrinter(ExprPrinter):
@@ -146,6 +172,10 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
+    def lgamma(x):
+        return f"tl.libdevice.lgamma({x})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -172,7 +202,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, {b})"
+        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
 
     @staticmethod
     def pow(a, b):
@@ -901,55 +931,67 @@ class TritonKernel(Kernel):
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
-        if self.inside_reduction:
-            heuristics = "reduction_heuristics"
-            hint_import = "from torchinductor.ir import ReductionHint"
+        if not self.inside_reduction:
+            size_hints.pop()
+            heuristics = "pointwise"
         else:
-            heuristics = "pointwise_heuristics"
-            size_hints = size_hints[:-1]
-            hint_import = ""
+            heuristics = "reduction"
 
         if name is None:
             code.splice(
                 f"""
                     import triton
                     import triton.language as tl
+                    from torchinductor.ir import ReductionHint
                     from torchinductor.triton_ops.autotune import {heuristics}
-                    {hint_import}
+                    from torchinductor.utils import instance_descriptor
                 """
             )
 
-        if self.inside_reduction:
-            reduction_hint = self.reduction_hint
-            heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, reduction_hint={reduction_hint}, filename=__file__)
-                @triton.jit
-            """
-        else:
-            heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__)
-                @triton.jit
-            """
-        code.splice(heuristics_line)
-
-        argdefs, _ = self.args.python_argdefs()
-
-        if config.dynamic_shapes:
-            maybe_const = ""
-        else:
-            maybe_const = ": tl.constexpr"
+        argdefs, _, signature = self.args.python_argdefs()
+        triton_meta = {
+            "signature": dict(enumerate(map(signature_of, signature))),
+            "device": V.graph.scheduler.current_device.index,
+            "configs": [config_of(signature)],
+            "constants": {},
+        }
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                argdefs.append(f"{tree.prefix}numel{maybe_const}")
+                triton_meta["signature"][len(argdefs)] = signature_of(
+                    SizeArg(f"{tree.prefix}numel", tree.numel)
+                )
+                argdefs.append(f"{tree.prefix}numel")
+                # constexpr version causes issues, see
+                # https://github.com/pytorch/torchdynamo/pull/1362
+                # triton_meta["constants"][len(argdefs)] = V.graph.sizevars.size_hint(
+                #     tree.numel
+                # )
+                # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
                 argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
-        code.writeline(f"def {name or '{kernel_name}'}({', '.join(argdefs)}):")
+        if self.inside_reduction:
+            reduction_hint = self.reduction_hint
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r},
+                              reduction_hint={reduction_hint},
+                              filename=__file__,
+                              meta={triton_meta!r})
+                @triton.jit
+            """
+        else:
+            heuristics_line = f"""
+                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @triton.jit
+            """
+        code.splice(heuristics_line)
+        code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
+            self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -958,10 +1000,25 @@ class TritonKernel(Kernel):
             return code.getvalue()
 
         wrapper = IndentedBuffer()
-        wrapper.writeline("TritonCodeCache.load('''")
+        wrapper.writeline("async_compile.triton('''")
         wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("''').{kernel_name}")
+        wrapper.writeline("''')")
         return wrapper.getvalue()
+
+    def codegen_static_numels(self, code):
+        """
+        We get a small speedup from hard coding numels if they are static.
+        """
+        for tree in self.range_trees:
+            if tree.prefix != "r" or self.inside_reduction:
+                if isinstance(V.graph.sizevars.simplify(tree.numel), sympy.Integer):
+                    code.writeline(
+                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}"
+                    )
+                elif not config.dynamic_shapes:
+                    code.writeline(
+                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
+                    )
 
     def reshape_size_str(self, i=None, x=None):
         sizes = ["1"] * (len(self.range_trees) - int(self.numels[-1] == 1))
@@ -979,7 +1036,7 @@ class TritonKernel(Kernel):
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, code, name: str):
-        _, call_args = self.args.python_argdefs()
+        _, call_args, _ = self.args.python_argdefs()
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
@@ -993,7 +1050,10 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
         call_args = ", ".join(call_args)
-        code.writeline(f"{name}[grid({', '.join(grid)})]({call_args})")
+        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
+        code.writeline(
+            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
+        )
 
 
 class TritonScheduling:
@@ -1175,7 +1235,7 @@ class TritonScheduling:
             kernel_name = wrapper.next_kernel_name()
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
-            src_code = src_code.format(kernel_name=subs_name)
+            src_code = src_code.replace("KERNEL_NAME", subs_name)
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")

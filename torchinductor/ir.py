@@ -717,7 +717,11 @@ class Reduction(Loops):
                 reduction_type,
                 reduction_numel,
             )
-            reduction_hint = hint if hint != ReductionHint.DEFAULT else reduction_hint
+            # intermediate reduction in split can contain complex indexing,
+            # and num_splits will fail to correctly set the hint
+            # reuse the passed hint if available
+            if reduction_hint == ReductionHint.DEFAULT:
+                reduction_hint = hint
             if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
@@ -1628,6 +1632,14 @@ class AliasedLayout(Layout):
 
     def make_indexer(self):
         return self.as_fixed().make_indexer()
+
+    def maybe_guard_aligned(self):
+        offset = self.view.get_layout().offset
+        if offset == 0:
+            return True
+        from .compile_fx import ALIGNMENT
+
+        return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
 
 
 class MutationLayout(Layout):
@@ -3188,6 +3200,11 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    def is_input_buffer(self):
+        if isinstance(self.data, (InputBuffer, ReinterpretView)):
+            return self.data.get_name() in V.graph.graph_inputs
+        return False
+
     def realize(self):
         if isinstance(
             self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)

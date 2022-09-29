@@ -4,6 +4,8 @@ import logging
 import operator
 from collections.abc import Iterable
 from typing import List
+from typing import Optional
+from typing import Tuple
 
 import sympy
 import torch
@@ -62,6 +64,7 @@ add_needs_realized_inputs(
         aten.mm,
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
+        aten.upsample_bicubic2d,
     ]
 )
 
@@ -429,7 +432,7 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift])
+@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift, prims.view_of])
 def nop(x):
     return x  # AOT autograd handles this for us
 
@@ -946,14 +949,16 @@ make_fallback(aten.cumsum)
 make_fallback(aten._embedding_bag)
 make_fallback(aten._embedding_bag_forward_only)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
+make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
+make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
 make_fallback(aten.unfold)
 make_fallback(aten.unfold_backward)
-make_fallback(aten.upsample_bicubic2d)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
 
@@ -1056,7 +1061,7 @@ def arange(
     assert isinstance(step, int)
 
     dtype = dtype or torch.int64
-    length = (end - start) // step
+    length = ceildiv((end - start), step)
     start = sympy.Integer(start)
     step = sympy.Integer(step)
 
@@ -1320,9 +1325,19 @@ def full_like(x, fill_value, **kwargs):
 
 def tensor_constructor(fill_value):
     # torch.zeros, torch.ones, etc
-    def inner(*size, dtype=None, device=None, layout=0, pin_memory=False):
+    def inner(
+        *size,
+        names=None,
+        dtype=None,
+        device=None,
+        layout=0,
+        pin_memory=False,
+        memory_format=None,
+    ):
+        assert names is None
         assert not pin_memory
         assert layout in (0, torch.strided)
+        assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -1370,6 +1385,8 @@ zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(zeros))
 ones_like = register_lowering(aten.ones_like)(create_tensor_like(ones))
 if not config.fallback_random:
     rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+
+register_lowering(aten.zero)(zeros_like)
 
 
 def new_constant(fill_value):
@@ -1439,16 +1456,17 @@ def full(size, fill_value, **kwargs):
 @register_lowering(aten.gather, type_promote=False)
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
-    assert isinstance(dim, int)
-    assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(x.get_size())
+    assert index.get_dtype() == torch.int64
+    offset = len(x.get_size()) == 0
+    dim = _validate_dim(x, dim, offset)
 
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
     def fn(idx):
         idx = list(idx)
-        idx[dim] = ops.indirect_indexing(index_loader(idx))
+        if len(idx) != 0:
+            idx[dim] = ops.indirect_indexing(index_loader(idx))
         return x_loader(idx)
 
     return Pointwise.create(
@@ -1548,6 +1566,18 @@ def index(x, indices):
     )
 
 
+# This is moved from decomposition to lowering because this decomp introduced
+# mutation in the graph, which is bad for Aot Autograd. Aot Autograd runs dead
+# code elimination and common subexpression elimination optimizations, which
+# assume graphs to be side-effect free. More details at
+# https://github.com/pytorch/torchdynamo/issues/1235.
+# Moving such reinplacing type of decomps to lowering ensures that AotAutograd
+# gets good graphs.
+@register_lowering([aten.index_put])
+def index_put(x, indices, values, accumulate=False):
+    return index_put_(clone(x), indices, values, accumulate)
+
+
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
     values = to_dtype(values, self.get_dtype())
@@ -1596,27 +1626,9 @@ def index_put_(self, indices, values, accumulate=False):
     return self
 
 
-@register_lowering(aten.index_select, type_promote=False)
-def index_select(x, dim, indices):
-    x_loader = x.make_loader()
-    index_loader = indices.make_loader()
-    dim = _validate_dim(x, dim, 0)
-
-    sizes = list(x.get_size())
-    (sizes[dim],) = indices.get_size()
-
-    def fn(idx):
-        assert len(idx) == len(sizes)
-        idx = list(idx)
-        idx[dim] = ops.indirect_indexing(index_loader([idx[dim]]))
-        return x_loader(idx)
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=sizes,
-    )
+@register_lowering(aten.scatter, type_promote=False)
+def scatter(x, dim: int, index, src, **kwargs):
+    return scatter_(clone(x), dim, index, src, **kwargs)
 
 
 @register_lowering(aten.scatter_, type_promote=False)
@@ -1629,6 +1641,21 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
     else:
         assert reduce is None
     return scatter_reduce_(self, dim, index, src, reduce)
+
+
+@register_lowering(aten.scatter_add, type_promote=False)
+def scatter_add(x, dim: int, index, src):
+    return scatter_add_(clone(x), dim, index, src)
+
+
+@register_lowering(aten.scatter_add_, type_promote=False)
+def scatter_add_(x, dim: int, index, src):
+    return scatter_reduce_(clone(x), dim, index, src, "sum")
+
+
+@register_lowering(aten.scatter_reduce, type_promote=False)
+def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
+    return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
 @register_lowering(aten.scatter_reduce_, type_promote=False)
@@ -1737,6 +1764,141 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
         inner_fn=fn,
         ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
     )
+
+
+@register_lowering(aten.upsample_bicubic2d.default)
+def upsample_bicubic2d_default(
+    x,
+    output_size,
+    align_corners: bool,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    x.realize_hint()
+    x_loader = x.make_loader()
+
+    N, C, iH, iW = x.get_size()
+    oH, oW = output_size
+
+    iH = V.graph.sizevars.guard_static_shape(iH)
+    iW = V.graph.sizevars.guard_static_shape(iW)
+
+    def get_int_dtype(maxval):
+        if maxval > torch.iinfo(torch.int32).max:
+            return torch.int64
+        return torch.int32
+
+    def compute_scale(in_size, out_size, align_corners, scale=None):
+        if align_corners:
+            return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
+        else:
+            return 1 / scale if scale is not None and scale > 0 else in_size / out_size
+
+    def compute_source_index(scale, dst_index, align_corners):
+        dst_index_ie = ops.index_expr(dst_index, torch.float32)
+        if align_corners:
+            return ops.mul(scale, dst_index_ie)
+        else:
+            return ops.sub(
+                ops.mul(scale, ops.add(dst_index_ie, 0.5)), 0.5
+            )  # scale * (dst_index + 0.5) - 0.5
+
+    def cubic_convolution1(x, A):
+        # ((A + 2) * x - (A+3)) * x * x + 1
+        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(A + 2, x), A + 3), x), x), 1.0)
+
+    def cubic_convolution2(x, A):
+        # ((A * x - 5 * A) * x + 8 * A) * x - 4*A
+        return ops.sub(
+            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(A, x), 5 * A), x), 8 * A), x), 4 * A
+        )
+
+    def get_cubic_upsample_coefficients(t):
+        A = -0.75
+        c0 = cubic_convolution2(ops.add(t, 1.0), A)
+        c1 = cubic_convolution1(t, A)
+
+        x2 = ops.sub(1.0, t)
+        c2 = cubic_convolution1(x2, A)
+        c3 = cubic_convolution2(ops.add(x2, 1.0), A)
+        return (
+            c0,
+            c1,
+            c2,
+            c3,
+        )
+
+    def cubic_interp1d(xs, t):
+        cs = get_cubic_upsample_coefficients(t)
+        # dot product between xs and cs
+        return ops.add(
+            ops.mul(xs[0], cs[0]),
+            ops.add(
+                ops.mul(xs[1], cs[1]),
+                ops.add(ops.mul(xs[2], cs[2]), ops.mul(xs[3], cs[3])),
+            ),
+        )
+
+    height_scale = compute_scale(iH, oH, align_corners, scales_h)
+    width_scale = compute_scale(iW, oW, align_corners, scales_h)
+
+    def clamp(v, min, max):
+        return ops.maximum(min, ops.minimum(max, v))
+
+    def fn(idx):
+        n, c, oy, ox = idx
+
+        real_x = compute_source_index(width_scale, ox, align_corners)
+        in_x = ops.floor(real_x)
+        t_x = ops.sub(real_x, in_x)
+
+        real_y = compute_source_index(height_scale, oy, align_corners)
+        in_y = ops.floor(real_y)
+        t_y = ops.sub(real_y, in_y)
+
+        def load_bounded(fy, fx):
+            iy = ops.indirect_indexing(clamp(fy, 0, iH - 1))
+            ix = ops.indirect_indexing(clamp(fx, 0, iW - 1))
+            return x_loader([n, c, iy, ix])
+
+        iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
+        ix = ops.to_dtype(in_x, get_int_dtype(iW + 1))
+        iys_ofs = tuple((ops.add(iy, ofs) for ofs in (-1, 0, 1, 2)))
+        ixs_ofs = tuple((ops.add(ix, ofs) for ofs in (-1, 0, 1, 2)))
+
+        def get_x_interp(y):
+            coeffs_x = tuple((load_bounded(y, x) for x in ixs_ofs))
+            return cubic_interp1d(coeffs_x, t_x)
+
+        coeffs_y = tuple(get_x_interp(y) for y in iys_ofs)
+        return cubic_interp1d(coeffs_y, t_y)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=[N, C, sympy.Integer(oH), sympy.Integer(oW)],
+    )
+
+
+@register_lowering(aten.upsample_bicubic2d.vec)
+def upsample_bicubic2d_vec(
+    a,
+    output_size,
+    align_corners: bool,
+    scale_factors: Optional[Tuple[float, float]] = None,
+):
+    _, _, iH, iW = a.get_size()
+    iH = V.graph.sizevars.guard_static_shape(iH)
+    iW = V.graph.sizevars.guard_static_shape(iW)
+
+    if bool(output_size) + bool(scale_factors) != 1:
+        raise RuntimeError("Must specify exactly one of output_size and scale_factor.")
+    if output_size is None:
+        assert scale_factors is not None
+        output_size = (int(iH * scale_factors[0]), int(iW * scale_factors[1]))
+    scale_h, scale_w = scale_factors if scale_factors else (None, None)
+    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
 @register_lowering(aten.reflection_pad2d)
@@ -2609,7 +2771,10 @@ def make_reduction(reduction_type: str, override_dtype=None):
                 reduction_type, reduction_type
             ),
         )
-        result.realize()
+        if isinstance(
+            result.data.data, Reduction
+        ):  # Only realize if reduction isn't unrolled
+            result.realize()
         return result
 
     return inner
@@ -2723,7 +2888,7 @@ def mutate_to(changed, val):
         ).data
         assert isinstance(val, ir.StorageBox)
 
-    if isinstance(changed_data, ir.StorageBox):
+    if isinstance(changed_data, ir.StorageBox) and not changed_data.is_input_buffer():
         # Fast path, just swing the data pointer
         val.realize()
         changed_data.data = val.data
@@ -2792,6 +2957,16 @@ def div(a, b):
     )
 
 
+@register_lowering([aten.mul], broadcast=True)
+def mul(a, b):
+    both_bool = is_boolean_type(a) and is_boolean_type(b)
+    if both_bool:
+        return logical_and(a, b)
+    else:
+        fn = ops_wrapper(aten.mul.__name__)
+        return make_pointwise(fn)(a, b)
+
+
 # TODO(lezcano) I believe the casting behaviour of prims.div is wrong
 # https://github.com/pytorch/pytorch/issues/84412
 # div prim performs truncation division on integer inputs
@@ -2845,7 +3020,6 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(aten.add, allow_alpha=True)
 exp = register_pointwise(aten.exp)
 floor = register_pointwise(aten.floor)
-mul = register_pointwise(aten.mul)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
@@ -2860,6 +3034,7 @@ register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
+register_pointwise(aten.lgamma)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not)
 register_pointwise(aten.maximum)
@@ -2882,9 +3057,10 @@ register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
 register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
-register_lowering(aten.__and__, type_promote=False)(
-    register_pointwise(aten.logical_and, type_promote=False, override_dtype=torch.bool)
+logical_and = register_pointwise(
+    aten.logical_and, type_promote=False, override_dtype=torch.bool
 )
+register_lowering(aten.__and__, type_promote=False)(logical_and)
 register_lowering(aten.__or__, type_promote=False)(
     register_pointwise(aten.logical_or, type_promote=False, override_dtype=torch.bool)
 )
@@ -2894,6 +3070,7 @@ def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promote=False)
     def fn(*args, **kwargs):
         result = outplace_op(*args, **kwargs)
+        result = to_dtype(result, args[0].get_dtype())
         return mutate_to(args[0], result)
 
     return fn

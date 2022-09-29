@@ -18,6 +18,8 @@ from torch.nn import functional as F
 
 import torchdynamo.testing
 import torchdynamo.utils
+from torchdynamo.debug_utils import same_two_models
+from torchdynamo.testing import rand_strided
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 
@@ -1631,6 +1633,42 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_mod = torchdynamo.optimize("eager", nopython=True)(mod)
 
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_reinplacing(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_layoutlm_embeddings_x_position_embeddings = (
+                    torch.nn.Embedding(1024, 768)
+                )
+                self.self_layoutlm_embeddings_y_position_embeddings = (
+                    torch.nn.Embedding(1024, 768)
+                )
+
+            def forward(self, getitem_1, getitem_2, add):
+                self_layoutlm_embeddings_x_position_embeddings = (
+                    self.self_layoutlm_embeddings_x_position_embeddings(getitem_1)
+                )
+                self_layoutlm_embeddings_y_position_embeddings = (
+                    self.self_layoutlm_embeddings_y_position_embeddings(getitem_2)
+                )
+                add_1 = add + self_layoutlm_embeddings_x_position_embeddings
+                add_2 = add_1 + self_layoutlm_embeddings_y_position_embeddings
+                return (add_2,)
+
+        mod = MockModule()
+        opt_mod = torchdynamo.optimize("aot_inductor_debug")(mod)
+
+        args = [
+            ((2, 512), (2048, 4), torch.int64, "cpu", False),
+            ((2, 512), (2048, 4), torch.int64, "cpu", False),
+            ((2, 512, 768), (393216, 768, 1), torch.float32, "cpu", True),
+        ]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+        self.assertTrue(same_two_models(mod, opt_mod, args))
 
 
 if __name__ == "__main__":

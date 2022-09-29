@@ -9,8 +9,8 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220916
-TRITON_VERSION ?= 5b04331dd2efdd23f4475823761fa975de60a514
+PYTORCH_VERSION ?= dev20220929
+TRITON_VERSION ?= 998fd5f9afe166247f441999c605dfe624ca9331
 
 
 default: develop
@@ -58,7 +58,6 @@ setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
                       torchvision==0.14.0.$(PYTORCH_VERSION) \
-                      torchaudio==0.13.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja
@@ -87,7 +86,7 @@ pull-deps:
 	(cd ../torchaudio     && git pull && git submodule update --init --recursive)
 	(cd ../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
-	(cd ../triton         && git pull && git submodule update --init --recursive)
+	(cd ../triton         && git checkout master && git pull && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo

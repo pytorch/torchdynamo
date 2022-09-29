@@ -516,15 +516,33 @@ class MiscTests(torchdynamo.testing.TestCase):
             return x
 
         with torch.no_grad():
-            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torchdynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torchdynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)
-            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)
+            torchdynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
+            torchdynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
+
+    def test_grad_mode_guard(self):
+        def fn(a, b):
+            prev_grad = torch.is_grad_enabled()
+            torch.set_grad_enabled(False)
+            a = a + 1
+            a.tolist()  # graph break
+            ret = a + b
+            torch.set_grad_enabled(prev_grad)
+            return ret
+
+        a = torch.randn([3, 4])
+        b = torch.randn([3, 4])
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            opt_fn(a, b)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
@@ -1299,7 +1317,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as FakeContextWrappingVariable and do nothing
+        # wrap torch.autograd.profiler.* as AutogradProfilerContextWrapperVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
@@ -1316,6 +1334,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize(cnts)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_python_slice(self):
         def f1(input):
@@ -2377,6 +2396,215 @@ class MiscTests(torchdynamo.testing.TestCase):
             torchdynamo.config.verbose = False
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
+
+    def test_inplace_param_update(self):
+        def fn(param, y):
+            prev_grad = torch.is_grad_enabled()
+            try:
+                torch.set_grad_enabled(False)
+                torch.set_grad_enabled(True)
+                torch.set_grad_enabled(False)
+                param.add_(y)
+            finally:
+                torch.set_grad_enabled(prev_grad)
+
+        y = torch.randn(4)
+        x = torch.nn.Parameter(torch.randn(4))
+        fn(x, y)
+
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn(x, y)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast(self):
+        if not torch.cuda.is_bf16_supported():
+            raise unittest.SkipTest("requires bf16")
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+                d_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    e_float16 = torch.mm(a_float32, b_float32)
+                    f_float16 = torch.mm(d_float32, e_float16)
+                return f_float16
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, guards = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.bfloat16)
+
+    def test_autocast_cpu(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+                d_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    e_float16 = torch.mm(a_float32, b_float32)
+                    f_float16 = torch.mm(d_float32, e_float16)
+                return f_float16
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, guards = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cpu")
+        self.assertEqual(exported.dtype, torch.bfloat16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_float64(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+                d_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                    e_float64 = torch.mm(a_float32, b_float32)
+                    f_float64 = torch.mm(d_float32, e_float64)
+                return f_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, guards = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_device(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+                d_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.autocast(device_type="cuda"):
+                    e_float64 = torch.mm(a_float32, b_float32)
+                    f_float64 = torch.mm(d_float32, e_float64)
+                return f_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, guards = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.torch.float16)
+
+    def test_generate_tensor_from_list_of_numpy_primitive_type(self):
+        # Test sth like torch.LongTensor(list(np.int64, np.int64, ...))
+        def fn():
+            x = np.array([1, 2, 3, 4, 5, 6], dtype=np.int64)
+            y = list((x[0], x[2], x[4]))
+            z = torch.LongTensor(y)
+            return z
+
+        ref = fn()
+        opt_fn = torchdynamo.optimize("eager")(fn)
+        res = opt_fn()
+        self.assertTrue(same(ref, res))
+
+    def test_autograd_function_equivalence(self):
+        m1 = Module1()
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f1():
+            return m1(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f1(), torch.tensor([2.0])))
+
+        m2 = Module2()
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f2():
+            return m2(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f2(), torch.tensor([2.0])))
+
+    def test_object_classmethod(self):
+        class C:
+            @classmethod
+            def fn(cls, x):
+                return x + x
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f():
+            return C().fn(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+    def test_object_staticmethod(self):
+        class C:
+            @staticmethod
+            def fn(x):
+                return x + x
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f():
+            return C().fn(torch.ones(2, 3))
+
+        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+
+class CustomFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+
+class Module1(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc().apply(foo)
+
+
+class Module2(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
 
 
 class TestTracer(JitTestCase):
