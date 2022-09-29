@@ -81,7 +81,7 @@ def install_gcc_via_conda():
         log.info("Downloading GCC via conda")
         subprocess.check_call(
             [
-                "conda",
+                os.environ.get("CONDA_EXE", "conda"),
                 "create",
                 f"--prefix={prefix}",
                 "--channel=conda-forge",
