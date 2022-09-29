@@ -1128,9 +1128,12 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_gather(self):
+    def test_gather1(self):
         def fn(a, b):
-            return (torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),)
+            return (
+                torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),
+                torch.gather(a.expand([4, 5, 10, 6]), -1, b + 1),
+            )
 
         self.common(
             fn,
@@ -1139,6 +1142,15 @@ class CommonTemplate:
                 torch.randint(5, [4, 5, 10, 1], dtype=torch.int64),
             ),
         )
+
+    def test_gather2(self):
+        # 0d tensor
+        def fn(a, b):
+            return torch.gather(a, 0, b) + torch.gather(a, -1, b)
+
+        x = torch.tensor(123)
+        y = torch.tensor(0)
+        self.assertEqual(fn(x, y), x + x)
 
     def test_slice1(self):
         def fn(a):

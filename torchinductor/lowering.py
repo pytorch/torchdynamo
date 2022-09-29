@@ -1456,16 +1456,17 @@ def full(size, fill_value, **kwargs):
 @register_lowering(aten.gather, type_promote=False)
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
-    assert isinstance(dim, int)
-    assert "int" in str(index.get_dtype())
-    assert 0 <= dim < len(x.get_size())
+    assert index.get_dtype() == torch.int64
+    offset = len(x.get_size()) == 0
+    dim = _validate_dim(x, dim, offset)
 
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
     def fn(idx):
         idx = list(idx)
-        idx[dim] = ops.indirect_indexing(index_loader(idx))
+        if len(idx) != 0:
+            idx[dim] = ops.indirect_indexing(index_loader(idx))
         return x_loader(idx)
 
     return Pointwise.create(
