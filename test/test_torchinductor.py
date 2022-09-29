@@ -309,16 +309,10 @@ class TestIndexingSimplification(unittest.TestCase):
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
 
-        # always-zero terms should be removed from IndexingDiv too
+        # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
             sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
-            IndexingDiv(i1, 32),
-        )
-        self.assertEqual(
-            sizevars.simplify_with_ranges(
-                IndexingDiv(r3 + 2 * i2 + i1, 32), var_ranges
-            ),
-            IndexingDiv(i1 + 2 * i2, 32),
+            IndexingDiv(r3 + i2 + i1, 32),
         )
 
         expr = ModularIndexing(2 * i2 + r3, 1, 64)
@@ -591,6 +585,13 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_expanded_reduction(self):
+        def fn(x, y):
+            z = x * y
+            return z.sum((0, 1))
+
+        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
 
     def test_min_max_reduction(self):
         def fn(a, b):

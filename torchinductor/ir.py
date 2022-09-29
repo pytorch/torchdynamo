@@ -717,7 +717,11 @@ class Reduction(Loops):
                 reduction_type,
                 reduction_numel,
             )
-            reduction_hint = hint if hint != ReductionHint.DEFAULT else reduction_hint
+            # intermediate reduction in split can contain complex indexing,
+            # and num_splits will fail to correctly set the hint
+            # reuse the passed hint if available
+            if reduction_hint == ReductionHint.DEFAULT:
+                reduction_hint = hint
             if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
