@@ -109,6 +109,7 @@ inductor_skips["cpu"] = {
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_unpack": {b8, f16, f32, f64, i32, i64},  # segfault
+    "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
 }
 
 inductor_skips["cuda"] = {
