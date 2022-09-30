@@ -2679,12 +2679,22 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
                 torch.randn([1024, 4, 2]),
                 torch.randn([1024, 4, 2]) > 0,
                 torch.randn([]),
                 True,
-            ],
+            ),
         )
 
     def test_index_put_fallback1(self):
@@ -2695,12 +2705,22 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [
+            (
                 torch.randn([3]),
                 torch.as_tensor([True, True, False]),
                 torch.randn([2]),
-                random.choice([True, False]),
-            ],
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                True,
+            ),
         )
 
     def test_index_put_fallback2(self):
@@ -2711,13 +2731,23 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [
+            (
                 torch.randn([1, 2, 3]),
                 torch.as_tensor([0, 1]),
                 torch.as_tensor([True, True, False]),
                 torch.randn([]),
-                random.choice([True, False]),
-            ],
+                False,
+            ),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                True,
+            ),
         )
 
     @patch.object(config, "fallback_random", True)
