@@ -152,7 +152,7 @@ A `ConstantVariable` is an instance of`VariableTracker`. `VariableTracker` repre
 When it comes to representing an object inside TorchDynamo, a VariableTracker does exactly what it says - it tracks a given variable. Its an extremely flexible class, but there are a few points to keep in mind:
 
 - It manages the `guard` relationship around the underlying object through:
-	- create_guard
+	- make_guard
 	- replace_guards
 	- add_guard(s)
 	- propagate - `propagate(*vars: List[List["VariableTracker"]])` - Perhaps the most important of all, in that it combines guards from all the provided VariableTracker instances passed in. It visits the guards and combines the guards from these onto itself.
@@ -197,7 +197,7 @@ What is happening here?
 
 Note: You may wonder - where did the first guards come from? Propagation is good and all, but don't we need something created before it can be propagated. Yes! Remember that `VariableBuilder` above? It calls `make_guards` as it creates `VariableTracker` instances, from `f_locals`. This in turn calls into the `source`, to have it create guards.
 
-After all this, bytecode translation is done and we are one step closer to producing `GuardedCode`. We now understand how locals become `VariableTracker`s, how instructions are handled, and where guards are called on for creation. Before we can go into seeing how code and guards are combined into a GuardedCode object, we need to dig a little bit into those `make_guard` and `source.create_guard` calls above. We can then understand, really, what was going on when we made guards alongside, and on, `VariableTracker` instances.
+After all this, bytecode translation is done and we are one step closer to producing `GuardedCode`. We now understand how locals become `VariableTracker`s, how instructions are handled, and where guards are called on for creation. Before we can go into seeing how code and guards are combined into a GuardedCode object, we need to dig a little bit into those `make_guard` and `source.make_guard` calls above. We can then understand, really, what was going on when we made guards alongside, and on, `VariableTracker` instances.
 
 ## Making Guards
 Guards are just python objects, of the class `Guard`, however, theres a good amount of detail around this little class.
@@ -217,7 +217,7 @@ The source here is an enum indicating what *kind* of source the guard belongs to
 
 And create_fn is the heart of how we go from having this simple dataclass to actually producing valid python code to be invoked for knowing whether or not things have changed in between invocations, and whether we can safely read from the code cache or not (In case you forgot what all this was for!)
 
-The most common code paths for getting an instance of a guard are through `make_guards` on `VariableTracker`. `make_guards`->`source.create_guard`->`return Guard(self.name(), self.guard_source(), fn)`
+The most common code paths for getting an instance of a guard are through `make_guards` on `VariableTracker`. `make_guards`->`source.make_guard`->`return Guard(self.name(), self.guard_source(), fn)`
 
 Or, in a concrete example:
 

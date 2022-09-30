@@ -28,6 +28,7 @@ from .exc import unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
+from .source import ConstantSource
 from .source import LocalSource
 from .source import Source
 from .utils import CleanupHook
@@ -35,6 +36,7 @@ from .utils import count_calls
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import format_graph_tabular
+from .variables.builder import VariableBuilder
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import UnspecializedNumpyVariable
@@ -189,15 +191,16 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def add_submodule(self, mod: torch.nn.Module, *names, **options):
+    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
-        source: Source = options["source"]
+        source: Source = options.get("source", None)
         if isinstance(mod, torch.Tensor):
-            options["guards"].add(source.create_guard(GuardBuilder.TENSOR_MATCH))
+            if source:
+                options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 return TensorVariable.create(
@@ -207,12 +210,21 @@ class OutputGraph(fx.Tracer):
                     **options,
                 )
 
-        else:
+        elif isinstance(mod, torch.nn.Module):
             assert isinstance(mod, torch.nn.Module)
-            options["guards"].add(source.create_guard(GuardBuilder.NN_MODULE))
+            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
+
+        else:
+
+            def wrap_name(module_key):
+                self.output.update_co_names(module_key)
+                self.root_globals[module_key] = mod
+                return VariableBuilder(self, ConstantSource(source_name=module_key))(
+                    mod
+                )
 
         for k, v in self.nn_modules.items():
             if v is mod:

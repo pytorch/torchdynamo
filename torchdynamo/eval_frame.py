@@ -556,6 +556,14 @@ def export(f, *args, aten_graph=False, **kwargs):
     return (new_graph, out_guards)
 
 
+def assume_constant_result(fn):
+    setattr(fn, "_dynamo_marked_constant", True)
+    assert (
+        not config.fake_tensor_propagation
+    ), "Constant result capture is not supported with fake tensors."
+    return fn
+
+
 def optimize_assert(backend, *, guard_export_fn=None, export=False):
     """
     The same as `torchdynamo.optimize(backend, nopython=True)`

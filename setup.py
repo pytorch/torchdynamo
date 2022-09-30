@@ -56,7 +56,7 @@ setup(
     install_requires=install_requires,
     packages=find_packages(include=package_include),
     package_data={
-        "torchinductor/codegen": ["*.h", "*.j2"],
+        "torchinductor.codegen": ["*.h", "*.j2"],
     },
     zip_safe=False,
     ext_modules=[
