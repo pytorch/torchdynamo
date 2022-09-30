@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import os
 import sys
 import time
@@ -62,7 +63,7 @@ def model_training_evaluation(
         # Run with native Pytorch
         opt_training_iter_fn = training_iter_fn
     else:
-        # Support backends: eager, aot_eager and aot_nvfuser
+        # Support backends: eager, aot_eager, aot_nvfuser and inductor
         opt_training_iter_fn = torchdynamo.optimize(backend)(training_iter_fn)
     for epoch in range(num_epochs):
         running_loss = 0.0
@@ -127,13 +128,13 @@ def parse_args():
     parser.add_argument(
         "--backend",
         choices=torchdynamo.list_backends(),
-        default="eager",
-        help="train/evaluate model with a given backend (default: eager)",
+        default="inductor",
+        help="train/evaluate model with a given backend (default: inductor)",
     )
     parser.add_argument(
         "--optimizer",
-        default="SGD",
-        help="train model using a given optimizer (default: SGD)",
+        default="Adam",
+        help="train model using a given optimizer (default: Adam)",
     )
     args = parser.parse_args()
     return args
@@ -148,7 +149,10 @@ def main():
         "bert-base-cased", num_labels=5
     )
     optimizer_cls = getattr(sys.modules["torch.optim"], args.optimizer)
-    optimizer = optimizer_cls(model.parameters(), lr=args.lr)
+    if "capturable" in inspect.signature(optimizer_cls).parameters.keys():
+        optimizer = optimizer_cls(model.parameters(), lr=args.lr, capturable=True)
+    else:
+        optimizer = optimizer_cls(model.parameters(), lr=args.lr)
     native_start = time.time()
     ref_loss, _ = model_training_evaluation(
         None, train_dataloader, eval_dataloader, model, optimizer, args.epochs
@@ -168,9 +172,13 @@ def main():
         )
     native_elapsed = native_end - native_start
     dynamo_elapsed = dynamo_end - native_end
-    print(f"Train model on {args.epochs} epochs:")
-    print(f"PyTorch spent {timedelta(seconds=native_elapsed)}")
-    print(f"TorchDynamo spent {timedelta(seconds=dynamo_elapsed)}")
+    print(
+        f"Train model on {args.epochs} epochs with backend {args.backend} and optimizer {args.optimizer}:"
+    )
+    print(f"PyTorch spent {timedelta(seconds=native_elapsed/args.epochs)} per epoch")
+    print(
+        f"TorchDynamo spent {timedelta(seconds=dynamo_elapsed/args.epochs)} per epoch"
+    )
 
 
 if __name__ == "__main__":

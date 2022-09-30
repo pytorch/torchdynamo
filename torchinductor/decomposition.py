@@ -50,6 +50,9 @@ decompositions = get_decompositions(
         aten.hardtanh_backward,
         aten.im2col,
         aten.im2col_backward,
+        aten.index_add,
+        aten.index_add_,
+        aten.index_select,
         aten.l1_loss,
         aten.leaky_relu,
         aten.leaky_relu_backward,
@@ -279,31 +282,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-@register_decomposition([aten.index_put])
-def index_put(self, indices, values, accumulate=False):
-    return aten.index_put_(self.clone(), indices, values, accumulate)
-
-
-@register_decomposition([aten.scatter])
-def scatter(self, dim: int, index, src, **kwargs):
-    return self.clone().scatter_(dim, index, src, **kwargs)
-
-
-@register_decomposition([aten.scatter_add])
-def scatter_add(self, dim: int, index, src):
-    return self.clone().scatter_add_(dim, index, src)
-
-
-@register_decomposition([aten.scatter_add_])
-def scatter_add_(self, dim: int, index, src):
-    return self.scatter_reduce_(dim, index, src, "sum")
-
-
-@register_decomposition([aten.scatter_reduce])
-def scatter_reduce(self, dim: int, index, src, reduction_type, **kwargs):
-    return self.clone().scatter_reduce_(dim, index, src, reduction_type, **kwargs)
-
-
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
@@ -323,6 +301,18 @@ def sgn(self):
 @register_decomposition([aten.fill.Scalar])
 def fill_scalar(self, value):
     return torch.full_like(self, value)
+
+
+@register_decomposition([aten.fill.Tensor])
+def fill_tensor(self, value: Tensor):
+    assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
+    return torch.full_like(self, value.item())
+
+
+@register_decomposition([aten.bernoulli.default])
+def bernoulli(self, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < self
 
 
 """

@@ -9,7 +9,6 @@ convnext_base 128
 crossvit_9_240 128
 cspdarknet53 128
 deit_base_distilled_patch16_224 128
-densenet121 128
 dla102 128
 dm_nfnet_f0 128
 dpn107 64
@@ -21,7 +20,6 @@ fbnetv3_b 128
 gernet_l 128
 ghostnet_100 128
 gluon_inception_v3 128
-gluon_senet154 64
 gluon_xception65 64
 gmixer_24_224 128
 gmlp_s16_224 128
@@ -47,7 +45,6 @@ res2net50_14w_8s 128
 res2next50 128
 resmlp_12_224 128
 resnest101e 128
-resnet18 128
 rexnet_100 128
 sebotnet33ts_256 128
 selecsls42b 128

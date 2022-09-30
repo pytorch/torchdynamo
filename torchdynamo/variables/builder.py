@@ -14,6 +14,7 @@ import torch
 from functorch.experimental.ops import PyOperator
 
 import torchdynamo
+from torchdynamo import replay_record
 
 from .. import config
 from .. import mutation_guard
@@ -56,6 +57,7 @@ from .lists import RangeVariable
 from .lists import SliceVariable
 from .lists import TupleVariable
 from .misc import AutogradFunctionVariable
+from .misc import GetAttrVariable
 from .misc import InspectSignatureVariable
 from .misc import LambdaVariable
 from .misc import NumpyVariable
@@ -69,6 +71,7 @@ from .tensor import UnspecializedNumpyVariable
 from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
+from .torch import tensor_dunder_fns
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -255,6 +258,12 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
+            elif issubclass(
+                value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
+            ):
+                return UnspecializedNNModuleVariable(
+                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                )
             else:
                 return self.tx.output.add_submodule(
                     value,
@@ -351,11 +360,16 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif istype(value, types.FunctionType):
+            if value in tensor_dunder_fns:
+                return TorchVariable(
+                    value,
+                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                )
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, types.ModuleType):
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             return PythonModuleVariable(
                 value,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
@@ -363,6 +377,19 @@ class VariableBuilder:
         elif type(value) is torch.autograd.function.FunctionMeta:
             return AutogradFunctionVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif (
+            isinstance(value, types.BuiltinFunctionType)
+            and type(getattr(value, "__self__", None))
+            is torch.autograd.function.FunctionMeta
+            and getattr(value, "__name__", "") == "apply"
+        ):
+            # handle aliased autograd function `apply` calls
+            return GetAttrVariable(
+                AutogradFunctionVariable(
+                    value.__self__, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+                ),
+                "apply",
             )
         elif isinstance(value, (int, float, np.number)):
             return self.wrap_unspecialized_primitive(value)

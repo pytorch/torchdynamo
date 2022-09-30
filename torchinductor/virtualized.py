@@ -29,8 +29,10 @@ class Virtualized:
 
         @contextmanager
         def ctx():
-            yield
-            self._set_handler(prior)
+            try:
+                yield
+            finally:
+                self._set_handler(prior)
 
         return ctx()
 

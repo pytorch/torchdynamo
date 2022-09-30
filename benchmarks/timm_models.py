@@ -5,12 +5,13 @@ import os
 import re
 import subprocess
 import sys
+import time
 import warnings
+from urllib.error import HTTPError
 
 import torch
 from common import BenchmarkRunner
 from common import main
-from torch._subclasses import FakeTensor
 
 from torchdynamo.testing import collect_results
 from torchdynamo.utils import clone_inputs
@@ -51,7 +52,6 @@ BATCH_SIZE_DIVISORS = {
     "crossvit_9_240": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "densenet121": 2,
     "dla102": 2,
     "dpn107": 2,
     "eca_botnext26ts_256": 2,
@@ -181,6 +181,7 @@ def refresh_model_names():
 class TimmRunnner(BenchmarkRunner):
     def __init__(self):
         super(TimmRunnner, self).__init__()
+        self.suite_name = "timm_models"
 
     def load_model(
         self,
@@ -195,21 +196,31 @@ class TimmRunnner(BenchmarkRunner):
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
-        model = create_model(
-            model_name,
-            in_chans=3,
-            scriptable=False,
-            num_classes=None,
-            drop_rate=0.0,
-            drop_path_rate=None,
-            drop_block_rate=None,
-            pretrained=True,
-            # global_pool=kwargs.pop('gp', 'fast'),
-            # num_classes=kwargs.pop('num_classes', None),
-            # drop_rate=kwargs.pop('drop', 0.),
-            # drop_path_rate=kwargs.pop('drop_path', None),
-            # drop_block_rate=kwargs.pop('drop_block', None),
-        )
+        retries = 1
+        success = False
+        while not success and retries < 4:
+            try:
+                model = create_model(
+                    model_name,
+                    in_chans=3,
+                    scriptable=False,
+                    num_classes=None,
+                    drop_rate=0.0,
+                    drop_path_rate=None,
+                    drop_block_rate=None,
+                    pretrained=True,
+                    # global_pool=kwargs.pop('gp', 'fast'),
+                    # num_classes=kwargs.pop('num_classes', None),
+                    # drop_rate=kwargs.pop('drop', 0.),
+                    # drop_path_rate=kwargs.pop('drop_path', None),
+                    # drop_block_rate=kwargs.pop('drop_block', None),
+                )
+                success = True
+            except HTTPError:
+                wait = retries * 30
+                time.sleep(wait)
+                retries += 1
+
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,
@@ -296,10 +307,9 @@ class TimmRunnner(BenchmarkRunner):
         )
 
     def compute_loss(self, pred):
-        if isinstance(pred, FakeTensor) and not isinstance(self.target, FakeTensor):
-            return self.loss(pred, torch.ops.aten.lift_fresh_copy(self.target))
-        else:
-            return self.loss(pred, self.target)
+        # High loss values make gradient checking harder, as small changes in
+        # accumulation order upsets accuracy checks.
+        return self.loss(pred, self.target) / 10.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)

@@ -9,7 +9,7 @@ compiled with a customizable backend. It creates this FX Graph through
 bytecode analysis and is designed to mix Python execution with compiled
 backends to get the best of both worlds: usability and performance.
 
-![](TorchDynamo.png)
+![](./documentation/images/TorchDynamo.png)
 
 For more on TorchDynamo you can read our [posts on PyTorch dev-discuss]
 or [watch a deep-dive video].
@@ -188,7 +188,7 @@ additional packages. Some of the most commonly used backends are
 
 Debugging backends:
 * `torchdynamo.optimize("eager")` - Uses PyTorch to run the extracted GraphModule. This is quite useful in debugging TorchDynamo issues.
-* `torchdynamo.optimize("aot_nop")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
+* `torchdynamo.optimize("aot_eager")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
 
 Training & inference backends:
 * `torchdynamo.optimize("inductor")` - Uses TorchInductor backend with AotAutograd and cudagraphs.  [Read more](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)
@@ -231,7 +231,7 @@ for _ in range(100):
 ```
 
 ## Troubleshooting
-See [Troubleshooting](TROUBLESHOOTING.md).
+See [Troubleshooting](./documentation/TROUBLESHOOTING.md).
 
 ## Adding Backends
 
@@ -346,11 +346,11 @@ conda create --name=torchdynamo python=3.8
 conda activate torchdynamo
 
 # install pytorch nightlies
-# for CUDA version, replace `cpuonly` with `cudatoolkit=11.6`
+# for CUDA version, replace `cpuonly` with `pytorch-cuda=11.6`
 conda install pytorch torchvision torchaudio torchtext cpuonly -c pytorch-nightly
 pip install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 
-git clone git@github.com:pytorch/torchdynamo.git
+git clone https://github.com/pytorch/torchdynamo
 cd torchdynamo
 pip install -r requirements.txt
 

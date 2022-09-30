@@ -323,6 +323,7 @@ EXTRA_MODELS = {
 class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
         super(HuggingfaceRunner, self).__init__()
+        self.suite_name = "huggingface"
 
     def load_model(
         self,
