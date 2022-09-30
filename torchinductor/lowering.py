@@ -2854,10 +2854,6 @@ def pow(a, b):
             torch.float16,
             torch.float32,
             torch.float64,
-        ) and a.get_dtype() in (
-            torch.float16,
-            torch.float32,
-            torch.float64,
         ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
