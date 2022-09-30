@@ -70,7 +70,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
 ):
-    log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
+    log.info("Inductor compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
@@ -106,7 +106,11 @@ def compile_fx_inner(
             elif complex_memory_overlap_inputs:
                 log.warning("skipping cudagraphs due to complex input striding")
 
-    return align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    log.info(
+        "Inductor done compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS"
+    )
+    return result
 
 
 def clone_preserve_strides(x):
@@ -302,13 +306,20 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         )
 
     with overrides.patch_functions():
-        return aot_autograd(
-            model_,
-            example_inputs_,
-            fw_compiler=make_boxed_compiler(fw_compiler),
-            bw_compiler=make_boxed_compiler(bw_compiler),
-            decompositions=select_decomp_table(),
-            partition_fn=functools.partial(
-                min_cut_rematerialization_partition, compiler="inductor"
-            ),
-        )
+
+        def aot_autograd_and_log(*args, **kwargs):
+            log.info("Running AOT autograd")
+            result = aot_autograd(
+                model_,
+                example_inputs_,
+                fw_compiler=make_boxed_compiler(fw_compiler),
+                bw_compiler=make_boxed_compiler(bw_compiler),
+                decompositions=select_decomp_table(),
+                partition_fn=functools.partial(
+                    min_cut_rematerialization_partition, compiler="inductor"
+                ),
+            )(*args, **kwargs)
+            log.info("Done AOT autograd")
+            return result
+
+        return aot_autograd_and_log

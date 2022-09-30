@@ -388,23 +388,25 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        log.info(
+        log.log(
+            config.INFO_CODE,
             format_bytecode(
                 "ORIGINAL BYTECODE",
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
                 code,
-            )
+            ),
         )
-        log.info(
+        log.log(
+            config.INFO_CODE,
             format_bytecode(
                 "MODIFIED BYTECODE",
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
                 out_code,
-            )
+            ),
         )
 
         assert output.guards is not None
@@ -415,7 +417,7 @@ def _compile(
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.info(guard_str)
+        log.log(config.INFO_CODE, guard_str)
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)

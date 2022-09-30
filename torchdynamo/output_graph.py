@@ -3,7 +3,6 @@ import itertools
 import logging
 import operator
 import re
-import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -380,8 +379,9 @@ class OutputGraph(fx.Tracer):
         try:
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
-                log.info(
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
+                log.log(
+                    config.INFO_CODE,
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
             log.warning(
@@ -396,13 +396,15 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
+            log.info("Calling compiler function")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            log.info("Done compiler function")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            sys.stderr.write("-" * 40 + "\n")
-            sys.stderr.write("TORCHDYNAMO: backend compiler failed\n")
-            traceback.print_exc()
-            sys.stderr.write("-" * 40 + "\n")
+            log.warning("-" * 40 + "\n")
+            log.warning("TORCHDYNAMO: backend compiler failed\n")
+            log.warning(traceback.format_exc())
+            log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
             if config.raise_on_backend_error:
                 raise BackendCompilerFailed(self.compiler_fn, e) from e

@@ -19,6 +19,7 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
+import torchdynamo.config
 import torchinductor
 from torchdynamo.debug_utils import save_graph_repro
 from torchdynamo.debug_utils import wrap_compiler_debug
@@ -233,8 +234,8 @@ class DebugContext:
         if not log.handlers:
             init_logging()
 
-        for handler in itertools.chain([log], log.handlers):
-            handler.setLevel(logging.DEBUG if config.debug else logging.WARNING)
+        if config.debug:
+            torchdynamo.config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))
 
