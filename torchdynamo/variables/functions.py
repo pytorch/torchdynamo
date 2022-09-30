@@ -15,7 +15,6 @@ from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import GetItemSource
-from ..source import NNModuleSource
 from ..utils import make_cell
 from .base import VariableTracker
 from .base import typestr
@@ -83,7 +82,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         super(UserFunctionVariable, self).__init__(**kwargs)
         if (
             hasattr(fn, "DYNAMO_MARKED_CONSTANT")
-            and getattr(fn, "DYNAMO_MARKED_CONSTANT") == True
+            and getattr(fn, "DYNAMO_MARKED_CONSTANT") is True
         ):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -289,7 +288,7 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
         return x.as_python_constant()
 
     args = [convert(x) for x in args]
-    kwargs = {k: convert(x) for k, v in kwargs.items()}
+    kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
     return tx.output.register_attr_or_module(
         res,

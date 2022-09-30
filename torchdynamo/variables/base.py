@@ -119,7 +119,7 @@ class VariableTracker:
         return self.clone(guards=set.union(self.guards, {guard}))
 
     def add_guards(self, guards):
-        if guards == None:
+        if guards is None:
             return self
         assert isinstance(guards, set)
         return self.clone(guards=set.union(self.guards, guards))

@@ -942,7 +942,6 @@ class ExportTests(torchdynamo.testing.TestCase):
                 return torch.nonzero(x)
 
             def forward(self, x):
-                res = {}
                 y = torch.sin(x)
                 x = self.linear(x)
                 y = self.helper_fn(x)
@@ -970,7 +969,6 @@ class ExportTests(torchdynamo.testing.TestCase):
                 return torch.nonzero(x)
 
             def forward(self, x):
-                res = {}
                 y = torch.sin(x)
                 x = self.linear(x)
                 y = self.helper_fn(x) + self.helper_fn(x)
@@ -1002,7 +1000,6 @@ class ExportTests(torchdynamo.testing.TestCase):
                 return torch.nonzero(x)
 
             def forward(self, x):
-                res = {}
                 y = torch.sin(x)
                 x = self.linear(x)
                 y = helper_fn(x) + self.helper_fn(x)
@@ -1030,7 +1027,6 @@ class ExportTests(torchdynamo.testing.TestCase):
                 self.linear = torch.nn.Linear(2, 2)
 
             def forward(self, x):
-                res = {}
                 y = torch.sin(x)
                 x = self.linear(x)
                 y = helper_fn(x)
@@ -1058,7 +1054,6 @@ class ExportTests(torchdynamo.testing.TestCase):
                 self.linear = torch.nn.Linear(2, 2)
 
             def forward(self, x, z):
-                res = {}
                 y = torch.sin(x)
                 x = self.linear(x)
                 y = helper_fn(x) + helper_fn(z)
@@ -1164,7 +1159,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
-    def test_export_with_constant_list_nonzero(self):
+    def test_export_with_constant_list_nonzero_free_function(self):
         @torchdynamo.eval_frame.assume_constant_result
         def helper_fn(x):
             return [torch.nonzero(x), torch.nonzero(x)]
@@ -1296,7 +1291,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         self.assertTrue(torchdynamo.utils.same(result, real_result))
 
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
-    def test_export_with_constant_not_none_control_flow(self):
+    def test_export_with_constant_not_none_control_flow_pos(self):
         class MyModule(torch.nn.Module):
             @torchdynamo.eval_frame.assume_constant_result
             def helper_fn(self, x):

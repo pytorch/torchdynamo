@@ -37,7 +37,6 @@ from .utils import counters
 from .utils import fake_tensors_available
 from .utils import format_graph_tabular
 from .variables.builder import VariableBuilder
-from .variables.constant import ConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.tensor import UnspecializedNumpyVariable

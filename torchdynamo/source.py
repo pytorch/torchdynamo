@@ -29,8 +29,8 @@ def is_constant_source(source):
     try:
         if source.guard_source() == GuardSource.CONSTANT:
             return True
-    except:
-        return False
+    except NotImplementedError:
+        pass
 
     return False
 
