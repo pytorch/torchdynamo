@@ -17,7 +17,8 @@ from .utils import guard_failures
 from .utils import orig_code_map
 
 __all__ = [
-    "assume_constant_result" "optimize",
+    "assume_constant_result",
+    "optimize",
     "optimize_assert",
     "export",
     "explain",
