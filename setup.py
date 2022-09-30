@@ -46,7 +46,7 @@ setup(
     install_requires=["torch>=1.12.0", "numpy", "tabulate", "pyyaml", "sympy"],
     packages=find_packages(include=package_include),
     package_data={
-        "torchinductor/codegen": ["*.h", "*.j2"],
+        "torchinductor.codegen": ["*.h", "*.j2"],
     },
     zip_safe=False,
     ext_modules=[
