@@ -1037,7 +1037,6 @@ class TritonKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
-
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
