@@ -2849,8 +2849,12 @@ def pow_native(a, b):
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if isinstance(a, ir.IRNode):
+    if isinstance(a, ir.IRNode) and isinstance(b, ir.IRNode):
         assert a.get_dtype() in (
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ) and a.get_dtype() in (
             torch.float16,
             torch.float32,
             torch.float64,
