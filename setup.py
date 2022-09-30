@@ -30,6 +30,16 @@ if "develop" in sys.argv:
         "benchmarks.microbenchmarks.*",
     ]
 
+install_requires = [
+    "torch>=1.12.0",
+    "numpy",
+    "tabulate",
+    "pyyaml",
+    "dill",
+    "jinja2",
+    "networkx",
+    "sympy",
+]
 
 setup(
     name="torchdynamo",
@@ -43,7 +53,7 @@ setup(
     license="BSD-3",
     keywords="pytorch machine learning compilers",
     python_requires=">=3.7, <3.11",
-    install_requires=["torch>=1.12.0", "numpy", "tabulate", "pyyaml", "sympy"],
+    install_requires=install_requires,
     packages=find_packages(include=package_include),
     package_data={
         "torchinductor/codegen": ["*.h", "*.j2"],
