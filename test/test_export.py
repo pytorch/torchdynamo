@@ -1356,7 +1356,7 @@ class ExportTests(torchdynamo.testing.TestCase):
             def forward(self, x):
                 y = torch.tensor([0.5])
                 x = self.helper_fn(x)
-                if x is "A":
+                if x == "A":
                     return y
                 return -1
 
