@@ -1,12 +1,9 @@
-import copy
 import functools
 import inspect
 import itertools
 import types
 from typing import Dict
 from typing import List
-
-import torch
 
 import torchdynamo.side_effects
 
@@ -186,30 +183,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def export_freevars(self, parent, child):
         pass
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        if self.is_constant:
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            return invoke_and_store_as_constant(
-                tx, self.fn, self.get_name(), options, args, kwargs
-            )
-
-        # handle copy.copy and copy.deepcopy on tensors
-        if self.fn is copy.copy or self.fn is copy.deepcopy:
-            if len(args) != 1:
-                unimplemented("copy.copy/copy.deepcopy does not have 1 argument")
-            if isinstance(args[0], variables.TensorVariable):
-                if self.fn is copy.copy:
-                    return args[0]
-                elif self.fn is copy.deepcopy:
-                    return variables.TorchVariable(torch.clone).call_function(
-                        tx, args, kwargs
-                    )
-            unimplemented("copy.copy/copy.deepcopy called on non-tensor")
-
-        return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):
