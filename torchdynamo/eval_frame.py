@@ -557,7 +557,7 @@ def export(f, *args, aten_graph=False, **kwargs):
 
 
 def assume_constant_result(fn):
-    setattr(fn, "DYNAMO_MARKED_CONSTANT", True)
+    setattr(fn, "_dynamo_marked_constant", True)
     assert (
         not config.fake_tensor_propagation
     ), "Constant result capture is not supported with fake tensors."

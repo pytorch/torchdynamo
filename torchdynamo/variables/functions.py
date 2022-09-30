@@ -81,8 +81,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def __init__(self, fn, is_constant=False, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
         if (
-            hasattr(fn, "DYNAMO_MARKED_CONSTANT")
-            and getattr(fn, "DYNAMO_MARKED_CONSTANT") is True
+            hasattr(fn, "_dynamo_marked_constant")
+            and getattr(fn, "_dynamo_marked_constant") is True
         ):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
