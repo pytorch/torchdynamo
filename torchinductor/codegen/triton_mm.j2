@@ -3,8 +3,8 @@ import triton
 import triton.language as tl
 {# from triton.ops.matmul import get_configs_io_bound #}
 
-@mm_heuristics()
 @mm_autotune()
+@mm_heuristics()
 @triton.jit
 def {{kernel_name}}(
     {% for i in template_inout_argdefs %}

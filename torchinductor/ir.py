@@ -717,7 +717,11 @@ class Reduction(Loops):
                 reduction_type,
                 reduction_numel,
             )
-            reduction_hint = hint if hint != ReductionHint.DEFAULT else reduction_hint
+            # intermediate reduction in split can contain complex indexing,
+            # and num_splits will fail to correctly set the hint
+            # reuse the passed hint if available
+            if reduction_hint == ReductionHint.DEFAULT:
+                reduction_hint = hint
             if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
@@ -1629,6 +1633,14 @@ class AliasedLayout(Layout):
     def make_indexer(self):
         return self.as_fixed().make_indexer()
 
+    def maybe_guard_aligned(self):
+        offset = self.view.get_layout().offset
+        if offset == 0:
+            return True
+        from .compile_fx import ALIGNMENT
+
+        return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
+
 
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
@@ -2418,6 +2430,42 @@ class InplaceBernoulliFallback(ExternKernel):
         self.name = V.graph.register_buffer(self)
 
 
+class IndexPutFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation and indices properly
+    """
+
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
+        indices = []
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(self.indices):
+            if self.indices[i] is not None:
+                indices.append(next(iter_valid_indices))
+            else:
+                indices.append("None")
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{','.join(indices)}], {values}, {repr(self.constant_args[0])})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, x, indices, values, accumulate):
+        self.indices = indices
+        valid_indices = [i for i in indices if i is not None]
+        tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            [accumulate],
+        )
+        self.name = V.graph.register_buffer(self)
+
+
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
@@ -3188,6 +3236,11 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    def is_input_buffer(self):
+        if isinstance(self.data, (InputBuffer, ReinterpretView)):
+            return self.data.get_name() in V.graph.graph_inputs
+        return False
+
     def realize(self):
         if isinstance(
             self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)

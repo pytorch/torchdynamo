@@ -1274,7 +1274,7 @@ class InstructionTranslatorBase(object):
 
     def store_dict_key(self, name, value):
         self.output.guards.add(
-            GlobalWeakRefSource(name).create_guard(GuardBuilder.WEAKREF_ALIVE)
+            GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
         if name not in self.output.root_globals:
             self.output.install_global(name, weakref.ref(value))
@@ -1505,7 +1505,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
-        assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
         if func.has_self():
             unimplemented("inline with __self__")
 

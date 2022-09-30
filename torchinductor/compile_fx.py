@@ -13,7 +13,6 @@ from torch.utils._mode_utils import no_dispatch
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.utils import dynamo_timed
-from torchdynamo.utils import identity
 from torchdynamo.utils import preserve_rng_state
 
 from . import config
@@ -21,11 +20,11 @@ from . import overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import ceildiv
 from .utils import has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+ALIGNMENT = 16
 
 
 @dataclasses.dataclass
@@ -67,7 +66,6 @@ def complex_memory_overlap(t):
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    wrap=identity,
     cudagraphs=None,
     num_fixed=0,
     is_backward=False,
@@ -80,8 +78,8 @@ def compile_fx_inner(
 
     graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
     with V.set_graph_handler(graph):
-        wrap(graph.run)(*example_inputs)
-        compiled_fn = wrap(graph.compile_to_fn())
+        graph.run(*example_inputs)
+        compiled_fn = graph.compile_to_fn()
 
     complex_memory_overlap_inputs = any(
         complex_memory_overlap(t) for t in example_inputs
@@ -102,12 +100,43 @@ def compile_fx_inner(
 
         if len(set(graph.device_types)) > 1:
             log.warning("skipping cudagraphs due to multiple devices")
-        elif graph.mutated_inputs and set(graph.device_types) == {"cuda"}:
-            log.warning("skipping cudagraphs due to input mutation")
-        elif complex_memory_overlap_inputs:
-            log.warning("skipping cudagraphs due to complex input striding")
+        elif set(graph.device_types) == {"cuda"}:
+            if graph.mutated_inputs:
+                log.warning("skipping cudagraphs due to input mutation")
+            elif complex_memory_overlap_inputs:
+                log.warning("skipping cudagraphs due to complex input striding")
 
-    return compiled_fn
+    return align_inputs(compiled_fn, example_inputs, range(num_fixed))
+
+
+def clone_preserve_strides(x):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
+def align_inputs(model, inputs, static_input_idxs=()):
+    check_inputs = [
+        i
+        for i in range(len(inputs))
+        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        and inputs[i].device.type == "cuda"
+    ]
+
+    if len(check_inputs) == 0:
+        return model
+
+    def run(*new_inputs):
+        for i in check_inputs:
+            if new_inputs[i].data_ptr() % ALIGNMENT:
+                if isinstance(new_inputs, tuple):
+                    new_inputs = list(new_inputs)
+                new_inputs[i] = clone_preserve_strides(new_inputs[i])
+        return model(*new_inputs)
+
+    return run
 
 
 @dynamo_timed
@@ -129,26 +158,40 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     return run
 
 
+def remove_unaligned_input_idxs(inputs, static_input_idxs):
+    """
+    We require all inputs to be aligned, so introduce a copy for any
+    that aren't.
+    """
+    aligned_static_input_idxs = {
+        idx for idx in static_input_idxs if (inputs[idx].data_ptr() % ALIGNMENT) == 0
+    }
+    if len(aligned_static_input_idxs) != len(static_input_idxs):
+        return aligned_static_input_idxs
+    return static_input_idxs
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
     def static_input(x):
-        # make sure alignment and contiguity of inputs is preserved
+        """
+        Copy and input while preserving strides
+        """
+        # TODO(jansel): figure out why this version doesn't work:
+        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
         needed_size = (
             sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
         )
-        needed_size = ceildiv(needed_size, 32) * 32
         buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
-        cache_line_offset = (
-            (x.data_ptr() - buffer.data_ptr()) % 32
-        ) // x.element_size()
-        return torch.as_strided(buffer, x.size(), x.stride(), cache_line_offset)
+        return torch.as_strided(buffer, x.size(), x.stride())
 
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else inputs[idx]
+        static_input(x) if idx not in static_input_idxs else x
         for idx, x in enumerate(inputs)
     ]
 
@@ -162,7 +205,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(stream):
-        model(*inputs)
+        model(*static_inputs)
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()

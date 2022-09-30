@@ -31,6 +31,10 @@ from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 
+tensor_dunder_fns = [
+    torch.Tensor.__rmatmul__,
+]
+
 
 class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
@@ -471,7 +475,7 @@ class TorchPyOperator(VariableTracker):
             gm.__name__ = next_name
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
-            tx.output.add_submodule(gm, next_name, source=src)
+            tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name, gm, guards
 
         # Get args as proxies

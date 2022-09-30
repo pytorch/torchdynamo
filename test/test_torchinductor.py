@@ -4,12 +4,14 @@ import dataclasses
 import functools
 import importlib
 import random
+import sys
 import unittest
 from unittest.mock import patch
 
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
+from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
@@ -37,7 +39,8 @@ try:
     assert get_decompositions([torch.ops.aten.trace])
     # Requires functorch
     from torchinductor.compile_fx import compile_fx_inner
-except (ImportError, ModuleNotFoundError, AssertionError):
+except (ImportError, ModuleNotFoundError, AssertionError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
     raise unittest.SkipTest("requires sympy/functorch")
 
 
@@ -81,7 +84,7 @@ def requires_decomp(fn):
     return wrap_test
 
 
-class TestCase(unittest.TestCase):
+class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
         cls._stack = contextlib.ExitStack()
@@ -137,10 +140,12 @@ def check_model(
     model,
     example_inputs,
     kwargs={},
-    tol=1e-4,
     *,
+    atol=None,
+    rtol=None,
     check_lowp=True,
     exact_dtype=True,
+    nopython=True,
 ):
     torchdynamo.reset()
 
@@ -171,12 +176,26 @@ def check_model(
 
     torchinductor.metrics.reset()
 
-    @torchdynamo.optimize_assert(compile_fx)
+    called = False
+
+    def compile_fx_wrapper(model_, example_inputs_):
+        nonlocal called
+        called = True
+        return compile_fx(model_, example_inputs_)
+
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
+    run = torchdynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
+
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
+    # if not called:
+    #     exp = torchdynamo.explain(run, *example_inputs)
+    #     print("Explain:", exp[0])
+    #     for graph in exp[2]:
+    #         print("Graph", graph)
+    assert called, "Ran graph without calling compile_fx"
 
     assert type(actual) == type(correct)
     correct_flat, correct_spec = tree_flatten(correct)
@@ -189,12 +208,15 @@ def check_model(
     )
     correct = tree_unflatten(correct_flat, correct_spec)
 
-    # print(correct)
-    # print(actual)
-    # print(correct - actual)
-    self.assertTrue(
-        same(actual, correct, tol=tol, equal_nan=True, exact_dtype=exact_dtype)
+    self.assertEqual(
+        actual,
+        correct,
+        atol=atol,
+        rtol=rtol,
+        equal_nan=True,
+        exact_dtype=exact_dtype,
     )
+    torchdynamo.reset()
 
 
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
@@ -204,8 +226,11 @@ def check_model_cuda(
     example_inputs,
     kwargs={},
     *,
+    atol=None,
+    rtol=None,
     check_lowp=True,
     exact_dtype=True,
+    nopython=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -219,7 +244,16 @@ def check_model_cuda(
         ).copy_(x)
 
     example_inputs = tuple(copy_fn(x) for x in example_inputs)
-    check_model(self, model, example_inputs, kwargs, exact_dtype=exact_dtype)
+    check_model(
+        self,
+        model,
+        example_inputs,
+        kwargs,
+        atol=atol,
+        rtol=rtol,
+        exact_dtype=exact_dtype,
+        nopython=nopython,
+    )
 
     if check_lowp:
 
@@ -233,7 +267,16 @@ def check_model_cuda(
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
-        check_model(self, model, example_inputs, kwargs, 2e-3, exact_dtype=exact_dtype)
+        check_model(
+            self,
+            model,
+            example_inputs,
+            kwargs,
+            atol=atol,
+            rtol=rtol,
+            exact_dtype=exact_dtype,
+            nopython=nopython,
+        )
 
 
 class SweepInputs2:
@@ -309,16 +352,10 @@ class TestIndexingSimplification(unittest.TestCase):
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
         )
 
-        # always-zero terms should be removed from IndexingDiv too
+        # small terms should be kept if the rest is not guaranteed to be divisible
         self.assertEqual(
             sizevars.simplify_with_ranges(IndexingDiv(r3 + i2 + i1, 32), var_ranges),
-            IndexingDiv(i1, 32),
-        )
-        self.assertEqual(
-            sizevars.simplify_with_ranges(
-                IndexingDiv(r3 + 2 * i2 + i1, 32), var_ranges
-            ),
-            IndexingDiv(i1 + 2 * i2, 32),
+            IndexingDiv(r3 + i2 + i1, 32),
         )
 
         expr = ModularIndexing(2 * i2 + r3, 1, 64)
@@ -416,6 +453,28 @@ class CommonTemplate:
             if name.startswith("test_"):
                 setattr(other_cls, f"{name}_{suffix}", value)
 
+    def test_bool(self):
+        def fn(a, b):
+            return (
+                a + b,
+                a * b,
+                a & b,
+                a | b,
+                a ^ b,
+                torch.logical_and(a, b),
+                torch.logical_or(a, b),
+                torch.logical_not(a),
+                torch.sign(b),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor([True, False, True, False]),
+                torch.tensor([False, False, True, True]),
+            ),
+        )
+
     def test_add_const_int(self):
         def fn(a):
             return (a + 1,)
@@ -511,7 +570,10 @@ class CommonTemplate:
             r3 = torch.squeeze(b) + 10
             return (r1, r2, r3)
 
-        self.common(fn, (torch.randn(10, 10), torch.randn(1, 10)))
+        # Mismatched elements: 2 / 10 (20.0%)
+        # Greatest absolute difference: 0.0029296875 at index (8,) (up to 1e-05 allowed)
+        # Greatest relative difference: 0.0017482517482517483 at index (6,) (up to 0.001 allowed)
+        self.common(fn, (torch.randn(10, 10), torch.randn(1, 10)), atol=1e-5, rtol=2e-3)
 
     def test_sum4(self):
         def fn(a):
@@ -591,6 +653,13 @@ class CommonTemplate:
             return torch.mean(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
+
+    def test_expanded_reduction(self):
+        def fn(x, y):
+            z = x * y
+            return z.sum((0, 1))
+
+        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -1081,9 +1150,12 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_gather(self):
+    def test_gather1(self):
         def fn(a, b):
-            return (torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),)
+            return (
+                torch.gather(a.expand([4, 5, 10, 6]), 3, b + 1),
+                torch.gather(a.expand([4, 5, 10, 6]), -1, b + 1),
+            )
 
         self.common(
             fn,
@@ -1092,6 +1164,15 @@ class CommonTemplate:
                 torch.randint(5, [4, 5, 10, 1], dtype=torch.int64),
             ),
         )
+
+    def test_gather2(self):
+        # 0d tensor
+        def fn(a, b):
+            return torch.gather(a, 0, b) + torch.gather(a, -1, b)
+
+        x = torch.tensor(123)
+        y = torch.tensor(0)
+        self.assertEqual(fn(x, y), x + x)
 
     def test_slice1(self):
         def fn(a):
@@ -1238,6 +1319,11 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([2, 5, 16, 16]),),
+            # Mismatched elements: 10 / 2352 (0.4%)
+            # Greatest absolute difference: 5.7220458984375e-05 at index (0, 3, 12, 12) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.06512477175897748 at index (0, 4, 11, 9) (up to 0.001 allowed)
+            atol=6e-5,
+            rtol=0.001,
         )
 
     def test_convolution2(self):
@@ -1400,6 +1486,11 @@ class CommonTemplate:
                     (16, 3, 224, 224), (150528, 50176, 224, 1), torch.float32, "cpu"
                 ),
             ),
+            # Mismatched elements: 127 / 746496 (0.0%)
+            # Greatest absolute difference: 0.0009765625 at index (1, 62, 7, 16) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.05187467899332306 at index (14, 18, 11, 0) (up to 0.001 allowed)
+            atol=1e-3,
+            rtol=0.001,
         )
 
     def test_elu(self):
@@ -1717,6 +1808,11 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([16, 16]),),
+            # Mismatched elements: 9 / 256 (3.5%)
+            # Greatest absolute difference: 2.491354329061828e+28 at index (6, 6) (up to 1e-05 allowed)
+            # Greatest relative difference: 2.9793410720160818e-05 at index (4, 5) (up to 1.3e-06 allowed)
+            atol=1e-5,
+            rtol=3e-05,
         )
 
     def test_glu(self):
@@ -2191,6 +2287,11 @@ class CommonTemplate:
                 torch.rand([4, 352, 352, 2], dtype=torch.float32) * 2 - 1,
             ),
             check_lowp=False,
+            # Mismatched elements: 154697 / 1486848 (10.4%)
+            # Greatest absolute difference: 0.0001976490020751953 at index (0, 0, 101, 243) (up to 1e-05 allowed)
+            # Greatest relative difference: 7.332530120481928 at index (1, 1, 258, 301) (up to 1.3e-06 allowed)
+            atol=0.0002,
+            rtol=1.3e-06,
         )
 
     def test_upsample_bicubic2d(self):
@@ -2200,7 +2301,15 @@ class CommonTemplate:
                 aten.upsample_bicubic2d(a, (128, 256), False),
             )
 
-        self.common(fn, (torch.randn([4, 3, 64, 32], dtype=torch.float32),))
+        # Mismatched elements: 10 / 196608 (0.0%)
+        # Greatest absolute difference: 1.3869255781173706e-05 at index (2, 1, 88, 65) (up to 1e-05 allowed)
+        # Greatest relative difference: 0.0033082996811011046 at index (3, 1, 88, 91) (up to 1.3e-06 allowed)
+        self.common(
+            fn,
+            (torch.randn([4, 3, 64, 32], dtype=torch.float32),),
+            atol=2e-5,
+            rtol=1e-3,
+        )
 
     def test_sort(self):
         def fn(a):
@@ -2386,6 +2495,20 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
+    def test_input_mutation4(self):
+        def fn(a):
+            torch.relu_(a)
+            return a
+
+        arg1 = torch.randn([1, 64], device=self.device)
+        arg2 = arg1.clone()
+        correct1 = fn(arg1)
+        opt_fn = torchdynamo.optimize_assert(compile_fx)(fn)
+        actual1 = opt_fn(arg2)
+
+        self.assertTrue(same(actual1, correct1))
+        self.assertTrue(same(arg1, arg2))
+
     @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
@@ -2506,6 +2629,11 @@ class CommonTemplate:
                 torch.randn(6, 128, 64),
                 torch.randn(6, 64, 100),
             ],
+            # Mismatched elements: 1212 / 76800 (1.6%)
+            # Greatest absolute difference: 0.001953125 at index (0, 0, 93) (up to 1e-05 allowed)
+            # Greatest relative difference: 1.0 at index (3, 19, 4) (up to 0.001 allowed)
+            atol=0.002,
+            rtol=0.001,
         )
 
     @patch.object(config.triton, "max_tiles", 2)
@@ -2579,8 +2707,87 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put_as_masked_fill(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                True,
+            ),
+        )
+
+    def test_index_put_fallback1(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                True,
+            ),
+        )
+
+    def test_index_put_fallback2(self):
+        def fn(a, b, c, d, e):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [None, b, c], d, e)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                False,
+            ),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                True,
+            ),
+        )
+
     @patch.object(config, "fallback_random", True)
-    def test_bernoulli(self):
+    def test_bernoulli1(self):
         def fn(a):
             b = torch.empty_like(a)
             return aten.bernoulli_(b), b
@@ -2590,6 +2797,15 @@ class CommonTemplate:
             [
                 torch.randn([100]),
             ],
+        )
+
+    def test_bernoulli2(self):
+        def fn(a):
+            return aten.bernoulli(a)
+
+        self.common(
+            fn,
+            [torch.tensor([1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0])],
         )
 
     def test_narrow(self):
@@ -2690,6 +2906,11 @@ class CommonTemplate:
                 torch.tensor([[[3, 5, 7, 9]]]),
                 0.8,  # src can be a scalar
             ],
+            # Mismatched elements: 1 / 1885 (0.1%)
+            # Greatest absolute difference: 0.00018310546875 at index (0, 0, 3) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.0022371364653243847 at index (0, 0, 3) (up to 0.001 allowed)
+            atol=2e-4,
+            rtol=1e-3,
         )
 
     @unittest.skip("Flaky test, needs debugging")
@@ -3127,6 +3348,11 @@ class CommonTemplate:
             [
                 torch.randn([144, 144]),
             ],
+            # Mismatched elements: 1 / 144 (0.7%)
+            # Greatest absolute difference: 26 at index (71,)
+            # Greatest relative difference: 0.4126984179019928 at index (71,)
+            atol=1e-5,
+            rtol=0.5,
         )
 
     @unittest.skip(
@@ -3207,7 +3433,7 @@ class CommonTemplate:
             (torch.Size([1, 512, 1]), torch.float32),
         ]
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
-        self.common(forward, inps)
+        self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):

@@ -1,3 +1,4 @@
+import functools
 import logging
 import operator
 from collections import defaultdict
@@ -160,7 +161,6 @@ def mem_efficient_fusion_kwargs(use_decomps):
         "fw_compiler": ts_compile,
         "bw_compiler": ts_compile,
         "partition_fn": min_cut_rematerialization_partition,
-        "hasher_type": "StaticShapeHasher",
     }
 
     if use_decomps:
@@ -183,6 +183,33 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+class AotInductorDebug(AotAutogradStrategy):
+    """
+    Uses TorchInductor Aot Autograd decopms and partitioner to isolate aot vs
+    inductor problems.
+    """
+
+    def candidate(self):
+        from functorch.compile import min_cut_rematerialization_partition
+        from functorch.compile import nop
+
+        from torchinductor.compile_fx import select_decomp_table
+
+        kwargs = {
+            # these are taken from memory_efficient_fusion()
+            "fw_compiler": nop,
+            "bw_compiler": nop,
+            "decompositions": select_decomp_table(),
+            "partition_fn": functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
+        }
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+aot_inductor_debug = AotInductorDebug.compile_fn
 
 
 class AOTMemEfficientFusionWithContext:
@@ -255,7 +282,6 @@ class AotPrimsNvfuser(AotAutogradStrategy):
             self.example_inputs,
             fw_compiler=wrap_compiler_debug(self.nvfuser, "nvfuser"),
             partition_fn=self.min_cut_rematerialization_partition,
-            hasher_type="StaticShapeHasher",
             decompositions=self.aten2aten_decompositions,
         )
 
@@ -292,7 +318,6 @@ def create_nvprims_backend(*, executor):
                 self.example_inputs,
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
-                hasher_type="StaticShapeHasher",
             )
 
     return NvPrims
@@ -413,7 +438,9 @@ def apply_cuda_graphs(gm):
             submod = gm.get_submodule(n.target)
             gm.delete_submodule(n.target)
             mutated_inputs = find_input_mutations(submod.graph)
-            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
+            gm.register_attr_or_module(
+                n.target, CudaGraphModule(submod, mutated_inputs)
+            )
     # NB: we didn't actually change the graph, no need for recompile
 
 
@@ -428,7 +455,6 @@ def raw_aot_autograd_cudagraphs(model, inputs):
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
-        "hasher_type": "StaticShapeHasher",
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
@@ -492,3 +518,7 @@ def create_aot_backends():
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
     BACKENDS["aot_cudagraphs"] = aot_cudagraphs
+
+    # aot_inductor_debug just replaces the inductor compiler with nop to help
+    # isolate inductor vs aot_eager errors
+    BACKENDS["aot_inductor_debug"] = aot_inductor_debug
