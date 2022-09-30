@@ -125,9 +125,7 @@ def decode_device(device):
     return device
 
 
-def get_promoted_dtype(
-    *args, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-):
+def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
         if isinstance(inp, Number):
             return inp
@@ -3003,7 +3001,9 @@ def div(a, b):
     def fn(*args):
         return ops.div(*args)
 
-    dtype = get_promoted_dtype(a, b)
+    dtype = get_promoted_dtype(
+        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
     # truediv produces a float tensor even if both operands are integer types
     if is_integer_type(a) and is_integer_type(b):
         dtype = torch.get_default_dtype()
