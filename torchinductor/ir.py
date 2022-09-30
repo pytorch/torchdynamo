@@ -2854,14 +2854,14 @@ class MultiOutput(ExternKernel):
 
 
 class LinearEltwise(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
+    kernel = "torch.ops.mkldnn._linear_pointwise"
 
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn_prepacked.linear_eltwise",
+        kernel="torch.ops.mkldnn._linear_pointwise",
     ):
         super().__init__(layout, inputs, constant_args)
         self.kernel = kernel
@@ -2873,10 +2873,10 @@ class LinearEltwise(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
-        kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
+        kernel = "torch.ops.mkldnn._linear_pointwise"
         x = cls.require_stride1(cls.realize_input(x))
         w = cls.require_stride1(cls.realize_input(w))
-        
+
         *m, ic = x.get_size()
         oc, ic = w.get_size()
 

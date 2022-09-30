@@ -82,7 +82,7 @@ class LinearEltwise(nn.Linear):
         self.algorithm = algorithm
 
     def forward(self, input):
-        y = torch.ops.mkldnn_prepacked.linear_eltwise(
+        y = torch.ops.mkldnn._linear_pointwise(
             input, self.weight, self.bias, self.attr, self.scalars, self.algorithm
         )
         return y

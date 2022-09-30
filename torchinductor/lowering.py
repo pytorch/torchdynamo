@@ -757,7 +757,7 @@ def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
-@register_lowering(torch.ops.mkldnn_prepacked.linear_eltwise)
+@register_lowering(torch.ops.mkldnn._linear_pointwise)
 def linear_eltwise(x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm):
     return TensorBox.create(ir.LinearEltwise.create(x, w, b, attr, scalars, algorithm))
 
