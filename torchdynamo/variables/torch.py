@@ -33,6 +33,9 @@ log = logging.getLogger(__name__)
 
 tensor_dunder_fns = [
     torch.Tensor.__rmatmul__,
+    torch.Tensor.__rmod__,
+    torch.Tensor.__rpow__,
+    torch.Tensor.__rsub__,
 ]
 
 

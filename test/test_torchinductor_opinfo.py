@@ -201,11 +201,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__radd__": {b8, f16, f32, f64, i32, i64},
     "__rand__": {b8, i32, i64},
-    "__rmod__": {f16, f32, f64},
     "__rmul__": {b8, f16, f32, f64, i32, i64},
     "__ror__": {b8, i32, i64},
-    "__rpow__": {f16, f32, f64, i32, i64},
-    "__rsub__": {f16, f32, f64, i32, i64},
     "__rxor__": {b8, i32, i64},
     "addmm": {f32, f64, i32, i64},
     "addr": {f16},
@@ -363,11 +360,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__radd__": {b8, f16, f32, f64, i32, i64},
     "__rand__": {b8, i32, i64},
-    "__rmod__": {f16, f32, f64, i32, i64},
     "__rmul__": {b8, f16, f32, f64, i32, i64},
     "__ror__": {b8, i32, i64},
-    "__rpow__": {f16, f32, f64, i32, i64},
-    "__rsub__": {f16, f32, f64, i32, i64},
     "__rxor__": {b8, i32, i64},
     "addbmm": {f16},
     "addmm": {f16, f32, f64},
@@ -516,6 +510,23 @@ inductor_expected_failures_single_sample["cuda"] = {
     "zero_": {b8},
 }
 
+inductor_should_fail_with_exception = defaultdict(dict)
+
+inductor_should_fail_with_exception["cpu"] = {
+    "__rpow__": {
+        i32 : "Pow input must be floating point.",
+        i64 : "Pow input must be floating point."
+    }
+}
+
+
+inductor_should_fail_with_exception["cuda"] = {
+    "__rpow__": {
+        i32 : "Pow input must be floating point.",
+        i64 : "Pow input must be floating point."
+    }
+}
+
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
@@ -606,7 +617,14 @@ class TestInductorOpInfo(TestCase):
                 if COLLECT_EXPECT:
                     return
 
-                raise e
+                known_failure = False
+                if dtype in inductor_should_fail_with_exception[device_type].get(op_name, set()):
+                    failure = inductor_should_fail_with_exception[device_type][op_name][dtype]
+                    if failure in str(e):
+                        known_failure = True
+                
+                if not known_failure:
+                    raise e
             else:
                 # with open("test_output.txt", "a") as f:
                 #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)

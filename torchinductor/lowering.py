@@ -2849,6 +2849,7 @@ def pow_native(a, b):
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
+    assert a.get_dtype() in (torch.float16, torch.float32, torch.float64), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, int) and b == 1:
