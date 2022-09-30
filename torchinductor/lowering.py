@@ -1604,8 +1604,34 @@ def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
 
 
+def index_put_as_masked_fill(self, indices, value, accumulate):
+    if value.get_device() != self.get_device():
+        value = to_device(value, self.get_device())
+    if accumulate:
+        value = add(self, value)
+    return mutate_to(self, where(indices[0], value, self))
+
+
+def index_put_fallback(self, indices, values, accumulate):
+    ir.IndexPutFallback(self, indices, values, accumulate)
+    return self
+
+
 @register_lowering(aten.index_put_, type_promote=False)
 def index_put_(self, indices, values, accumulate=False):
+    # Dispatch to masked fill for single boolean index with single value
+    if (
+        values.get_numel() == 1
+        and len(indices) == 1
+        and indices[0].get_dtype() in {torch.bool, torch.uint8}
+    ):
+        return index_put_as_masked_fill(self, indices, values, accumulate)
+
+    # Fallback if there is a boolean index
+    for index in indices:
+        if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
+            return index_put_fallback(self, indices, values, accumulate)
+
     values = to_dtype(values, self.get_dtype())
     indices, start_offset, end_offset = check_and_broadcast_indices(indices)
     indices_sizes = [i.get_size() for i in indices if i is not None]
