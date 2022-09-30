@@ -628,6 +628,22 @@ class TestInductorOpInfo(TestCase):
                         known_failure = True
 
                 if not known_failure:
+                    # DO NOT LAND ___ DEBUGGING CI ___ !!! 
+                    print("FAILED")
+                    print("TABLE", inductor_should_fail_with_exception)
+                    print("TABLE[device_type]", inductor_should_fail_with_exception[device_type])
+                    if dtype in inductor_should_fail_with_exception[device_type].get(
+                        op_name, set()
+                    ):
+                        failure = inductor_should_fail_with_exception[device_type][op_name][
+                            dtype
+                        ]
+                        print("FAILURE", failure)
+                    else:
+                        print("NOT FOUND")
+                    print("ERROR", str(e))
+                    
+                    # END DO NOT LAND ___ DEBUGGING CI ___ !!! 
                     raise e
             else:
                 # with open("test_output.txt", "a") as f:
