@@ -276,7 +276,7 @@ def evaluate(
             stats.sort_stats("tottime").print_stats(10)
             print(f"RUN FINISHED FOR {backend}", file=file)
             print(
-                f"    RUN FOR {backend} TOOK: {end - start} seconds for {len(inputs)} inputs and {len(warmups)} warmups",
+                f"   RUN FOR {backend} TOOK: {end - start} seconds for {len(inputs)} inputs and {len(warmups)} warmups",
                 file=file,
             )
 
