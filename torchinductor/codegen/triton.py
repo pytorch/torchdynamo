@@ -1037,10 +1037,6 @@ class TritonKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 1-element tensor on CPU, need to convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
 
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
