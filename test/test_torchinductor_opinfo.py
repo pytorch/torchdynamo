@@ -514,16 +514,16 @@ inductor_should_fail_with_exception = defaultdict(dict)
 
 inductor_should_fail_with_exception["cpu"] = {
     "__rpow__": {
-        i32 : "Pow input must be floating point.",
-        i64 : "Pow input must be floating point."
+        i32: "Pow input must be floating point.",
+        i64: "Pow input must be floating point.",
     }
 }
 
 
 inductor_should_fail_with_exception["cuda"] = {
     "__rpow__": {
-        i32 : "Pow input must be floating point.",
-        i64 : "Pow input must be floating point."
+        i32: "Pow input must be floating point.",
+        i64: "Pow input must be floating point.",
     }
 }
 
@@ -618,11 +618,15 @@ class TestInductorOpInfo(TestCase):
                     return
 
                 known_failure = False
-                if dtype in inductor_should_fail_with_exception[device_type].get(op_name, set()):
-                    failure = inductor_should_fail_with_exception[device_type][op_name][dtype]
+                if dtype in inductor_should_fail_with_exception[device_type].get(
+                    op_name, set()
+                ):
+                    failure = inductor_should_fail_with_exception[device_type][op_name][
+                        dtype
+                    ]
                     if failure in str(e):
                         known_failure = True
-                
+
                 if not known_failure:
                     raise e
             else:
