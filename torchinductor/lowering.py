@@ -573,7 +573,7 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promote=False)
-def slice_(x, dim, start, end, step=1):
+def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
@@ -671,13 +671,13 @@ def cat(inputs, dim=0):
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
-@register_lowering(aten.select)
+@register_lowering(aten.select, type_promote=False)
 def select(x, dim, idx):
     idx = View.handle_negative_index(idx, x.get_size()[dim])
     return squeeze(slice_(x, dim, idx, idx + 1), dim)
 
 
-@register_lowering(aten.split)
+@register_lowering(aten.split, type_promote=False)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
@@ -692,12 +692,12 @@ def split(x, sizes, dim=0):
     return result
 
 
-@register_lowering(aten.split_with_sizes)
+@register_lowering(aten.split_with_sizes, type_promote=False)
 def split_with_sizes(x, sizes, dim=0):
     return split(x, sizes, dim)
 
 
-@register_lowering(aten.unbind)
+@register_lowering(aten.unbind, type_promote=False)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
@@ -1118,8 +1118,9 @@ def triu(x, diagonal=0):
     )
 
 
-@register_lowering(aten.select_scatter)
+@register_lowering(aten.select_scatter, type_promote=False)
 def select_scatter(x, src, dim: int, index: int):
+    assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     src = expand(unsqueeze(src, dim), x.get_size())
@@ -1143,8 +1144,9 @@ def select_scatter(x, src, dim: int, index: int):
     )
 
 
-@register_lowering(aten.slice_scatter)
+@register_lowering(aten.slice_scatter, type_promote=False)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
+    assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -1318,7 +1320,7 @@ def _full(fill_value, device, dtype, size):
     )
 
 
-@register_lowering(aten.full_like)
+@register_lowering(aten.full_like, type_promote=False)
 def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
