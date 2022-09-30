@@ -67,7 +67,7 @@ decompositions = get_decompositions(
         aten.mse_loss_backward,
         aten.mv,
         aten.narrow,
-        # aten.native_batch_norm, TODO - fix cpu error and enable
+        aten.native_batch_norm,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
@@ -116,26 +116,6 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
     return x
-
-
-# temporary workaround until https://github.com/pytorch/torchdynamo/issues/1215
-# is fixed - fails on cpu
-@register_decomposition([aten.native_batch_norm])
-def native_batch_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    training: bool,
-    momentum: float,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    if input.device.type == "cpu":
-        return NotImplemented
-    return torch._decomp.decompositions.native_batch_norm(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
-    )
 
 
 @register_decomposition([aten.tanh])
