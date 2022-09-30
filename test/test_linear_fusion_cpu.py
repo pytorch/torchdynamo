@@ -43,7 +43,7 @@ class TestFuseFx(QuantizationTestCase):
                 x = self.eltwise(x)
                 return x
 
-        mod = M(eltwise_fn, input_shape[-1], 10, bias).eval()
+        mod = M(eltwise_fn, input_shape[-1], 30, bias).eval()
 
         @torchdynamo.optimize("inductor")
         def fn(x):

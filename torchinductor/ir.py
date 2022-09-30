@@ -2862,12 +2862,16 @@ class LinearEltwise(ExternKernelAlloc):
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
         kernel = "torch.ops.mkldnn_prepacked.linear_eltwise"
-        *m, k1 = x.get_size()
-        k2, n = w.get_size()
+        x = cls.require_stride1(cls.realize_input(x))
+        w = cls.require_stride1(cls.realize_input(w))
+        
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
 
         inputs = [x, w]
         constant_args = [attr, scalars, algorithm]
         if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)
@@ -2876,7 +2880,7 @@ class LinearEltwise(ExternKernelAlloc):
             layout=FlexibleLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
-                size=list(m) + [n],
+                size=list(m) + [oc],
             ),
             inputs=inputs,
             constant_args=constant_args,
