@@ -136,10 +136,6 @@ inductor_skips["cuda"] = {
     "log2": {b8, i32, i64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
-    "nan_to_num": {
-        i32,
-        i64,
-    },  # FIXME bad decomposition, torch.finfo() requires a floating point input type
     "nn.functional.binary_cross_entropy": {f64},
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.cross_entropy": {f64},
@@ -163,7 +159,6 @@ inductor_skips["cuda"] = {
     "sqrt": {b8, i32, i64},
     "tanh": {f64},
     "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
-    "roll": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -175,11 +170,9 @@ inductor_skips["cuda"] = {
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.sum": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax": {b8, f16, f32, f64, i32, i64},  # segfault
+    "softmax": {b8, f64, i32, i64},  # segfault
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.kl_div": {b8, f16, f32, f64, i32, i64},  # segfault
-    "fliplr": {b8, f16, f32, f64, i32, i64},  # segfault
-    "flipud": {b8, f16, f32, f64, i32, i64},  # segfault
     "log_softmax": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
@@ -450,7 +443,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "min.reduction_no_dim": {b8},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "nan_to_num": {b8},
+    "nan_to_num": {b8, i32, i64},
     "new_empty": {f16, f32, f64, i32, i64},
     "new_empty_strided": {f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
