@@ -195,14 +195,10 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
         x.to("cuda") if x.device.type == "cpu" and x.dim() == 0 else x for x in inputs
     ]
 
-    static_inputs = []
-    for idx, x in enumerate(inputs):
-        if idx not in static_input_idxs:
-            static_inputs.append(static_input(x))
-        elif x.device.type == "cpu" and x.dim() == 0:
-            static_inputs.append(x.to("cuda"))
-        else:
-            static_inputs.append(inputs[idx])
+    static_inputs = [
+        static_input(x) if idx not in static_input_idxs else x
+        for idx, x in enumerate(inputs)
+    ]
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
