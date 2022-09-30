@@ -2,8 +2,6 @@ import functools
 import logging
 import math
 import numbers
-from typing import Optional
-from typing import Tuple
 
 import torch
 import torch._decomp as decomp
