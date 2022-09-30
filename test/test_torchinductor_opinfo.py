@@ -341,7 +341,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16, f32, f64},
-    "zero_": {b8},
 }
 
 
@@ -487,7 +486,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
-    "zero_": {b8},
 }
 
 
