@@ -466,6 +466,22 @@ def squeeze_(x, dim=None):
     return x
 
 
+@register_lowering(aten.ceil)
+def ceil(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper(aten.ceil.__name__)
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.floor)
+def floor(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper(aten.floor.__name__)
+    return make_pointwise(fn)(x)
+
+
 @register_lowering(aten.expand, type_promote=False)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
@@ -3019,7 +3035,6 @@ reduce_argmin = register_lowering(aten.argmin)(
 
 add = register_pointwise(aten.add, allow_alpha=True, override_bool="logical_or")
 exp = register_pointwise(aten.exp)
-floor = register_pointwise(aten.floor)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
@@ -3045,7 +3060,6 @@ register_pointwise(aten.remainder)
 register_pointwise(aten.round)
 register_pointwise(aten.sign, override_bool="identity")
 register_pointwise(aten.silu)
-register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_dtype=torch.bool)
 register_pointwise(aten.isinf, override_dtype=torch.bool)
