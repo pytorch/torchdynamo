@@ -16,7 +16,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 import torchdynamo
-from torchdynamo.debug_utils import wrap_backend_debug
 from torchdynamo.optimizations.distributed import DDPOptimizer
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
@@ -302,6 +301,8 @@ class WrapperBackend:
 
 
 def get_compiler_fn(compiler_fn):
+    from torchdynamo.debug_utils import wrap_backend_debug
+
     """Expand backend strings to functions"""
     compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
     if compiler_fn == "inductor":
