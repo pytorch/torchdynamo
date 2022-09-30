@@ -4,6 +4,7 @@ isort==5.10.1
 mypy==0.960
 click>=8.1
 expecttest
+networkx
 ninja
 numpy
 pytest

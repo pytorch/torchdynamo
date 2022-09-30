@@ -38,7 +38,7 @@ install_requires = [
     "dill",
     "jinja2",
     "networkx",
-    "sympy"
+    "sympy",
 ]
 
 setup(
