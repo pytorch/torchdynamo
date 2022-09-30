@@ -61,6 +61,10 @@ def complex_memory_overlap(t):
     return torch._debug_has_internal_overlap(indexed_tensor) != 0
 
 
+def is_unspec_input(t):
+    return t.device.type == "cpu" and t.dim() == 0
+
+
 @DebugContext.wrap
 @no_dispatch()
 def compile_fx_inner(
@@ -134,6 +138,7 @@ def align_inputs(model, inputs, static_input_idxs=()):
                 if isinstance(new_inputs, tuple):
                     new_inputs = list(new_inputs)
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
+        new_inputs = [x.to("cuda") if is_unspec_input(x) else x for x in new_inputs]
         return model(*new_inputs)
 
     return run
@@ -191,9 +196,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
     assert isinstance(inputs, (list, tuple))
     # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
-    inputs = [
-        x.to("cuda") if x.device.type == "cpu" and x.dim() == 0 else x for x in inputs
-    ]
+    inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
 
     static_inputs = [
         static_input(x) if idx not in static_input_idxs else x
