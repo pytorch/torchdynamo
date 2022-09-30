@@ -125,7 +125,9 @@ def decode_device(device):
     return device
 
 
-def get_promoted_dtype(*args, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT):
+def get_promoted_dtype(
+    *args, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+):
     def construct_input(inp):
         if isinstance(inp, Number):
             return inp
@@ -136,9 +138,7 @@ def get_promoted_dtype(*args, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIN
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
     inps = [construct_input(arg) for arg in args]
-    _, dtype = elementwise_dtypes(
-        *inps, type_promotion_kind=type_promotion_kind
-    )
+    _, dtype = elementwise_dtypes(*inps, type_promotion_kind=type_promotion_kind)
     return dtype
 
 
@@ -172,7 +172,9 @@ def _register_lowering(
                 promoting_args = [
                     a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
                 ]
-                dtype = get_promoted_dtype(*promoting_args, type_promotion_kind=type_promotion_kind)
+                dtype = get_promoted_dtype(
+                    *promoting_args, type_promotion_kind=type_promotion_kind
+                )
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
@@ -209,7 +211,10 @@ def _register_lowering(
 
 
 def register_lowering(
-    aten_fn, broadcast=False, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, convert_input_to_bool=False
+    aten_fn,
+    broadcast=False,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    convert_input_to_bool=False,
 ):
     """
     Shim to support decorator syntax.
@@ -490,7 +495,7 @@ def squeeze_(x, dim=None):
     return x
 
 
-@register_lowering(aten.expand, type_promote=False)
+@register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
