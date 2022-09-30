@@ -165,7 +165,7 @@ class DDPOptimizer:
                         compiled_submod = self.compile_submod(submod, args, kwargs)
                         n.target = "compiled_" + n.target
                         self.module.delete_submodule(n.target)
-                        self.module.add_submodule(n.target, compiled_submod)
+                        self.module.register_attr_or_module(n.target, compiled_submod)
 
                     # then we execute the modified node using the usual logic
                     return getattr(self, n.op)(n.target, args, kwargs)
