@@ -16,7 +16,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 import torchdynamo
-from torchdynamo.debug_utils import wrap_backend_debug
 from torchdynamo.optimizations.distributed import DDPOptimizer
 from torchdynamo.utils import checkpoint_params
 from torchdynamo.utils import clone_inputs
@@ -302,6 +301,8 @@ class WrapperBackend:
 
 
 def get_compiler_fn(compiler_fn):
+    from torchdynamo.debug_utils import wrap_backend_debug
+
     """Expand backend strings to functions"""
     compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
     if compiler_fn == "inductor":
@@ -431,7 +432,13 @@ def explain(f, *args, **kwargs):
     return explanation, out_guards, graphs, ops_per_graph, break_reasons
 
 
-def export(f, *args, aten_graph=False, **kwargs):
+def export(
+    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+):
+    if decomposition_table is not None or tracing_mode != "real":
+        assert (
+            aten_graph
+        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
     f = innermost_fn(f)
 
     graph = None
@@ -547,7 +554,11 @@ def export(f, *args, aten_graph=False, **kwargs):
             with torch.fx.traceback.override_stack_trace():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(graph_with_interpreter)(*graph_captured_input)
+        graph = make_fx(
+            graph_with_interpreter,
+            decomposition_table=decomposition_table,
+            tracing_mode=tracing_mode,
+        )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,
