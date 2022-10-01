@@ -273,7 +273,7 @@ def lift(self):
 
 @register_decomposition([aten.sgn])
 def sgn(self):
-    return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
+    return torch.sign(self)
 
 
 @register_decomposition([aten.fill.Scalar])
