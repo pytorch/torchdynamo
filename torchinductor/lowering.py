@@ -3153,3 +3153,8 @@ def sym_size(a, dim):
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
+
+
+@register_lowering(aten._foobar)
+def foobar(self, *args, **kwargs):
+    raise NotImplementedError("Helpful for debugging")
