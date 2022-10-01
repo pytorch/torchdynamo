@@ -494,7 +494,7 @@ def squeeze_(x, dim=None):
 def ceil(x):
     if is_integer_type(x):
         return x
-    fn = ops_wrapper(aten.ceil.__name__)
+    fn = ops_wrapper("ceil")
     return make_pointwise(fn)(x)
 
 
@@ -502,7 +502,23 @@ def ceil(x):
 def floor(x):
     if is_integer_type(x):
         return x
-    fn = ops_wrapper(aten.floor.__name__)
+    fn = ops_wrapper("floor")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.round)
+def round(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("round")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.trunc)
+def trunc(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("trunc")
     return make_pointwise(fn)(x)
 
 
@@ -3093,7 +3109,6 @@ sigmoid = register_pointwise(aten.sigmoid)
 sqrt = register_pointwise(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
-trunc = register_pointwise(aten.trunc)
 
 register_pointwise(aten.cos)
 register_pointwise(aten.sin)
@@ -3110,7 +3125,6 @@ register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.remainder)
-register_pointwise(aten.round)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.silu)
 register_pointwise(aten.fmod)
