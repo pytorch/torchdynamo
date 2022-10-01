@@ -1367,3 +1367,56 @@ class ExportTests(torchdynamo.testing.TestCase):
         module.val = "B"
         resB = graph(torch.tensor([2]))
         self.assertTrue(torchdynamo.utils.same(resA, resB))
+
+    def test_export_decomp(self):
+        def f(x):
+            return x.t() + x.t()
+
+        def nop(x):
+            return x.cos()
+
+        graph, _ = torchdynamo.export(
+            f,
+            (torch.randn(5)),
+            aten_graph=True,
+            decomposition_table={torch.ops.aten.t.default: nop},
+        )
+        self.assertEqual(
+            len([n for n in graph.graph.nodes if n.target == torch.ops.aten.t.default]),
+            0,
+        )
+
+        graph, _ = torchdynamo.export(
+            f, (torch.randn(5)), aten_graph=True, decomposition_table=None
+        )
+        self.assertEqual(
+            len([n for n in graph.graph.nodes if n.target == torch.ops.aten.t.default]),
+            2,
+        )
+
+    def test_export_decomp_asserts_bad_args(self):
+        def f(x):
+            return x.t() + x.t()
+
+        def nop(x):
+            return x.cos()
+
+        with self.assertRaises(AssertionError):
+            graph, _ = torchdynamo.export(
+                f,
+                (torch.randn(5)),
+                aten_graph=False,
+                decomposition_table={torch.ops.aten.t.default: nop},
+            )
+
+    def test_export_decomp_asserts_bad_args_mode(self):
+        def f(x):
+            return x.t() + x.t()
+
+        def nop(x):
+            return x.cos()
+
+        with self.assertRaises(AssertionError):
+            graph, _ = torchdynamo.export(
+                f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
+            )
