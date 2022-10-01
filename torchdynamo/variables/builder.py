@@ -85,6 +85,10 @@ class GraphArg:
     example: Any
     is_unspecialized: bool
 
+    def __post_init__(self):
+        if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
+            raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
+
     def load(self, tx):
         return self.source.reconstruct(tx)
 
