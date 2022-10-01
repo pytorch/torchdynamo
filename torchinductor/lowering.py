@@ -3092,7 +3092,9 @@ register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
-register_pointwise(aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+register_pointwise(
+    aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.log)
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
@@ -3106,8 +3108,16 @@ register_pointwise(aten.silu)
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
-register_pointwise(aten.isinf, override_return_dtype=torch.bool)
-register_pointwise(aten.isnan, override_return_dtype=torch.bool)
+register_pointwise(
+    aten.isinf,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    override_return_dtype=torch.bool,
+)
+register_pointwise(
+    aten.isnan,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    override_return_dtype=torch.bool,
+)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)

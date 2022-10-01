@@ -392,8 +392,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "inner": {f16, f32, f64},
-    "isinf": {b8, i32, i64},
-    "isnan": {b8, i32, i64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
