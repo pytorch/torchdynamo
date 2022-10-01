@@ -120,7 +120,8 @@ inductor_skips["cuda"] = {
     "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "cumprod": {f16, f32, f64},
     "masked.prod": {f16, f32, f64},
-    "empty_like": {f16, f32, f64, i32, i64},
+    "empty_like": {b8, f16, f32, f64, i32, i64},
+    "empty": {b8, f16, f32, f64, i32, i64},
     "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
@@ -136,10 +137,6 @@ inductor_skips["cuda"] = {
     "log2": {b8, i32, i64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
-    "nan_to_num": {
-        i32,
-        i64,
-    },  # FIXME bad decomposition, torch.finfo() requires a floating point input type
     "nn.functional.binary_cross_entropy": {f64},
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.cross_entropy": {f64},
@@ -163,7 +160,6 @@ inductor_skips["cuda"] = {
     "sqrt": {b8, i32, i64},
     "tanh": {f64},
     "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
-    "roll": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -175,11 +171,9 @@ inductor_skips["cuda"] = {
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.sum": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax": {b8, f16, f32, f64, i32, i64},  # segfault
+    "softmax": {b8, f64, i32, i64},  # segfault
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.kl_div": {b8, f16, f32, f64, i32, i64},  # segfault
-    "fliplr": {b8, f16, f32, f64, i32, i64},  # segfault
-    "flipud": {b8, f16, f32, f64, i32, i64},  # segfault
     "log_softmax": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
@@ -218,14 +212,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "bincount": {i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
-    "chunk": {b8},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
     "constant_pad_nd": {f16, f32, f64},
     "copysign": {f16},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
-    "cumulative_trapezoid": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8, f64},
     "fft.fft": {f32, f64},
@@ -246,7 +238,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
-    "gradient": {f16, f32, f64, i32, i64},
     "index_add": {b8, f16, f32, f64, i32, i64},
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
@@ -265,7 +256,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
     "logdet": {f32, f64},
-    "logical_not": {f16, f32, f64, i32, i64},
     "logsumexp": {b8, f32, f64, i32, i64},
     "masked.argmax": {f16, f32, f64, i32, i64},
     "masked.argmin": {f16, f32, f64, i32, i64},
@@ -324,16 +314,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.sum": {f16},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
-    "select": {b8},
-    "select_scatter": {b8},
     "sgn": {b8, f16, f32, f64, i32, i64},
-    "sign": {b8, i32, i64},
-    "slice": {b8, f16, f32, f64, i32, i64},
-    "slice_scatter": {b8},
+    "sign": {i32, i64},
     "sparse.sampled_addmm": {f32, f64},
-    "split": {b8},
-    "split.list_args": {b8},
-    "split_with_sizes": {b8},
     "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
@@ -342,18 +325,14 @@ inductor_expected_failures_single_sample["cpu"] = {
     "tensordot": {f32, f64, i32, i64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
-    "trapezoid": {f16, f32, f64, i32, i64},
-    "trapz": {f16, f32, f64, i32, i64},
     "tril": {f16},
     "triu": {f16},
-    "unbind": {b8},
     "uniform": {f16, f32, f64},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16, f32, f64},
-    "zero_": {b8},
 }
 
 
@@ -383,14 +362,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "ceil": {i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
-    "chunk": {b8},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "cumsum": {f16},
-    "cumulative_trapezoid": {f16, f32, f64, i32, i64},
-    "empty": {i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8},
     "fft.fft": {f16, f32, f64},
@@ -412,7 +388,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
     "floor": {i32, i64},
-    "gradient": {f16, f32, f64, i32, i64},
     "index_add": {b8, f16, f32, f64, i32, i64},
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
@@ -434,9 +409,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
-    "logical_and": {f16, f32, f64, i32, i64},
-    "logical_not": {f16, f32, f64, i32, i64},
-    "logical_or": {f16, f32, f64, i32, i64},
     "logsumexp": {b8, f16, f32, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
@@ -450,7 +422,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "min.reduction_no_dim": {b8},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "nan_to_num": {b8},
+    "nan_to_num": {b8, i32, i64},
     "new_empty": {f16, f32, f64, i32, i64},
     "new_empty_strided": {f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
@@ -488,15 +460,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "round.decimals_3": {f16},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
-    "select": {b8},
-    "select_scatter": {b8},
     "sgn": {b8, f16, f32, f64, i32, i64},
-    "sign": {b8, i32, i64},
-    "slice": {b8, f16, f32, f64, i32, i64},
-    "slice_scatter": {b8},
-    "split": {b8},
-    "split.list_args": {b8},
-    "split_with_sizes": {b8},
+    "sign": {i32, i64},
     "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
@@ -505,15 +470,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "tensordot": {f16, f32, f64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
-    "trapezoid": {f16, f32, f64, i32, i64},
-    "trapz": {f16, f32, f64, i32, i64},
     "trunc": {i32, i64},
-    "unbind": {b8},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
-    "zero_": {b8},
 }
 
 
@@ -595,8 +556,6 @@ class TestInductorOpInfo(TestCase):
                     self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
 
             except Exception as e:
-                # with open("test_output_929.txt", "a") as f:
-                #     print(f"FAILED OP {op_name} on {device_type} with {dtype}, {e}", flush=True, file=f)
 
                 if test_expect is TestExpect.XFAILURE:
                     return
