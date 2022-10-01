@@ -686,9 +686,14 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            def fn(index):
-                reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
-                return inner_fn(index, reduction_index)
+            if reduction_type in ("argmin", "argmax"):
+                def fn(index):
+                    assert len(index) <= 1
+                    return 0
+            else:
+                def fn(index):
+                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dst_dtype, fn, ranges)
 
