@@ -651,7 +651,7 @@ class LoopLevel:
         simd = f"simd simdlen({config.cpp.simdlen})"
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
-            line1 = f"#pragma omp for{reduction}"
+            line1 = f"#pragma omp for{reduction} "
             if self.parallel > 1:
                 line1 += f" collapse({self.parallel})"
             if self.simd:
