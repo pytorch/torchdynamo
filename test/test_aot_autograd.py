@@ -41,7 +41,7 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
         aot_mod(*args)
         self.assertTrue(not is_safe[0])
 
-    def test_set_grad_enabled(self):
+    def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301
         def fn(param, y):
             prev_grad = torch.is_grad_enabled()
@@ -58,6 +58,23 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_fn = torchdynamo.optimize(compiler_fn)(fn)
         aot_fn(x, y)
+        self.assertTrue(not is_safe[0])
+
+    def test_new(self):
+        # https://github.com/pytorch/torchdynamo/issues/1448
+        def fn(argsort: torch.Tensor):
+            new = argsort.new(2, 12, 4096)
+            x = torch.add(new, 2)
+            return (
+                new,
+                x,
+            )
+
+        x = torch.randn((2, 12, 4096))
+        is_safe = [True]
+        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
+        aot_fn = torchdynamo.optimize(compiler_fn)(fn)
+        aot_fn(x)
         self.assertTrue(not is_safe[0])
 
     def test_negative_testing(self):
