@@ -3587,7 +3587,7 @@ if HAS_CPU:
                 torch.set_num_threads(num_threads)
                 yield
                 torch.set_num_threads(orig_num_threads)
-                
+
             x1 = torch.randn((10, 20))
             x2 = torch.randn((10, 20))
             with set_num_threads(1):
