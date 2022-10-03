@@ -57,7 +57,7 @@ compile_threads = 1
 # config specific to codegen/cpp.pp
 class cpp:
     threads = -1  # set to torch.get_num_threads()
-    specialize_num_threads = False # whether to specialize on the number of threads
+    specialize_num_threads = False  # whether to specialize on the number of threads
     simdlen = None
     min_chunk_size = 4096
     cxx = (

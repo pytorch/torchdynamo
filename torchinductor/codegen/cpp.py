@@ -300,7 +300,7 @@ class CppKernel(Kernel):
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
-        self.num_threads = num_threads # num_threads the kernel specialized for
+        self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
