@@ -12,16 +12,16 @@ from os.path import exists
 import torch
 from torch.testing._internal.common_utils import IS_FBCODE
 
-from torchdynamo.testing import collect_results
-from torchdynamo.testing import reduce_to_scalar_loss
-from torchdynamo.utils import clone_inputs
-
 if IS_FBCODE:
     from .common import BenchmarkRunner
     from .common import main
 else:
     from common import BenchmarkRunner
     from common import main
+
+from torchdynamo.testing import collect_results
+from torchdynamo.testing import reduce_to_scalar_loss
+from torchdynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
