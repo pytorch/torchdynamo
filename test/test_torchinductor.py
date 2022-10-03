@@ -18,6 +18,7 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.utils import timed
 
 try:
     import sympy
@@ -3594,6 +3595,10 @@ if HAS_CPU:
                 assert same(x1 + x2, fn(x1, x2))
             with set_num_threads(4):
                 assert same(x1 + x2, fn(x1, x2))
+
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_timed_cpu_only(self):
+            timed(lambda: torch.randn(10), ())
 
 
 if HAS_CUDA:
