@@ -686,9 +686,17 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            def fn(index):
-                reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
-                return inner_fn(index, reduction_index)
+            if reduction_type in ("argmin", "argmax"):
+
+                def fn(index):
+                    assert len(index) <= 1
+                    return 0
+
+            else:
+
+                def fn(index):
+                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dst_dtype, fn, ranges)
 
@@ -2426,6 +2434,42 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class IndexPutFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation and indices properly
+    """
+
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
+        indices = []
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(self.indices):
+            if self.indices[i] is not None:
+                indices.append(next(iter_valid_indices))
+            else:
+                indices.append("None")
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{','.join(indices)}], {values}, {repr(self.constant_args[0])})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, x, indices, values, accumulate):
+        self.indices = indices
+        valid_indices = [i for i in indices if i is not None]
+        tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            [accumulate],
         )
         self.name = V.graph.register_buffer(self)
 

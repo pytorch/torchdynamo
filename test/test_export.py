@@ -928,3 +928,495 @@ class ExportTests(torchdynamo.testing.TestCase):
         make_fx_result = opt_func(inp)
 
         self.assertTrue(torchdynamo.utils.same(make_fx_result, export_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_method_on_module(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return torch.nonzero(x)
+
+            def forward(self, x):
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = self.helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_method_on_module_invoke_twice(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return torch.nonzero(x)
+
+            def forward(self, x):
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = self.helper_fn(x) + self.helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_free_function(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return torch.nonzero(x)
+
+            def forward(self, x):
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = helper_fn(x) + self.helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_free_function_and_class_method(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = helper_fn(x)
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([[1.0, 0], [0, 0]]))
+        module = MyModule()
+        graph, _ = torchdynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_free_function_and_class_method_multiarg(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 2))
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x, z):
+                y = torch.sin(x)
+                x = self.linear(x)
+                y = helper_fn(x) + helper_fn(z)
+                return y
+
+        module = MyModule()
+        real_result = module(
+            torch.tensor([[1.0, 0], [0, 0]]), torch.tensor([[1.0, 0], [0, 0]])
+        )
+        module = MyModule()
+        graph, _ = torchdynamo.export(
+            module, torch.tensor([[0.0, 0], [0, 0]]), torch.tensor([[1.0, 0], [0, 0]])
+        )
+        result = graph(
+            torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[1.0, 0.0], [0, 0]])
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(
+            torch.tensor([[1, 0], [0.25, 0.25]]), torch.tensor([[1, 0], [0.25, 0.25]])
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_free_function_and_class_method_multiarg_diff(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            return torch.nonzero(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, z):
+                y = helper_fn(x) + helper_fn(z)
+                return y
+
+        module = MyModule()
+        real_result = module(
+            torch.tensor([[1.0, 0], [0, 0]]), torch.tensor([[1.0, 0], [0, 0]])
+        )
+        module = MyModule()
+        graph, _ = torchdynamo.export(
+            module, torch.tensor([[0.0, 0], [0, 0]]), torch.tensor([[0.0, 0], [0.5, 0]])
+        )
+        result = graph(
+            torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[0.0, 1.0], [0, 0]])
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+        result = graph(
+            torch.tensor([[1, 0], [0.25, 0.25]]),
+            torch.tensor([[0.33, 0.33], [0.25, 0.25]]),
+        )
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_tuple_nonzero(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return (torch.nonzero(x), torch.nonzero(x))
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                elements = self.helper_fn(x)
+                all_y = []
+                for element in elements:
+                    for item in element:
+                        all_y.append(y * item)
+                return all_y
+
+        module = MyModule()
+        real_result = module(torch.tensor([1.0, 1.0]))
+        graph, guards = torchdynamo.export(module, torch.tensor([1.0, 1.0]))
+
+        # Tensor input can be almost anything here, and the result will capture what we
+        # made constant at compile time.
+        result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_list_nonzero(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return [torch.nonzero(x), torch.nonzero(x)]
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                elements = self.helper_fn(x)
+                all_y = []
+                for element in elements:
+                    for item in element:
+                        all_y.append(y * item)
+                return all_y
+
+        module = MyModule()
+        real_result = module(torch.tensor([1.0, 1.0]))
+        graph, guards = torchdynamo.export(module, torch.tensor([1.0, 1.0]))
+
+        # Tensor input can be almost anything here, and the result will capture what we
+        # made constant at compile time.
+        result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_list_nonzero_free_function(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            return [torch.nonzero(x), torch.nonzero(x)]
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                elements = helper_fn(x)
+                all_y = []
+                for element in elements:
+                    for item in element:
+                        all_y.append(y * item)
+                return all_y
+
+        module = MyModule()
+        real_result = module(torch.tensor([1.0, 1.0]))
+        graph, guards = torchdynamo.export(module, torch.tensor([1.0, 1.0]))
+
+        # Tensor input can be almost anything here, and the result will capture what we
+        # made constant at compile time.
+        result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_dict_values(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return {"x": x, "x^2": x * x}
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                elements = self.helper_fn(x)
+                y = y * elements["x"]
+                y = y * elements["x^2"]
+                return y
+
+        module = MyModule()
+        real_result = module(torch.tensor([2.0, 2.0]))
+        graph, guards = torchdynamo.export(module, torch.tensor([2.0, 2.0]))
+
+        # Tensor input can be almost anything here, and the result will capture what we
+        # made constant at compile time.
+        result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_none_control_flow(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                if x.item() < 0:
+                    return None
+                else:
+                    return x
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = self.helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([-1]))
+
+        # X is negative, so .item() < 0, which means we return y
+        self.assertEqual(real_result, torch.tensor([0.5]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([-1]))
+        result = graph(torch.tensor([2]))
+        # X is positive, but we compiled helper_fn to return None, so it will still return y
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_not_none_control_flow(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                if x.item() < 0:
+                    return None
+                else:
+                    return x
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = self.helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([2]))
+
+        # X is positive, so .item() > 0, which means we return y * x
+        self.assertEqual(real_result, torch.tensor([1]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([2]))
+        result = graph(torch.tensor([-0.5]))
+        # X is negative, but we compiled helper_fn to return x, so it will still return y * x
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_none_control_flow_free_func(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            if x.item() < 0:
+                return None
+            else:
+                return x
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([-1]))
+
+        # X is negative, so .item() < 0, which means we return y
+        self.assertEqual(real_result, torch.tensor([0.5]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([-1]))
+        result = graph(torch.tensor([2]))
+        # X is positive, but we compiled helper_fn to return None, so it will still return y
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_not_none_control_flow_pos(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                if x.item() < 0:
+                    return None
+                else:
+                    return x
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = self.helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([2]))
+
+        # X is positive, so .item() > 0, which means we return y * x
+        self.assertEqual(real_result, torch.tensor([1]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([2]))
+        result = graph(torch.tensor([-0.5]))
+        # X is negative, but we compiled helper_fn to return x, so it will still return y * x
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_not_none_control_flow_free_func(self):
+        @torchdynamo.assume_constant_result
+        def helper_fn(x):
+            if x.item() < 0:
+                return None
+            else:
+                return x
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = helper_fn(x)
+                if x is None:
+                    return y
+                return y * x
+
+        module = MyModule()
+        real_result = module(torch.tensor([2]))
+
+        # X is positive, so .item() > 0, which means we return y * x
+        self.assertEqual(real_result, torch.tensor([1]))
+
+        graph, guards = torchdynamo.export(module, torch.tensor([2]))
+        result = graph(torch.tensor([-0.5]))
+        # X is negative, but we compiled helper_fn to return x, so it will still return y * x
+        self.assertTrue(torchdynamo.utils.same(result, real_result))
+
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_constant_not_return_const(self):
+        class MyModule(torch.nn.Module):
+            @torchdynamo.assume_constant_result
+            def helper_fn(self, x):
+                return self.val
+
+            def forward(self, x):
+                y = torch.tensor([0.5])
+                x = self.helper_fn(x)
+                if x == "A":
+                    return y
+                return -1
+
+        module = MyModule()
+        module.val = "A"
+        resA = module(torch.tensor([2]))
+        graph, guards = torchdynamo.export(module, torch.tensor([2]))
+        module.val = "B"
+        resB = graph(torch.tensor([2]))
+        self.assertTrue(torchdynamo.utils.same(resA, resB))
+
+    def test_export_decomp(self):
+        def f(x):
+            return x.t() + x.t()
+
+        def nop(x):
+            return x.cos()
+
+        graph, _ = torchdynamo.export(
+            f,
+            (torch.randn(5)),
+            aten_graph=True,
+            decomposition_table={torch.ops.aten.t.default: nop},
+        )
+        self.assertEqual(
+            len([n for n in graph.graph.nodes if n.target == torch.ops.aten.t.default]),
+            0,
+        )
+
+        graph, _ = torchdynamo.export(
+            f, (torch.randn(5)), aten_graph=True, decomposition_table=None
+        )
+        self.assertEqual(
+            len([n for n in graph.graph.nodes if n.target == torch.ops.aten.t.default]),
+            2,
+        )
+
+    def test_export_decomp_asserts_bad_args(self):
+        def f(x):
+            return x.t() + x.t()
+
+        def nop(x):
+            return x.cos()
+
+        with self.assertRaises(AssertionError):
+            graph, _ = torchdynamo.export(
+                f,
+                (torch.randn(5)),
+                aten_graph=False,
+                decomposition_table={torch.ops.aten.t.default: nop},
+            )
+
+    def test_export_decomp_asserts_bad_args_mode(self):
+        def f(x):
+            return x.t() + x.t()
+
+        def nop(x):
+            return x.cos()
+
+        with self.assertRaises(AssertionError):
+            graph, _ = torchdynamo.export(
+                f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
+            )

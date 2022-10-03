@@ -121,10 +121,13 @@ allowed_functions_module_string_ignorelist = {
 # aot - Runs minifier on the Aot Autograd produced graphs, if compilation fails
 repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # Compiler compilation debug info
-# 1: Dumps the original graph out to repro.py/repro.tar.gz if compilation fails
-# 2: Either 1) Dumps the original graph out to minify_repro.py with a minifier if compilation fails
-#        or 2) Minifies and dumps the minified graph to repro.py/repro.tar.gz if compilation fails
+# 1: Dumps the original graph out to repro.py if compilation fails
+# 2: Dumps a minifier_launcher.py if compilation fails.
+# 3: Always dumps a minifier_laucher.py. Good for segfaults.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
+
+# Specify the directory where to save the repro artifacts
+repro_dir = os.environ.get("TORCHDYNAMO_REPRO_DIR", None)
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
@@ -141,6 +144,9 @@ optimize_ddp = False
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
+
+# If True, raise when aot autograd is unsafe to use
+raise_on_unsafe_aot_autograd = False
 
 
 class _AccessLimitingConfig(ModuleType):

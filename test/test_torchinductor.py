@@ -18,6 +18,7 @@ from torch.utils._pytree import tree_unflatten
 import torchdynamo
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.utils import timed
 
 try:
     import sympy
@@ -452,6 +453,28 @@ class CommonTemplate:
         for name, value in my_cls.__dict__.items():
             if name.startswith("test_"):
                 setattr(other_cls, f"{name}_{suffix}", value)
+
+    def test_bool(self):
+        def fn(a, b):
+            return (
+                a + b,
+                a * b,
+                a & b,
+                a | b,
+                a ^ b,
+                torch.logical_and(a, b),
+                torch.logical_or(a, b),
+                torch.logical_not(a),
+                torch.sign(b),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor([True, False, True, False]),
+                torch.tensor([False, False, True, True]),
+            ),
+        )
 
     def test_add_const_int(self):
         def fn(a):
@@ -2685,6 +2708,85 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put_as_masked_fill(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                True,
+            ),
+        )
+
+    def test_index_put_fallback1(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                True,
+            ),
+        )
+
+    def test_index_put_fallback2(self):
+        def fn(a, b, c, d, e):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [None, b, c], d, e)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                False,
+            ),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                True,
+            ),
+        )
+
     @patch.object(config, "fallback_random", True)
     def test_bernoulli1(self):
         def fn(a):
@@ -3474,6 +3576,10 @@ if HAS_CPU:
 
             x = torch.randn((10, 20))
             assert same(x, forward(x))
+
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_timed_cpu_only(self):
+            timed(lambda: torch.randn(10), ())
 
 
 if HAS_CUDA:
