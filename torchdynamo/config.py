@@ -18,11 +18,9 @@ except ImportError:
     HAS_REFS_PRIMS = False
 
 
-INFO_CODE = 15
-
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# torchdynamo.config.INFO_CODE print compiled functions + graphs
+# torchdynamo.logging.INFO_CODE print compiled functions + graphs
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
@@ -158,7 +156,7 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            torchdynamo.utils.set_loggers_level(value)
+            torchdynamo.logging.set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 

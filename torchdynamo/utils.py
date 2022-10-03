@@ -117,6 +117,20 @@ def compile_times(repr="str", aggregate=False):
         return headers, values
 
 
+tensortype_to_dtype = {
+    torch.FloatTensor: (torch.float32, torch.float),
+    torch.DoubleTensor: (torch.float64, torch.double),
+    torch.HalfTensor: (torch.float16, torch.half),
+    torch.BFloat16Tensor: (torch.bfloat16,),
+    torch.ByteTensor: (torch.uint8,),
+    torch.CharTensor: (torch.int8,),
+    torch.LongTensor: (torch.int64, torch.long),
+    torch.IntTensor: (torch.int32, torch.int),
+    torch.ShortTensor: (torch.int16, torch.short),
+    torch.BoolTensor: (torch.bool,),
+}
+
+
 class DuplicateWarningChecker(object):
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
@@ -140,74 +154,10 @@ class DuplicateWarningChecker(object):
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-# Return all loggers that torchdynamo is responsible for
-def get_loggers():
-    return [
-        logging.getLogger("torchdynamo"),
-        logging.getLogger("torchinductor"),
-    ]
-
-
-# Set the level of all loggers that torchdynamo is responsible for
-def set_loggers_level(level):
-    for logger in get_loggers():
-        logger.setLevel(level)
-
-
-LOGGING_CONFIG = {
-    "version": 1,
-    "formatters": {
-        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
-    },
-    "handlers": {
-        "torchdynamo_console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stdout",
-        },
-    },
-    "loggers": {
-        "torchdynamo": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torchinductor": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-    },
-    "disable_existing_loggers": False,
-}
-
-
-tensortype_to_dtype = {
-    torch.FloatTensor: (torch.float32, torch.float),
-    torch.DoubleTensor: (torch.float64, torch.double),
-    torch.HalfTensor: (torch.float16, torch.half),
-    torch.BFloat16Tensor: (torch.bfloat16,),
-    torch.ByteTensor: (torch.uint8,),
-    torch.CharTensor: (torch.int8,),
-    torch.LongTensor: (torch.int64, torch.long),
-    torch.IntTensor: (torch.int32, torch.int),
-    torch.ShortTensor: (torch.int16, torch.short),
-    torch.BoolTensor: (torch.bool,),
-}
-
-
-# initialize torchdynamo loggers
 def init_logging():
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        logging.config.dictConfig(LOGGING_CONFIG)
-        if config.log_file_name is not None:
-            log_file = logging.FileHandler(config.log_file_name)
-            log_file.setLevel(config.log_level)
-            for logger in get_loggers():
-                logger.addHandler(log_file)
-
-    set_loggers_level(config.log_level)
+    torchdynamo.logging.init_logging(
+        config.log_level, log_file_name=config.log_file_name
+    )
     graph_break_dup_warning_checker.reset()
 
 
