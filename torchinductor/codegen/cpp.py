@@ -459,7 +459,7 @@ class CppKernel(Kernel):
         # if we do not specialize on num_threads, make sure we
         # have at least one parallel scope and let OMP runtime
         # to manage the serial vs. parallel.
-        if depth == 0 and not config.cpp.specialize_num_threads:
+        if depth == 0 and len(ranges) > 0 and not config.cpp.specialize_num_threads:
             depth = 1
         return depth
 
@@ -684,8 +684,6 @@ class LoopNest:
 
     def mark_parallel(self, par_depth):
         loops = self.loops
-        if len(loops) == 0:
-            return
         loops[0].parallel = par_depth
         for i in range(1, par_depth):
             loops[i].collapsed = True
