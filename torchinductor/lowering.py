@@ -3111,7 +3111,6 @@ add = register_pointwise(
 exp = register_pointwise(
     aten.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
-floor = register_pointwise(aten.floor)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
     aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
