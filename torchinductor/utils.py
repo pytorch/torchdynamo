@@ -9,7 +9,6 @@ from typing import List
 import numpy as np
 import sympy
 import torch
-from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
 
@@ -93,15 +92,18 @@ def gen_gm_and_inputs(target, args, kwargs):
     return gm, a_args
 
 
-def timed(model, example_inputs, times=1):
+def synchronize():
     if torch.cuda.is_available():
-        synchronize()
+        torch.cuda.synchronize()
+
+
+def timed(model, example_inputs, times=1):
+    synchronize()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
         result = model(*example_inputs)
-        if torch.cuda.is_available():
-            synchronize()
+        synchronize()
     t1 = time.perf_counter()
     # GC the result after timing
     assert result is not None
