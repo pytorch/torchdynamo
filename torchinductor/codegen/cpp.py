@@ -684,6 +684,8 @@ class LoopNest:
 
     def mark_parallel(self, par_depth):
         loops = self.loops
+        if len(loops) == 0:
+            return
         loops[0].parallel = par_depth
         for i in range(1, par_depth):
             loops[i].collapsed = True
