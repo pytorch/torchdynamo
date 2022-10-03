@@ -129,12 +129,9 @@ inductor_skips["cuda"] = {
     "nn.functional.conv_transpose2d": {f16},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
-    "cos": {b8, f64, i32, i64},
-    "erf": {f64, i32, i64},
-    "exp": {b8, f64, i32, i64},
-    "log": {b8, i32, i64},
-    "log1p": {b8, i32, i64},
-    "log2": {b8, i32, i64},
+    "cos": {f64},
+    "erf": {f64},
+    "exp": {f64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
     "nn.functional.binary_cross_entropy": {f64},
@@ -143,7 +140,7 @@ inductor_skips["cuda"] = {
     "nn.functional.elu": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
-    "nn.functional.poisson_nll_loss": {f64, i32, i64},
+    "nn.functional.poisson_nll_loss": {f64},
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f64},
@@ -152,12 +149,10 @@ inductor_skips["cuda"] = {
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "rsqrt": {b8, i32, i64},
-    "sigmoid": {b8, f64, i32, i64},
-    "sin": {b8, f64, i32, i64},
+    "sigmoid": {f64},
+    "sin": {f64},
     "special.log_ndtr": {f64},
     "special.ndtr": {f64},
-    "sqrt": {b8, i32, i64},
     "tanh": {f64},
     "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -171,7 +166,7 @@ inductor_skips["cuda"] = {
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.sum": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax": {b8, f64, i32, i64},  # segfault
+    "softmax": {f64, i32, i64},  # segfault
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.kl_div": {b8, f16, f32, f64, i32, i64},  # segfault
     "log_softmax": {f64},  # segfault
@@ -392,6 +387,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "inner": {f16, f32, f64},
+    "isinf": {b8, i32, i64},
+    "isnan": {b8, i32, i64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
