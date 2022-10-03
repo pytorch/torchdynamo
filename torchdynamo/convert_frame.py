@@ -72,6 +72,9 @@ input_codes = Tracker()
 output_codes = Tracker()
 
 
+initial_grad_state = None
+
+
 @functools.wraps(original_forward_from_src)
 def fx_forward_from_src_skip_result(*args, **kwargs):
     # we monkey patch FX to prevent infinite loop of trying to convert
@@ -315,6 +318,9 @@ def convert_frame_assert(
 
         if not has_tensor_in_frame(frame):
             return None
+
+        global initial_grad_state
+        initial_grad_state = torch.is_grad_enabled()
 
         return _compile(
             frame.f_code,

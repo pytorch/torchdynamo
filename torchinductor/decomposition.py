@@ -2,8 +2,6 @@ import functools
 import logging
 import math
 import numbers
-from typing import Optional
-from typing import Tuple
 
 import torch
 import torch._decomp as decomp
@@ -67,7 +65,7 @@ decompositions = get_decompositions(
         aten.mse_loss_backward,
         aten.mv,
         aten.narrow,
-        # aten.native_batch_norm, TODO - fix cpu error and enable
+        aten.native_batch_norm,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
@@ -87,6 +85,7 @@ decompositions = get_decompositions(
         aten.sigmoid_backward,
         aten.silu_backward,
         aten.slice_backward,
+        aten.sgn,
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
@@ -116,26 +115,6 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
     return x
-
-
-# temporary workaround until https://github.com/pytorch/torchdynamo/issues/1215
-# is fixed - fails on cpu
-@register_decomposition([aten.native_batch_norm])
-def native_batch_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    training: bool,
-    momentum: float,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    if input.device.type == "cpu":
-        return NotImplemented
-    return torch._decomp.decompositions.native_batch_norm(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
-    )
 
 
 @register_decomposition([aten.tanh])
@@ -293,11 +272,6 @@ def lift(self):
     return self
 
 
-@register_decomposition([aten.sgn])
-def sgn(self):
-    return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
-
-
 @register_decomposition([aten.fill.Scalar])
 def fill_scalar(self, value):
     return torch.full_like(self, value)
@@ -307,6 +281,12 @@ def fill_scalar(self, value):
 def fill_tensor(self, value: Tensor):
     assert value.dim() == 0, "aten.fill.Tensor only supports 0-dimension value tensor"
     return torch.full_like(self, value.item())
+
+
+@register_decomposition([aten.bernoulli.default])
+def bernoulli(self, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < self
 
 
 """

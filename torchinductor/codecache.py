@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sysconfig
 import tempfile
@@ -15,6 +16,7 @@ from ctypes import cdll
 from typing import Any
 from typing import Dict
 
+import torch
 from torch.utils import cpp_extension
 
 from . import config
@@ -64,10 +66,9 @@ def cpp_compiler_search(search):
     for cxx in search:
         try:
             if cxx is None:
-                return install_gcc_via_conda()
-            else:
-                subprocess.check_output([cxx, "--version"])
-                return cxx
+                cxx = install_gcc_via_conda()
+            subprocess.check_output([cxx, "--version"])
+            return cxx
         except (subprocess.SubprocessError, FileNotFoundError):
             continue
     raise exc.InvalidCxxCompiler()
@@ -79,20 +80,23 @@ def install_gcc_via_conda():
     cxx_path = os.path.join(prefix, "bin", "g++")
     if not os.path.exists(cxx_path):
         log.info("Downloading GCC via conda")
-        subprocess.check_call(
-            [
-                "conda",
-                "create",
-                f"--prefix={prefix}",
-                "--channel=conda-forge",
-                "--quiet",
-                "-y",
-                "python=3.8",
-                "gxx",
-            ],
-            stdout=subprocess.PIPE,
-        )
-        assert os.path.exists(cxx_path)
+        conda = os.environ.get("CONDA_EXE", "conda")
+        if conda is None:
+            conda = shutil.which("conda")
+        if conda is not None:
+            subprocess.check_call(
+                [
+                    conda,
+                    "create",
+                    f"--prefix={prefix}",
+                    "--channel=conda-forge",
+                    "--quiet",
+                    "-y",
+                    "python=3.8",
+                    "gxx",
+                ],
+                stdout=subprocess.PIPE,
+            )
     return cxx_path
 
 
@@ -192,6 +196,9 @@ class TritonCodeCache:
 
 
 class AsyncCompile:
+    def __init__(self):
+        self._context_keepalive = None
+
     @staticmethod
     @functools.lru_cache(1)
     def pool():
@@ -211,6 +218,9 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(self, source_code):
+        if self._context_keepalive is None:
+            # Workaround `CUDA: Error- context is destroyed`
+            self._context_keepalive = torch.tensor([1], device="cuda")
         kernel = TritonCodeCache.load(source_code)
 
         def task():

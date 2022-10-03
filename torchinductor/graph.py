@@ -91,6 +91,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_dynamic_inputs = num_dynamic_inputs
         self.num_static_inputs = None
         self.mutated_inputs = set()
+        self.unaligned_buffers = set()
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}

@@ -12,6 +12,7 @@ from torch.utils._mode_utils import no_dispatch
 
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
+from torchdynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torchdynamo.utils import dynamo_timed
 from torchdynamo.utils import preserve_rng_state
 
@@ -278,6 +279,11 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
+
+    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
+        log.warning("Aot Autograd is not safe to run, so falling back to eager")
+        return model_
+
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
