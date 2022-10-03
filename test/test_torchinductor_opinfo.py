@@ -3,6 +3,7 @@ import os
 from collections import defaultdict
 from enum import Enum
 from functools import partial
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_device_type import OpDTypes
@@ -205,8 +206,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f16, f32, f64},
-    "argmax": {f16, f32, f64, i32, i64},
-    "argmin": {f16, f32, f64, i32, i64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
@@ -257,8 +256,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.svd": {f32, f64},
     "logdet": {f32, f64},
     "logsumexp": {b8, f32, f64, i32, i64},
-    "masked.argmax": {f16, f32, f64, i32, i64},
-    "masked.argmin": {f16, f32, f64, i32, i64},
     "masked.norm": {f16},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
@@ -353,13 +350,10 @@ inductor_expected_failures_single_sample["cuda"] = {
     "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
-    "argmax": {f16, f32, f64, i32, i64},
-    "argmin": {f16, f32, f64, i32, i64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
-    "ceil": {i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
@@ -387,7 +381,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "floor": {i32, i64},
     "index_add": {b8, f16, f32, f64, i32, i64},
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
@@ -412,8 +405,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "logsumexp": {b8, f16, f32, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
-    "masked.argmax": {f16, f32, f64, i32, i64},
-    "masked.argmin": {f16, f32, f64, i32, i64},
+    "masked.argmax": {f16, f32, f64, i32},
+    "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "matrix_exp": {f16},
@@ -456,7 +449,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "round": {i32, i64},
     "round.decimals_3": {f16},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
@@ -470,7 +462,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "tensordot": {f16, f32, f64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
-    "trunc": {i32, i64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
@@ -488,6 +479,7 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @_ops(op_db[START:END])
+    @patch("torchdynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
         torchdynamo.reset()
         with torch.no_grad():

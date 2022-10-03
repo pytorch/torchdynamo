@@ -145,6 +145,9 @@ optimize_ddp = False
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
+# If True, raise when aot autograd is unsafe to use
+raise_on_unsafe_aot_autograd = False
+
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
