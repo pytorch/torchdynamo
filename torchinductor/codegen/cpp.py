@@ -1,7 +1,6 @@
 import contextlib
 import dataclasses
 import functools
-import multiprocessing
 from pathlib import Path
 from typing import Dict
 from typing import List
@@ -292,7 +291,7 @@ class CppKernel(Kernel):
     newvar_prefix = "auto "
     suffix = ";"
 
-    def __init__(self, args):
+    def __init__(self, args, num_threads):
         super(CppKernel, self).__init__(args)
         self.call_ranges = None
         self.ranges = None
@@ -301,6 +300,7 @@ class CppKernel(Kernel):
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
+        self.num_threads = num_threads # num_threads the kernel specialized for
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -317,7 +317,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr(index)}] = {value};"
         elif mode == "atomic_add":
-            if config.cpp.threads == 1:
+            if config.cpp.specialize_num_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
                 line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
@@ -383,7 +383,7 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
         if threads < 1:
-            threads = multiprocessing.cpu_count()
+            threads = torch.get_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -443,8 +443,6 @@ class CppKernel(Kernel):
                 code.splice(self.reduction_suffix)
 
     def decide_parallel_depth(self, ranges, threads):
-        if threads == 1:
-            return 0
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -458,6 +456,11 @@ class CppKernel(Kernel):
             depth += 1
             par *= hint
             seq /= hint
+        # if we do not specialize on num_threads, make sure we
+        # have at least one parallel scope and let OMP runtime
+        # to manage the serial vs. parallel.
+        if depth == 0 and not config.cpp.specialize_num_threads:
+            depth = 1
         return depth
 
     @contextlib.contextmanager
@@ -546,7 +549,7 @@ class KernelGroup:
         self.count = 0
 
     def new_kernel(self):
-        return CppKernel(self.args)
+        return CppKernel(self.args, self.ws.num_threads)
 
     def finalize_kernel(self, new_kernel, scheduler):
         self.count += 1
@@ -600,10 +603,10 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
-            if threads == multiprocessing.cpu_count():
-                self.code.writeline("#pragma omp parallel")
-            else:
+            if config.cpp.specialize_num_threads:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
+            else:
+                self.code.writeline("#pragma omp parallel")
             self.stack.enter_context(self.code.indent())
 
     def single(self):

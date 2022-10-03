@@ -3576,6 +3576,23 @@ if HAS_CPU:
             x = torch.randn((10, 20))
             assert same(x, forward(x))
 
+        def test_parallel_num_threads(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x1, x2):
+                return x1 + x2
+            @contextlib.contextmanager
+            def set_num_threads(num_threads):
+                orig_num_threads = torch.get_num_threads()
+                torch.set_num_threads(num_threads)    
+                yield
+                torch.set_num_threads(orig_num_threads)
+            x1 = torch.randn((10, 20))
+            x2 = torch.randn((10, 20))
+            with set_num_threads(1):
+                assert same(x1 + x2, fn(x1, x2))
+            with set_num_threads(4):
+                assert same(x1 + x2, fn(x1, x2))
+
 
 if HAS_CUDA:
 
