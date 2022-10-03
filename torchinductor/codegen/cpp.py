@@ -36,6 +36,15 @@ DTYPE_TO_CPP = {
 }
 INDEX_TYPE = "long"
 
+RTYPE_TO_CPP = {
+    "sum": "+",
+    "min": "min",
+    "max": "max",
+    "argmin": "argmin",
+    "argmax": "argmax",
+    "any": "||",
+}
+
 
 def reduction_init(reduction_type, dtype):
     if reduction_type in ("sum", "any"):
@@ -94,6 +103,13 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
             ]
         )
+    return prefix
+
+
+def float16_reduction_prefix(rtype):
+    prefix = [
+        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]} : {DTYPE_TO_CPP[torch.float16]} : omp_out += omp_in)"
+    ]
     return prefix
 
 
@@ -346,6 +362,10 @@ class CppKernel(Kernel):
                 ],
             )
         else:
+            if dtype == torch.float16:
+                self.reduction_prefix.writelines(
+                    float16_reduction_prefix(reduction_type)
+                )
             self.reduction_prefix.writeline(
                 f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
             )
@@ -637,16 +657,8 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
-            lookup = {
-                "sum": "+",
-                "min": "min",
-                "max": "max",
-                "argmin": "argmin",
-                "argmax": "argmax",
-                "any": "||",
-            }
             reduction = " " + " ".join(
-                f"reduction({lookup[rtype]}:{var})"
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
                 for var, rtype in self.reduction_vars.items()
             )
         else:
