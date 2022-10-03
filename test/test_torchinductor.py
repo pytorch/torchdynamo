@@ -3577,10 +3577,11 @@ if HAS_CPU:
             x = torch.randn((10, 20))
             assert same(x, forward(x))
 
-        @patch('torch.cuda.is_available')
+        @patch("torch.cuda.is_available")
         def test_timed_cpu_only(self, cuda_available):
             cuda_available.return_value = False
             timed(lambda: torch.randn(10), ())
+
 
 if HAS_CUDA:
 
