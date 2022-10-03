@@ -2847,9 +2847,16 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
+def _is_ir_node_and_cuda(x):
+    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
+        return True
+
+    return False
+
+
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if isinstance(a, ir.IRNode) and isinstance(b, ir.IRNode):
+    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
         assert a.get_dtype() in (
             torch.float16,
             torch.float32,

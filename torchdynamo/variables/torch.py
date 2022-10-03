@@ -36,7 +36,41 @@ tensor_dunder_fns = [
     torch.Tensor.__rmod__,
     torch.Tensor.__rpow__,
     torch.Tensor.__rsub__,
+    torch._C._TensorBase.__radd__,
+    torch._C._TensorBase.__rmul__,
+    torch._C._TensorBase.__ror__,
+    torch._C._TensorBase.__rxor__,
+    torch._C._TensorBase.__rand__,
 ]
+
+# TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
+def remap_as_fn___radd__(*args):
+    return torch._C._TensorBase.__radd__(*args)
+
+
+def remap_as_fn___rmul__(*args):
+    return torch._C._TensorBase.__rmul__(*args)
+
+
+def remap_as_fn___ror__(*args):
+    return torch._C._TensorBase.__ror__(*args)
+
+
+def remap_as_fn___rxor__(*args):
+    return torch._C._TensorBase.__rxor__(*args)
+
+
+def remap_as_fn___rand__(*args):
+    return torch._C._TensorBase.__rand__(*args)
+
+
+tensor_dunder_fns_remap = {
+    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+}
 
 
 class TorchVariable(VariableTracker):
@@ -45,6 +79,8 @@ class TorchVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(TorchVariable, self).__init__(**kwargs)
 
+        if value in tensor_dunder_fns_remap:
+            value = tensor_dunder_fns_remap[value]
         self.value = value
 
         # the remainder of this is just optional debug checks

@@ -199,11 +199,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "__radd__": {b8, f16, f32, f64, i32, i64},
-    "__rand__": {b8, i32, i64},
-    "__rmul__": {b8, f16, f32, f64, i32, i64},
-    "__ror__": {b8, i32, i64},
-    "__rxor__": {b8, i32, i64},
     "addmm": {f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
@@ -358,11 +353,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "__radd__": {b8, f16, f32, f64, i32, i64},
-    "__rand__": {b8, i32, i64},
-    "__rmul__": {b8, f16, f32, f64, i32, i64},
-    "__ror__": {b8, i32, i64},
-    "__rxor__": {b8, i32, i64},
     "addbmm": {f16},
     "addmm": {f16, f32, f64},
     "addr": {f16},
@@ -512,12 +502,7 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 inductor_should_fail_with_exception = defaultdict(dict)
 
-inductor_should_fail_with_exception["cpu"] = {
-    "__rpow__": {
-        i32: "Pow input must be floating point.",
-        i64: "Pow input must be floating point.",
-    }
-}
+inductor_should_fail_with_exception["cpu"] = {}
 
 
 inductor_should_fail_with_exception["cuda"] = {
@@ -628,22 +613,6 @@ class TestInductorOpInfo(TestCase):
                         known_failure = True
 
                 if not known_failure:
-                    # DO NOT LAND ___ DEBUGGING CI ___ !!! 
-                    print("FAILED")
-                    print("TABLE", inductor_should_fail_with_exception)
-                    print("TABLE[device_type]", inductor_should_fail_with_exception[device_type])
-                    if dtype in inductor_should_fail_with_exception[device_type].get(
-                        op_name, set()
-                    ):
-                        failure = inductor_should_fail_with_exception[device_type][op_name][
-                            dtype
-                        ]
-                        print("FAILURE", failure)
-                    else:
-                        print("NOT FOUND")
-                    print("ERROR", str(e))
-                    
-                    # END DO NOT LAND ___ DEBUGGING CI ___ !!! 
                     raise e
             else:
                 # with open("test_output.txt", "a") as f:
