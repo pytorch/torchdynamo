@@ -493,6 +493,38 @@ def squeeze_(x, dim=None):
     return x
 
 
+@register_lowering(aten.ceil)
+def ceil(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("ceil")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.floor)
+def floor(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("floor")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.round)
+def round(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("round")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.trunc)
+def trunc(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("trunc")
+    return make_pointwise(fn)(x)
+
+
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
@@ -3089,7 +3121,6 @@ sqrt = register_pointwise(
 )
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
-trunc = register_pointwise(aten.trunc)
 
 register_pointwise(
     aten.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
@@ -3114,7 +3145,6 @@ register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
 register_pointwise(aten.reciprocal)
 register_pointwise(aten.remainder)
-register_pointwise(aten.round)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(
     aten.silu, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
