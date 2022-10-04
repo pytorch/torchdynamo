@@ -11,7 +11,7 @@ PIP ?= python -m pip
 # versions used in CI
 # Also update the "Install nightly binaries" section of the README when updating these
 PYTORCH_VERSION ?= dev20221004
-TRITON_VERSION ?= 998fd5f9afe166247f441999c605dfe624ca9331
+TRITON_VERSION ?= d3c925db8a81ca74f14680876b9311e7d079c5a1
 
 
 default: develop
