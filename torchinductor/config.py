@@ -1,7 +1,7 @@
 import os
 
 # add some debug printouts
-debug = True
+debug = False
 
 # dead code elimination
 dce = False
@@ -102,7 +102,7 @@ class triton:
     # should we give different names to kernels
     ordered_kernel_names = False
     # should we use natural codegen for where, needs newer triton version
-    simple_where = True
+    simple_where = False
 
 
 # create a directory containing lots of debug information
