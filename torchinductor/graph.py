@@ -225,7 +225,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.device_types.add(example.device.type)
+        if example.dim() != 0:
+            self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
