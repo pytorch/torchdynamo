@@ -108,8 +108,8 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
 
 def float16_reduction_prefix(rtype):
     prefix = [
-        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:" +
-        f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
+        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
+        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
     ]
     return prefix
 
