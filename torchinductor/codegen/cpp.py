@@ -335,7 +335,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr(index)}] = {value};"
         elif mode == "atomic_add":
-            if config.cpp.specialize_num_threads and self.num_threads == 1:
+            if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
                 line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
@@ -478,10 +478,10 @@ class CppKernel(Kernel):
             depth += 1
             par *= hint
             seq /= hint
-        # if we do not specialize on num_threads, make sure we
+        # if we assume thread number is dynamic, make sure we
         # have at least one parallel scope and let OMP runtime
         # to manage the serial vs. parallel.
-        if depth == 0 and len(ranges) > 0 and not config.cpp.specialize_num_threads:
+        if config.cpp.dynamic_threads and depth == 0 and len(ranges) > 0:
             depth = 1
         return depth
 
@@ -625,10 +625,10 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
-            if config.cpp.specialize_num_threads:
-                self.code.writeline(f"#pragma omp parallel num_threads({threads})")
-            else:
+            if config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
+            else:
+                self.code.writeline(f"#pragma omp parallel num_threads({threads})")
             self.stack.enter_context(self.code.indent())
 
     def single(self):
