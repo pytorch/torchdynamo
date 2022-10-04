@@ -1608,6 +1608,23 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_issue1466_size_aot_autograd(self):
+        def fn(x):
+            # do a tensor op and a size compute
+            y = x * 2
+            x_size = x.size()
+            # trigger a graph break
+            print("arf")
+            # use the tensor op and size compute
+            z = y.view(x_size) + 1
+            return z
+
+        x = torch.randn(2, 3, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("aot_eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_ellipsis(self):
         class Repro(torch.nn.Module):
             def __init__(self):

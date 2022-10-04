@@ -178,13 +178,14 @@ class TensorVariable(VariableTracker):
             options.update(specialized_props)
             return cls(proxy, **options)
         elif (
-            istype(example_value, (torch.Size, int, bool, float))
+            istype(example_value, (int, bool, float))
             and config.dynamic_shapes
         ):
             proxy.node.meta["example_value"] = example_value
-            if isinstance(example_value, torch.Size):
-                options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
+        elif istype(example_value, torch.Size) and config.dynamic_shapes:
+            sizes = [DynamicShapeVariable(proxy[i], int) for i in range(len(example_value))]
+            return SizeVariable(sizes, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
