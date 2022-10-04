@@ -83,6 +83,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
+    "YituTechConvBert",
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
@@ -103,6 +104,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "AllenaiLongformerBase",  # OOM
     "BartForConditionalGeneration",  # OOM
     "BigBird",
+    "YituTechConvBert",
     # TIMM
     "cait_m36_384",  # Accuracy
     "ghostnet_100",  # Accuracy
@@ -158,6 +160,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "XGLMForCausalLM",
     "XLNetLMHeadModel",
     "PegasusForCausalLM",
+    "YituTechConvBert",
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
