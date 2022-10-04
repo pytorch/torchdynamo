@@ -70,8 +70,9 @@ def compile_fx_inner(
     cudagraphs=None,
     num_fixed=0,
     is_backward=False,
+    graph_id=None,
 ):
-    log.info("Inductor compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
+    log.info("Step 4: torchinductor compiling %s graph %s", "BACKWARDS" if is_backward else "FORWARDS", graph_id)
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
@@ -109,7 +110,7 @@ def compile_fx_inner(
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     log.info(
-        "Inductor done compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS"
+        "Step 4: torchinductor done compiling %s graph %a", "BACKWARDS" if is_backward else "FORWARDS", graph_id,
     )
     return result
 
@@ -277,6 +278,8 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+_graph_counter = 0
+
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
 
@@ -293,11 +296,15 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
+    global _graph_counter
+    graph_id = _graph_counter
+    _graph_counter += 1
+
     @dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
-            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs, graph_id=graph_id
         )
 
     @dynamo_timed
@@ -309,12 +316,13 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             is_backward=True,
+            graph_id=graph_id
         )
 
     with overrides.patch_functions():
 
         def aot_autograd_and_log(*args, **kwargs):
-            log.info("Running AOT autograd")
+            log.info("Step 3: running AOT autograd")
             result = aot_autograd(
                 model_,
                 example_inputs_,
@@ -325,7 +333,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
                     min_cut_rematerialization_partition, compiler="inductor"
                 ),
             )(*args, **kwargs)
-            log.info("Done AOT autograd")
+            log.info("Step 3: done AOT autograd")
             return result
 
         return aot_autograd_and_log

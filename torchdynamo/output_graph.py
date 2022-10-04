@@ -392,7 +392,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    torchdynamo.config.INFO_CODE,
+                    torchdynamo.logging.INFO_CODE,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -408,9 +408,9 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            log.info("Calling compiler function")
+            log.info("Step 2: calling compiler function")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            log.info("Done compiler function")
+            log.info("Step 2: done compiler function")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             log.warning("-" * 40 + "\n")

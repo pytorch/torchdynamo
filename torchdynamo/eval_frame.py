@@ -160,20 +160,21 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             if self.first_ctx:
-                log.info("torchdynamo begin tracing")
+                log.info("Step 1: torchdynamo begin tracing")
 
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             try:
-                return fn(*args, **kwargs)
+                result = fn(*args, **kwargs)
+                if self.first_ctx:
+                    log.info("Step 1: torchdynamo done tracing")
+                return result
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
 
-                if self.first_ctx:
-                    log.info("torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
