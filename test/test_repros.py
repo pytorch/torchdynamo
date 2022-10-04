@@ -885,7 +885,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(14, 11))
+        self.assertEqual(cnt.op_count, ifdyn(13, 11))
 
     def test_slicing_dynamic_shape(self):
         def fn(y):
@@ -1155,7 +1155,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(x), correct))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(28, 14))
+        self.assertEqual(cnt.op_count, ifdyn(36, 14))
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132

@@ -38,6 +38,7 @@ class BaseListVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
+        assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
@@ -249,6 +250,37 @@ class SizeVariable(TupleVariable):
 
     def python_type(self):
         return torch.Size
+
+    def as_proxy(self):
+        # torch.Size needs special handling.  Normally, we pun a list-like
+        # container to directly contain Proxy/Node objects from FX, and FX
+        # knows to look inside containers (via map_aggregate).  But torch.Size
+        # is weird; although it subclasses from tuple, it doesn't allow
+        # members which aren't int-like (rejecting Proxy and Node).  This
+        # means we can't use the normal representation trick
+        # torch.Size([proxy0, proxy1]).  I looked into seeing if I could
+        # relax torch.Size in PyTorch proper, but if torch.Size constructor
+        # sees a type that it doesn't recognize, it will try to call
+        # __index__() on it, so there is no BC way to actually change this
+        # behavior (though it occurs to me that I could have just added a
+        # YOLO no checking alternate constructor.)
+        #
+        # To work around this problem, I represent a torch.Size proxy as
+        # a straight up proxy, that would have been constructed by taking
+        # the constituent proxies as arguments.  This trick can be generally
+        # used for any construct that we need a proxy for but we can't
+        # directly represent as an aggregate; I don't see very many examples
+        # of this in torchdynamo though!
+        if not self.items:
+            # special case: empty list is directly representable, and indeed
+            # must be represented this way, since I don't have a tracer on
+            # hand at this point
+            return torch.Size([])
+        tracer = self.items[0].as_proxy().tracer
+        proxy = tracer.create_proxy("call_function", torch.Size, (self._as_proxy(),), {})
+        proxy.node.meta["example_value"] = torch.Size(
+            [p.node.meta["example_value"] for p in self._as_proxy()])
+        return proxy
 
     def reconstruct(self, codegen):
         codegen.load_import_from("torch", "Size")
