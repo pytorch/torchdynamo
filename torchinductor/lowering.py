@@ -999,7 +999,6 @@ if has_torchvision_roi_align():
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.as_strided_scatter)
-make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -2933,8 +2932,21 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
+def _is_ir_node_and_cuda(x):
+    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
+        return True
+
+    return False
+
+
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
+    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
+        assert a.get_dtype() in (
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, int) and b == 1:

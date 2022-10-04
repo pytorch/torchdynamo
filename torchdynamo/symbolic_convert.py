@@ -302,6 +302,7 @@ class InstructionTranslatorBase(object):
             self.next_instruction = None
         if inst.starts_line:
             self.lineno = inst.starts_line
+            log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()

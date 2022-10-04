@@ -164,12 +164,13 @@ def check_model(
             return x
 
     upcasted_inputs = list(map(upcast_fn, example_inputs))
+    upcasted_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
     if has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.float)
     torch.manual_seed(0)
 
-    correct = model(*upcasted_inputs, **kwargs)
+    correct = model(*upcasted_inputs, **upcasted_kwargs)
     # downcast the model back if needed
     if has_lowp_args:
         if hasattr(model, "to"):
@@ -3528,6 +3529,30 @@ class CommonTemplate:
 
         out = compiled(torch.randn(12, 4, device=self.device))
         self.assertEqual(out[0].shape, (24, 2))
+
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_unspec_inputs(self):
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", True)
+    def test_unspec_inputs_cudagraphs(self):
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
 
 if HAS_CPU:
