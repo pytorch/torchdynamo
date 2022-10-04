@@ -130,12 +130,9 @@ inductor_skips["cuda"] = {
     "nn.functional.conv_transpose2d": {f16},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
-    "cos": {b8, f64, i32, i64},
-    "erf": {f64, i32, i64},
-    "exp": {b8, f64, i32, i64},
-    "log": {b8, i32, i64},
-    "log1p": {b8, i32, i64},
-    "log2": {b8, i32, i64},
+    "cos": {f64},
+    "erf": {f64},
+    "exp": {f64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
     "nn.functional.binary_cross_entropy": {f64},
@@ -144,7 +141,7 @@ inductor_skips["cuda"] = {
     "nn.functional.elu": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
-    "nn.functional.poisson_nll_loss": {f64, i32, i64},
+    "nn.functional.poisson_nll_loss": {f64},
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f64},
@@ -153,12 +150,10 @@ inductor_skips["cuda"] = {
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "rsqrt": {b8, i32, i64},
-    "sigmoid": {b8, f64, i32, i64},
-    "sin": {b8, f64, i32, i64},
+    "sigmoid": {f64},
+    "sin": {f64},
     "special.log_ndtr": {f64},
     "special.ndtr": {f64},
-    "sqrt": {b8, i32, i64},
     "tanh": {f64},
     "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
     "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -172,7 +167,7 @@ inductor_skips["cuda"] = {
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.sum": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax": {b8, f64, i32, i64},  # segfault
+    "softmax": {f64, i32, i64},  # segfault
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.kl_div": {b8, f16, f32, f64, i32, i64},  # segfault
     "log_softmax": {f64},  # segfault
@@ -194,14 +189,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "__radd__": {b8, f16, f32, f64, i32, i64},
-    "__rand__": {b8, i32, i64},
-    "__rmod__": {f16, f32, f64},
-    "__rmul__": {b8, f16, f32, f64, i32, i64},
-    "__ror__": {b8, i32, i64},
-    "__rpow__": {f16, f32, f64, i32, i64},
-    "__rsub__": {f16, f32, f64, i32, i64},
-    "__rxor__": {b8, i32, i64},
     "addmm": {f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
@@ -311,8 +298,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.sum": {f16},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
-    "sgn": {b8, f16, f32, f64, i32, i64},
-    "sign": {i32, i64},
+    "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
@@ -337,14 +323,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "__radd__": {b8, f16, f32, f64, i32, i64},
-    "__rand__": {b8, i32, i64},
-    "__rmod__": {f16, f32, f64, i32, i64},
-    "__rmul__": {b8, f16, f32, f64, i32, i64},
-    "__ror__": {b8, i32, i64},
-    "__rpow__": {f16, f32, f64, i32, i64},
-    "__rsub__": {f16, f32, f64, i32, i64},
-    "__rxor__": {b8, i32, i64},
     "addbmm": {f16},
     "addmm": {f16, f32, f64},
     "addr": {f16},
@@ -388,7 +366,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "isinf": {b8, i32, i64},
     "isnan": {b8, i32, i64},
     "istft": {f32, f64},
-    "lgamma": {b8, i32, i64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -452,8 +429,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "round.decimals_3": {f16},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
-    "sgn": {b8, f16, f32, f64, i32, i64},
-    "sign": {i32, i64},
+    "sgn": {f16, f32, f64},
     "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
@@ -466,6 +442,18 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
+}
+
+inductor_should_fail_with_exception = defaultdict(dict)
+
+inductor_should_fail_with_exception["cpu"] = {}
+
+
+inductor_should_fail_with_exception["cuda"] = {
+    "__rpow__": {
+        i32: "Pow input must be floating point.",
+        i64: "Pow input must be floating point.",
+    }
 }
 
 
@@ -557,7 +545,18 @@ class TestInductorOpInfo(TestCase):
                 if COLLECT_EXPECT:
                     return
 
-                raise e
+                known_failure = False
+                if dtype in inductor_should_fail_with_exception[device_type].get(
+                    op_name, set()
+                ):
+                    failure = inductor_should_fail_with_exception[device_type][op_name][
+                        dtype
+                    ]
+                    if failure in str(e):
+                        known_failure = True
+
+                if not known_failure:
+                    raise e
             else:
                 # with open("test_output.txt", "a") as f:
                 #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)

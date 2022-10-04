@@ -23,6 +23,7 @@ decompositions = get_decompositions(
         aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
         aten.clamp_min,
+        aten.col2im,
         aten.col2im_backward,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
@@ -85,6 +86,7 @@ decompositions = get_decompositions(
         aten.sigmoid_backward,
         aten.silu_backward,
         aten.slice_backward,
+        aten.sgn,
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
@@ -269,11 +271,6 @@ def conj_physical(self):
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
-
-
-@register_decomposition([aten.sgn])
-def sgn(self):
-    return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
 
 
 @register_decomposition([aten.fill.Scalar])
