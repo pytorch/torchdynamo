@@ -187,7 +187,7 @@ class TensorVariable(VariableTracker):
                 proxy_i = proxy[i]
                 proxy_i.node.meta["example_value"] = v
                 sizes.append(DynamicShapeVariable(proxy_i, int))
-            return SizeVariable(sizes, **options)
+            return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,

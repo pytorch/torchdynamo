@@ -1,5 +1,6 @@
 from typing import Dict
 from typing import List
+from typing import Optional
 
 import torch
 import torch.fx
@@ -249,10 +250,22 @@ class TupleVariable(BaseListVariable):
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        proxy: Optional[torch.fx.Proxy] = None,
+        **kwargs,
+    ):
+        self.proxy = proxy
+        super().__init__(items, **kwargs)
+
     def python_type(self):
         return torch.Size
 
     def as_proxy(self):
+        if self.proxy is not None:
+            return self.proxy
+
         # torch.Size needs special handling.  Normally, we pun a list-like
         # container to directly contain Proxy/Node objects from FX, and FX
         # knows to look inside containers (via map_aggregate).  But torch.Size
