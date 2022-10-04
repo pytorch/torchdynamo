@@ -164,12 +164,13 @@ def check_model(
             return x
 
     upcasted_inputs = list(map(upcast_fn, example_inputs))
+    upcasted_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
     if has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.float)
     torch.manual_seed(0)
 
-    correct = model(*upcasted_inputs, **kwargs)
+    correct = model(*upcasted_inputs, **upcasted_kwargs)
     # downcast the model back if needed
     if has_lowp_args:
         if hasattr(model, "to"):

@@ -145,31 +145,27 @@ inductor_skips["cuda"] = {
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f64},
-    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
-    "nn.functional.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
+    "nn.functional.softmin": {f64},  # segfault
+    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "sigmoid": {f64},
     "sin": {f64},
     "special.log_ndtr": {f64},
     "special.ndtr": {f64},
     "tanh": {f64},
-    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
+    "masked.log_softmax": {f64},  # segfault
+    "masked.softmax": {f64},  # segfault
+    "masked.softmin": {f64},  # segfault
     "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amin": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.sum": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax": {f64, i32, i64},  # segfault
+    "scatter_reduce.sum": {b8, i64},  # segfault
+    "softmax": {f64},  # segfault
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
-    "nn.functional.kl_div": {b8, f16, f32, f64, i32, i64},  # segfault
+    "nn.functional.kl_div": {f64},  # segfault
     "log_softmax": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
@@ -264,7 +260,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.dropout": {f32, f64},
     "nn.functional.dropout2d": {f32, f64},
     "nn.functional.dropout3d": {f32, f64},
-    "nn.functional.embedding_bag": {f16},
     "nn.functional.feature_alpha_dropout.with_train": {f32, f64},
     "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
     "nn.functional.fractional_max_pool2d": {f32, f64},
@@ -406,11 +401,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.fractional_max_pool2d": {f16, f32, f64},
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
-    "nn.functional.group_norm": {f16},
     "nn.functional.huber_loss": {f16, f32, f64},
-    "nn.functional.instance_norm": {f16},
     "nn.functional.one_hot": {i64},
-    "nn.functional.prelu": {f16},
     "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.soft_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
