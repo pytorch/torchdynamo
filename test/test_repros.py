@@ -1608,6 +1608,8 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    # This doesn't work without fake tensors but I don't care
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_issue1466_size_aot_autograd(self):
         def fn(x):
             # do a tensor op and a size compute

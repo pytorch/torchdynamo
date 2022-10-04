@@ -2,6 +2,7 @@ from typing import Dict
 from typing import List
 
 import torch
+import torch.fx
 
 from .. import config
 from .. import variables
@@ -271,17 +272,21 @@ class SizeVariable(TupleVariable):
         # used for any construct that we need a proxy for but we can't
         # directly represent as an aggregate; I don't see very many examples
         # of this in torchdynamo though!
-        if not self.items:
-            # special case: empty list is directly representable, and indeed
-            # must be represented this way, since I don't have a tracer on
-            # hand at this point
-            return torch.Size([])
-        tracer = self.items[0].as_proxy().tracer
-        proxy = tracer.create_proxy(
-            "call_function", torch.Size, (self._as_proxy(),), {}
-        )
+
+        # Look for a proxy.  If there are none, do the legacy behavior
+        tracer = None
+        proxies = self._as_proxy()
+        for proxy in proxies:
+            if isinstance(proxy, torch.fx.Proxy):
+                tracer = proxy.tracer
+                break
+
+        if tracer is None:
+            return torch.Size(proxies)
+
+        proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
         proxy.node.meta["example_value"] = torch.Size(
-            [p.node.meta["example_value"] for p in self._as_proxy()]
+            [p.node.meta["example_value"] for p in proxies]
         )
         return proxy
 
