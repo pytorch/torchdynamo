@@ -429,7 +429,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
+    # "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
@@ -531,6 +531,8 @@ class TestInductorOpInfo(TestCase):
             kwargs = sample_input.kwargs
 
             try:
+                import pdb
+                pdb.set_trace()
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)

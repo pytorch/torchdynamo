@@ -14,6 +14,7 @@ import torch
 from functorch.experimental.ops import PyOperator
 
 import torchdynamo
+import pathlib
 from torchdynamo import replay_record
 
 from .. import config
@@ -44,6 +45,7 @@ from ..utils import istype
 from ..utils import tuple_iterator
 from ..utils import tuple_iterator_getitem
 from ..utils import tuple_iterator_len
+from ..utils import extract_wrapped
 from .base import MutableLocal
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
@@ -358,6 +360,15 @@ class VariableBuilder:
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
+            import pdb
+            pdb.set_trace()
+            new_value_or_none = _extract_context_manager_fn(value)
+            if new_value_or_none:
+                # re-enter the builder
+                import pdb
+                pdb.set_trace()
+                return self._wrap(new_value_or_none)
+
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
@@ -516,6 +527,21 @@ class VariableBuilder:
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             return unspec_var
+
+
+def _extract_context_manager_fn(value):
+    path_str = getfile(value)
+    assert skipfiles.check(path_str, allow_torch=True), "We should only try extraction if we fail a skipfile check"
+    path = pathlib.PurePath(path_str)
+    if path.name == 'contextlib.py':
+        # Context
+        new_value = extract_wrapped(value)
+        if new_value != value:
+            return new_value
+    return None
+
+
+    
 
 
 def _dataclasses_fields_lambda(obj):

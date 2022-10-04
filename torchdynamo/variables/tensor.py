@@ -265,6 +265,13 @@ class TensorVariable(VariableTracker):
                     **options,
                 )
         else:
+            import pdb
+            pdb.set_trace()
+            if isinstance(example_value, contextlib._GeneratorContextManager):
+                from .misc import SimpleEnterExitContextWrappingVariable
+                return SimpleEnterExitContextWrappingVariable(example_value)
+            import pdb
+            pdb.set_trace()
             assert (
                 False
             ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
