@@ -72,7 +72,11 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
-    log.info("Step 4: torchinductor compiling %s graph %s", "BACKWARDS" if is_backward else "FORWARDS", graph_id)
+    log.info(
+        "Step 4: torchinductor compiling %s graph %s",
+        "BACKWARDS" if is_backward else "FORWARDS",
+        graph_id,
+    )
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
@@ -110,7 +114,9 @@ def compile_fx_inner(
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     log.info(
-        "Step 4: torchinductor done compiling %s graph %a", "BACKWARDS" if is_backward else "FORWARDS", graph_id,
+        "Step 4: torchinductor done compiling %s graph %a",
+        "BACKWARDS" if is_backward else "FORWARDS",
+        graph_id,
     )
     return result
 
@@ -280,6 +286,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 
 _graph_counter = 0
 
+
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
 
@@ -304,7 +311,11 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
-            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs, graph_id=graph_id
+            model,
+            example_inputs,
+            num_fixed=fixed,
+            cudagraphs=cudagraphs,
+            graph_id=graph_id,
         )
 
     @dynamo_timed
@@ -316,7 +327,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             is_backward=True,
-            graph_id=graph_id
+            graph_id=graph_id,
         )
 
     with overrides.patch_functions():
