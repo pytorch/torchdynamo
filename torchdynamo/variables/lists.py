@@ -277,9 +277,12 @@ class SizeVariable(TupleVariable):
             # hand at this point
             return torch.Size([])
         tracer = self.items[0].as_proxy().tracer
-        proxy = tracer.create_proxy("call_function", torch.Size, (self._as_proxy(),), {})
+        proxy = tracer.create_proxy(
+            "call_function", torch.Size, (self._as_proxy(),), {}
+        )
         proxy.node.meta["example_value"] = torch.Size(
-            [p.node.meta["example_value"] for p in self._as_proxy()])
+            [p.node.meta["example_value"] for p in self._as_proxy()]
+        )
         return proxy
 
     def reconstruct(self, codegen):
