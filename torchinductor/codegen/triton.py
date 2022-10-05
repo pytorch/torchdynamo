@@ -773,7 +773,7 @@ class TritonKernel(Kernel):
             other = ", other=0"
         else:
             other = ""
-        line = f"tl.load({var} + {index}, {mask}{ep}{other})"
+        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
@@ -797,9 +797,9 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
-            line = f"tl.store({var} + {index}, {value}, {mask})"
+            line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
+            line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
