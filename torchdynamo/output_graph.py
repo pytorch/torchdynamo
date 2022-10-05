@@ -418,7 +418,7 @@ class OutputGraph(fx.Tracer):
         except Exception as e:
             log.warning("-" * 40 + "\n")
             log.warning("TORCHDYNAMO: backend compiler failed\n")
-            log.warning(traceback.format_exc())
+            log.warning(e, exc_info=True)
             log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
             if config.raise_on_backend_error:

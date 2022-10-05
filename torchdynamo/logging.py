@@ -22,14 +22,16 @@ def set_loggers_level(level):
 LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
-        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
+        "torchdynamo_format": {
+            "format": "%(name)s: [%(levelname)s] [%(asctime)s] %(message)s"
+        },
     },
     "handlers": {
         "torchdynamo_console": {
             "class": "logging.StreamHandler",
             "level": "DEBUG",
             "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stdout",
+            "stream": "ext://sys.stderr",
         },
     },
     "loggers": {
