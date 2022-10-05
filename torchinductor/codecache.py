@@ -13,6 +13,7 @@ import types
 from concurrent.futures import Future
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import cdll
+from sys import platform
 from typing import Any
 from typing import Dict
 
@@ -65,11 +66,13 @@ def cpp_compiler():
 def cpp_compiler_search(search):
     for cxx in search:
         try:
-            if cxx is None:
+            if cxx is None and (platform == "linux" or platform == "linux2"):
                 cxx = install_gcc_via_conda()
+            elif cxx is None: # and non-Linux
+                continue
             subprocess.check_output([cxx, "--version"])
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except (subprocess.SubprocessError, FileNotFoundError, PermissionError):
             continue
     raise exc.InvalidCxxCompiler()
 
@@ -108,7 +111,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -116,17 +119,25 @@ def cpp_compile_command(input, output, include_pytorch=False):
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = ["gomp"]
+        libs = []
+
+    if platform != "darwin":
+        libs += ["gomp"]
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+    if platform == "darwin":
+        otheropts = ""
+    else:
+        otheropts = "-march=native -fopenmp"
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
             {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs}
-            -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
+            -O3 -ffast-math -fno-finite-math-only {otheropts}
             -o{output} {input}
         """,
     ).strip()

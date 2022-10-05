@@ -3,7 +3,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #include "ATen/core/PhiloxRNGEngine.h"
 #include <c10/util/Half.h>
