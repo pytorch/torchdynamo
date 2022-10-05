@@ -8,17 +8,12 @@ import numpy
 import torch._C
 import torch.nn
 
-from torchdynamo.source import GetItemSource
-from torchdynamo.source import NNModuleSource
-from torchdynamo.variables.lists import ListVariable
-from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import AutocastModeVariable
-from torchdynamo.variables.misc import AutogradProfilerContextWrapperVariable
-
 from .. import config
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
+from ..source import GetItemSource
+from ..source import NNModuleSource
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
@@ -27,6 +22,10 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from ..utils import tensortype_to_dtype
 from .base import VariableTracker
+from .lists import ListVariable
+from .lists import TupleVariable
+from .misc import AutocastModeVariable
+from .misc import AutogradProfilerContextWrapperVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -515,9 +514,9 @@ class TorchPyOperator(VariableTracker):
                 return arg
 
         def register_as_subgraph(fn, name, args):
-            import torchdynamo
+            from .. import export
 
-            gm, guards = torchdynamo.export(fn, *args)
+            gm, guards = export(fn, *args)
 
             next_name = None
             i = 0
@@ -539,7 +538,7 @@ class TorchPyOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-            import torchdynamo.config as config
+            from .. import config
 
             if config.fake_tensor_propagation:
                 unimplemented("Fake tensor mode not yet supported for cond")
