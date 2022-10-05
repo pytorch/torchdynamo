@@ -68,6 +68,7 @@ CI_SKIP_INFERENCE = [
     "tacotron2",
     "pytorch_unet",
     "yolov3",
+    "nvidia_deeprecommender",
     # Huggingface
     "AllenaiLongformerBase",
     "BartForCausalLM",
