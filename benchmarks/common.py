@@ -56,6 +56,7 @@ CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
     "speech_transformer",
+    "nvidia_deeprecommender",  # OOM
     # Huggingface
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
@@ -99,7 +100,7 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
-    "nvidia_deeprecommender",
+    "nvidia_deeprecommender",  # OOM
     "yolov3",  # Accuracy
     # Huggingface
     "AllenaiLongformerBase",  # OOM
