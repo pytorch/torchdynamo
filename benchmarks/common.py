@@ -125,7 +125,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "mobilenet_v3_large",
     "pytorch_struct",
     "vgg16",
-    "nvidia_deeprecommender",  # OOM
     "speech_transformer",  # from functionalization
     "vision_maskrcnn",  # from functionalization
     "timm_efficientnet",  # from functionalization (only fails for inductor)
