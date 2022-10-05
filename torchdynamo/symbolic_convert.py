@@ -30,6 +30,7 @@ from torchdynamo.source import GlobalWeakRefSource
 from torchdynamo.source import LocalSource
 from torchdynamo.variables.builder import VariableBuilder
 
+from . import allowed_functions
 from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
@@ -1515,6 +1516,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
+
+        if id(func.get_function()) in allowed_functions._disallowed_function_ids:
+            unimplemented(f"inlining disallowed: {func.get_function()}")
 
         if skipfiles.check(
             func.get_filename()
