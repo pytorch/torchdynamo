@@ -233,6 +233,7 @@ def check_model_cuda(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    copy_to_cuda=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -245,7 +246,9 @@ def check_model_cuda(
             x.size(), x.stride(), device="cuda", dtype=x.dtype
         ).copy_(x)
 
-    example_inputs = tuple(copy_fn(x) for x in example_inputs)
+    if copy_to_cuda:
+        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+
     check_model(
         self,
         model,
