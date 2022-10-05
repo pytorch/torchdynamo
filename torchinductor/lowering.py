@@ -493,6 +493,22 @@ def squeeze_(x, dim=None):
     return x
 
 
+@register_lowering(aten.isinf)
+def isinf(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isinf")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
+@register_lowering(aten.isnan)
+def isnan(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isnan")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
 @register_lowering(aten.ceil)
 def ceil(x):
     if is_integer_type(x):
@@ -3163,8 +3179,6 @@ register_pointwise(
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
-register_pointwise(aten.isinf, override_return_dtype=torch.bool)
-register_pointwise(aten.isnan, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)
