@@ -2412,7 +2412,9 @@ class ExternKernelOut(ExternKernel):
         wrapper.writeline(f"{self.kernel}({', '.join(args)})")
 
     def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
-        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args, kwargs)
+        super().__init__(
+            None, layout, self.unwrap_storage(inputs), constant_args, kwargs
+        )
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
 
