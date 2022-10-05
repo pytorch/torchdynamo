@@ -216,7 +216,10 @@ def filter_stack(stack):
     for frame in stack:
         if "convert_frame" in frame.filename:
             break
-        if "eval_frame" in frame.filename or f"{config.dynamo_import}.optimize(" in frame.line:
+        if (
+            "eval_frame" in frame.filename
+            or f"{config.dynamo_import}.optimize(" in frame.line
+        ):
             continue
         user_stack.append(frame)
 
@@ -710,6 +713,7 @@ try:
             return fn()
         except UnsupportedFakeTensorException as e:
             from .exc import FakeTensorError
+
             raise FakeTensorError(
                 f"Unsupported: {e.reason} with fake tensor propagation. "
                 "Run with config.fake_tensor_propagation=False"
@@ -948,7 +952,10 @@ class CompileProfiler:
                 headers=["Function", "Num Recompiles", "Recompile Reasons"],
             )
             rpt += "\n"
-            rpt += f"Set {config.dynamo_import}.config.cache_size_limit to {max_recompiles} to avoid being cache limited.\n"
+            rpt += (
+                f"Set {config.dynamo_import}.config.cache_size_limit to "
+                f"{max_recompiles} to avoid being cache limited.\n"
+            )
         else:
             rpt += "No cache-limited recompilations detected.\n"
 

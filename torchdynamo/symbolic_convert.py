@@ -20,19 +20,11 @@ from unittest.mock import patch
 
 import torch
 
-from . import side_effects
-from . import variables
 from . import config
-from .source import AttrSource
-from .source import GetItemSource
-from .source import GlobalSource
-from .source import GlobalWeakRefSource
-from .source import LocalSource
-from .variables.builder import VariableBuilder
-
-from . import allowed_functions
 from . import exc
+from . import side_effects
 from . import skipfiles
+from . import variables
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin_callable
 from .allowed_functions import is_builtin_constant
@@ -52,6 +44,11 @@ from .replay_record import DummyModule
 from .replay_record import ExecutionRecorder
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
+from .source import AttrSource
+from .source import GetItemSource
+from .source import GlobalSource
+from .source import GlobalWeakRefSource
+from .source import LocalSource
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import graph_break_dup_warning_checker
@@ -59,6 +56,7 @@ from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
+from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
@@ -264,17 +262,11 @@ class InstructionTranslatorBase(object):
             self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        if isinstance(
-            oldvar.mutable_local, side_effects.MutableSideEffects
-        ):
+        if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
-            assert isinstance(
-                oldvar.mutable_local, variables.base.MutableLocal
-            )
-            newvar = newvar.clone(
-                mutable_local=variables.base.MutableLocal()
-            )
+            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
+            newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
@@ -1516,9 +1508,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
-
-        if id(func.get_function()) in allowed_functions._disallowed_function_ids:
-            unimplemented(f"inlining disallowed: {func.get_function()}")
 
         if skipfiles.check(
             func.get_filename()

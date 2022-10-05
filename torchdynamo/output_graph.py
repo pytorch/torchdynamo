@@ -81,7 +81,7 @@ class OutputGraph(fx.Tracer):
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: Callable,
-        root_tx: ".symbolic_convert.InstructionTranslator",
+        root_tx,
     ):
         super(OutputGraph, self).__init__()
 
@@ -250,6 +250,7 @@ class OutputGraph(fx.Tracer):
         Automatically restore live variables.
         """
         from .eval_frame import disable
+
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
@@ -361,6 +362,7 @@ class OutputGraph(fx.Tracer):
         call that generated code.
         """
         from .eval_frame import disable
+
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
         for output in rv:

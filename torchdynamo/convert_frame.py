@@ -238,7 +238,9 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
         msg += replay_record_msg()
 
-        msg += f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        msg += (
+            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        )
     msg += "=" * 10
     return msg
 

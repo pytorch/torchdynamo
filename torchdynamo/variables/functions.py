@@ -5,7 +5,6 @@ import types
 from typing import Dict
 from typing import List
 
-from .. import side_effects
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -40,7 +39,7 @@ def wrap_args_kwargs(result, options):
 
 def init_cellvars(parent, result, code):
     closure_cells = dict()
-    side_effects: "side_effects.SideEffects" = parent.output.side_effects
+    side_effects = parent.output.side_effects
 
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()

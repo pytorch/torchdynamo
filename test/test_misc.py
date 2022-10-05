@@ -23,7 +23,6 @@ from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 from torchdynamo.testing import unsupported
-from torchdynamo import graph_break
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -1166,25 +1165,6 @@ class MiscTests(torchdynamo.testing.TestCase):
             self.assertFalse(True)
         except torchdynamo.exc.Unsupported as e:
             self.assertIn("call torchdynamo.disable() wrapped function", str(e))
-
-    def test_graph_break(self):
-        cnts = torchdynamo.testing.CompileCounter()
-
-        @torchdynamo.optimize(cnts)
-        def fn(x):
-            x = torch.cos(x)
-            x = torch.cos(x)
-            torchdynamo.graph_break()
-            x = torch.cos(x)
-            x = torch.cos(x)
-            graph_break()
-            x = torch.cos(x)
-            x = torch.cos(x)
-            return x
-
-        fn(torch.randn(4, 5))
-        self.assertEqual(cnts.frame_count, 3)
-        self.assertEqual(cnts.op_count, 6)
 
     def test_torch_size(self):
         cnts = torchdynamo.testing.CompileCounter()

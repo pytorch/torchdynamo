@@ -9,11 +9,11 @@ import os
 
 import torch
 
-from torchdynamo import config
-from torchdynamo.utils import check_is_cuda
-from torchdynamo.utils import checkpoint_params
-from torchdynamo.utils import is_jit_model
-from torchdynamo.utils import torchscript
+from .. import config
+from ..utils import check_is_cuda
+from ..utils import checkpoint_params
+from ..utils import is_jit_model
+from ..utils import torchscript
 
 log = logging.getLogger(__name__)
 

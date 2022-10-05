@@ -5,12 +5,7 @@ from os.path import abspath
 from os.path import dirname
 from types import ModuleType
 
-import torch.fx._symbolic_trace
-
-try:
-    from torch.fx._symbolic_trace import is_fx_tracing
-except ImportError:
-    is_fx_tracing = None
+import torch
 
 try:
     import torch._prims
@@ -55,10 +50,9 @@ constant_functions = {
     torch.jit.is_scripting: False,
     torch.jit.is_tracing: False,
     torch._C._get_tracing_state: None,
+    torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
 }
-if is_fx_tracing is not None:
-    constant_functions[is_fx_tracing] = False
 
 # root folder of the project
 base_dir = dirname(dirname(abspath(__file__)))
@@ -145,16 +139,17 @@ enforce_cond_guards_match = True
 # to allow DDP comm/compute overlap
 optimize_ddp = False
 
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# How to import torchdynamo
+# How to import torchdynamo, either torchdynamo or torch.dynamo
 dynamo_import = __name__.replace(".config", "")
-inductor_import = "torchinductor"
+
+# How to import torchinductor, either torchinductor or torch.inductor
+inductor_import = dynamo_import.replace("dynamo", "inductor")
 
 
 class _AccessLimitingConfig(ModuleType):
@@ -164,6 +159,7 @@ class _AccessLimitingConfig(ModuleType):
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
             from .utils import set_loggers_level
+
             set_loggers_level(value)
         return object.__setattr__(self, name, value)
 

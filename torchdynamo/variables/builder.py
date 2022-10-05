@@ -13,9 +13,9 @@ import numpy as np
 import torch
 from functorch.experimental.ops import PyOperator
 
-from .. import replay_record
 from .. import config
 from .. import mutation_guard
+from .. import replay_record
 from .. import skipfiles
 from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin_callable
