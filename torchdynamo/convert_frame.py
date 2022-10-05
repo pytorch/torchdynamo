@@ -199,7 +199,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
             and record_filename is not None
         ):
             return f"\nLast frame execution written to {record_filename}. To run only this frame while debugging, run\
- torchdynamo.replay('{record_filename}').\n"
+ {config.dynamo_import}.replay('{record_filename}').\n"
         else:
             return ""
 
@@ -238,7 +238,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
         msg += replay_record_msg()
 
-        msg += "\nSet torchdynamo.config.verbose=True for more information\n"
+        msg += f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
     msg += "=" * 10
     return msg
 

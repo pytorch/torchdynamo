@@ -6,10 +6,10 @@ from typing import List
 
 import torch._C
 
-from torchdynamo.variables.functions import UserFunctionVariable
-from torchdynamo.variables.functions import UserMethodVariable
-from torchdynamo.variables.functions import WrappedUserFunctionVariable
-from torchdynamo.variables.functions import WrappedUserMethodVariable
+from .functions import UserFunctionVariable
+from .functions import UserMethodVariable
+from .functions import WrappedUserFunctionVariable
+from .functions import WrappedUserMethodVariable
 
 from .. import variables
 from ..bytecode_transformation import create_instruction

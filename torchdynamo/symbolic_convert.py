@@ -20,16 +20,17 @@ from unittest.mock import patch
 
 import torch
 
-import torchdynamo.side_effects
-import torchdynamo.variables.base
-from torchdynamo import config
-from torchdynamo.source import AttrSource
-from torchdynamo.source import GetItemSource
-from torchdynamo.source import GlobalSource
-from torchdynamo.source import GlobalWeakRefSource
-from torchdynamo.source import LocalSource
-from torchdynamo.variables.builder import VariableBuilder
+from . import side_effects
+from . import variables
+from . import config
+from .source import AttrSource
+from .source import GetItemSource
+from .source import GlobalSource
+from .source import GlobalWeakRefSource
+from .source import LocalSource
+from .variables.builder import VariableBuilder
 
+from . import allowed_functions
 from . import exc
 from . import skipfiles
 from .allowed_functions import is_allowed
@@ -264,15 +265,15 @@ class InstructionTranslatorBase(object):
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(
-            oldvar.mutable_local, torchdynamo.side_effects.MutableSideEffects
+            oldvar.mutable_local, side_effects.MutableSideEffects
         ):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
             assert isinstance(
-                oldvar.mutable_local, torchdynamo.variables.base.MutableLocal
+                oldvar.mutable_local, variables.base.MutableLocal
             )
             newvar = newvar.clone(
-                mutable_local=torchdynamo.variables.base.MutableLocal()
+                mutable_local=variables.base.MutableLocal()
             )
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
@@ -1516,6 +1517,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
 
+        if id(func.get_function()) in allowed_functions._disallowed_function_ids:
+            unimplemented(f"inlining disallowed: {func.get_function()}")
+
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
@@ -1614,7 +1618,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             if isinstance(
                 self.symbolic_locals.get(inst.argval),
-                torchdynamo.variables.NewCellVariable,
+                variables.NewCellVariable,
             ):
                 self.output.side_effects.store_cell(
                     self.symbolic_locals[inst.argval], self.pop()
@@ -1631,7 +1635,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(self.output.side_effects.load_cell(cell))
         else:
             maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
-            if isinstance(maybe_sym_local, torchdynamo.variables.NewCellVariable):
+            if isinstance(maybe_sym_local, variables.NewCellVariable):
                 self.push(self.output.side_effects.load_cell(maybe_sym_local))
             else:
                 super().LOAD_DEREF(inst)

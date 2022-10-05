@@ -12,10 +12,9 @@ from collections import Counter
 import torch
 import torch.fx as fx
 
-import torchdynamo
-from torchdynamo import config
-from torchdynamo.optimizations.backends import register_backend
-from torchdynamo.utils import clone_inputs
+from . import config
+from .optimizations.backends import register_backend
+from .utils import clone_inputs
 
 log = logging.getLogger(__name__)
 
@@ -132,11 +131,11 @@ def _cuda_system_info_comment():
 
 def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
-        """
+        f"""
         import torch
         from torch import tensor, device
         import torch.fx as fx
-        from torchdynamo.testing import rand_strided
+        from {config.dynamo_import}.testing import rand_strided
         from math import inf
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -180,7 +179,7 @@ def dump_compiler_graph_state(gm, args, compiler_name):
     print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
         save_graph_repro(fd, gm, args, compiler_name)
-    repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
+    repro_path = os.path.join(config.base_dir, "repro.py")
     shutil.copyfile(file_name, repro_path)
 
 
@@ -210,7 +209,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         fd.write(
             textwrap.dedent(
                 f"""
-                from torchdynamo.debug_utils import {fail_fn}
+                from {__name__} import {fail_fn}
                 """
             )
         )
@@ -290,7 +289,7 @@ def helper_for_dump_minify(contents):
         log.exception(e)
         raise NotImplementedError("Could not write to {minified_repro_path}")
 
-    local_path = os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py")
+    local_path = os.path.join(config.base_dir, "minifier_launcher.py")
     try:
         shutil.copyfile(minified_repro_path, local_path)
         log.warning(
@@ -308,7 +307,7 @@ def dump_to_minify(gm, args, compiler_name: str):
 {generate_compiler_repro_string(gm, args)}
 
 from functools import partial
-from torchdynamo.debug_utils import (
+from {__name__} import (
     isolate_fails,
     dump_compiler_graph_state,
 )
@@ -385,9 +384,9 @@ def run_fwd_maybe_bwd(gm, args):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from torchdynamo.testing import collect_results
-    from torchdynamo.testing import reduce_to_scalar_loss
-    from torchdynamo.testing import requires_bwd_pass
+    from .testing import collect_results
+    from .testing import reduce_to_scalar_loss
+    from .testing import requires_bwd_pass
 
     gm = copy.deepcopy(gm)
     args = clone_inputs(args)
@@ -406,7 +405,7 @@ def same_two_models(gm, opt_gm, example_inputs):
     """
     Check two models have same accuracy.
     """
-    from torchdynamo.utils import same
+    from .utils import same
 
     ref = run_fwd_maybe_bwd(gm, example_inputs)
 
@@ -447,13 +446,13 @@ def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
 
     return textwrap.dedent(
         f"""
+from math import inf
 import torch
-import torchdynamo
 from torch import tensor, device
 import torch.fx as fx
-from torchdynamo.testing import rand_strided
-from math import inf
-from torchdynamo.debug_utils import run_fwd_maybe_bwd
+import {config.dynamo_import}
+from {config.dynamo_import}.testing import rand_strided
+from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
@@ -461,7 +460,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 {model_str}
 
 mod = Repro().cuda()
-opt_mod = torchdynamo.optimize("{compiler_name}")(mod)
+opt_mod = {config.dynamo_import}.optimize("{compiler_name}")(mod)
 
 with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     ref = run_fwd_maybe_bwd(mod, args)
@@ -487,7 +486,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name):
     log.warning(f"Copying {file_name} to {latest_repro} for convenience")
     shutil.copyfile(file_name, latest_repro)
 
-    local_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
+    local_path = os.path.join(config.base_dir, "repro.py")
     try:
         shutil.copyfile(file_name, local_path)
         log.warning(
@@ -542,11 +541,11 @@ def dump_backend_repro_as_file(gm, args, compiler_name):
 #             )
 #         )
 
-#     local_dir = os.path.join(torchdynamo.config.base_dir, "repro")
+#     local_dir = os.path.join(config.base_dir, "repro")
 #     if os.path.exists(local_dir):
 #         shutil.rmtree(local_dir)
 #     shutil.copytree(tmp_dir, local_dir)
-#     local_tar_file = os.path.join(torchdynamo.config.base_dir, "repro.tar.gz")
+#     local_tar_file = os.path.join(config.base_dir, "repro.tar.gz")
 #     print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to {local_tar_file}")
 #     with tarfile.open(local_tar_file, "w:gz") as tar:
 #         tar.add(local_dir, arcname=os.path.basename(local_dir))
@@ -595,18 +594,18 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 
     contents = textwrap.dedent(
         f"""
+import os
+from math import inf
 import torch
-import torchdynamo
 from torch import tensor, device
 import torch.fx as fx
-from torchdynamo.testing import rand_strided
-from math import inf
-from torchdynamo.debug_utils import run_fwd_maybe_bwd
-from torchdynamo.optimizations.backends import BACKENDS
 import functools
-import os
+import {config.dynamo_import} 
+from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
+from {config.dynamo_import}.optimizations.backends import BACKENDS
+from {config.dynamo_import}.testing import rand_strided
 
-torchdynamo.config.repro_dir = \"{minifier_dir()}\"
+{config.dynamo_import}.config.repro_dir = \"{minifier_dir()}\"
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
@@ -620,7 +619,7 @@ dynamo_minifier_backend = functools.partial(
     compiler_fn,
     compiler_name="{compiler_name}",
 )
-opt_mod = torchdynamo.optimize(dynamo_minifier_backend)(mod)
+opt_mod = {config.dynamo_import}.optimize(dynamo_minifier_backend)(mod)
 
 opt_mod(*args)
         """
@@ -678,7 +677,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
 def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torchdynamo.optimizations.backends import BACKENDS
+    from .optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
         from torchinductor.compile_fx import compile_fx

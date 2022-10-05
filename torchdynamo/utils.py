@@ -30,8 +30,7 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-import torchdynamo
-import torchdynamo.config as config
+from . import config
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -143,8 +142,8 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 # Return all loggers that torchdynamo is responsible for
 def get_loggers():
     return [
-        logging.getLogger("torchdynamo"),
-        logging.getLogger("torchinductor"),
+        logging.getLogger(config.dynamo_import),
+        logging.getLogger(config.inductor_import),
     ]
 
 
@@ -168,12 +167,12 @@ LOGGING_CONFIG = {
         },
     },
     "loggers": {
-        "torchdynamo": {
+        config.dynamo_import: {
             "level": "DEBUG",
             "handlers": ["torchdynamo_console"],
             "propagate": False,
         },
-        "torchinductor": {
+        config.inductor_import: {
             "level": "DEBUG",
             "handlers": ["torchdynamo_console"],
             "propagate": False,
@@ -217,7 +216,7 @@ def filter_stack(stack):
     for frame in stack:
         if "convert_frame" in frame.filename:
             break
-        if "eval_frame" in frame.filename or "torchdynamo.optimize(" in frame.line:
+        if "eval_frame" in frame.filename or f"{config.dynamo_import}.optimize(" in frame.line:
             continue
         user_stack.append(frame)
 
@@ -710,7 +709,8 @@ try:
         try:
             return fn()
         except UnsupportedFakeTensorException as e:
-            raise torchdynamo.exc.FakeTensorError(
+            from .exc import FakeTensorError
+            raise FakeTensorError(
                 f"Unsupported: {e.reason} with fake tensor propagation. "
                 "Run with config.fake_tensor_propagation=False"
             ) from e
@@ -924,7 +924,7 @@ class CompileProfiler:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
             rpt += (
-                "You may gain additional insight by passing `nopython=True` to torchdynamo.optimize, "
+                f"You may gain additional insight by passing `nopython=True` to {config.dynamo_import}.optimize, "
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
@@ -948,7 +948,7 @@ class CompileProfiler:
                 headers=["Function", "Num Recompiles", "Recompile Reasons"],
             )
             rpt += "\n"
-            rpt += f"Set torchdynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.\n"
+            rpt += f"Set {config.dynamo_import}.config.cache_size_limit to {max_recompiles} to avoid being cache limited.\n"
         else:
             rpt += "No cache-limited recompilations detected.\n"
 

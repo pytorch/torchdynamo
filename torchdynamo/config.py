@@ -5,9 +5,12 @@ from os.path import abspath
 from os.path import dirname
 from types import ModuleType
 
-import torch
+import torch.fx._symbolic_trace
 
-import torchdynamo.utils
+try:
+    from torch.fx._symbolic_trace import is_fx_tracing
+except ImportError:
+    is_fx_tracing = None
 
 try:
     import torch._prims
@@ -52,9 +55,10 @@ constant_functions = {
     torch.jit.is_scripting: False,
     torch.jit.is_tracing: False,
     torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
     torch.onnx.is_in_onnx_export: False,
 }
+if is_fx_tracing is not None:
+    constant_functions[is_fx_tracing] = False
 
 # root folder of the project
 base_dir = dirname(dirname(abspath(__file__)))
@@ -148,6 +152,10 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
+# How to import torchdynamo
+dynamo_import = __name__.replace(".config", "")
+inductor_import = "torchinductor"
+
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):
@@ -155,7 +163,8 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            torchdynamo.utils.set_loggers_level(value)
+            from .utils import set_loggers_level
+            set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 

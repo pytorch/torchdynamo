@@ -11,11 +11,11 @@ from typing import List
 import numpy as np
 import torch
 
-from torchdynamo.guards import GuardBuilder
-from torchdynamo.replay_record import DummyModule
-from torchdynamo.variables.dicts import ConstDictVariable
-from torchdynamo.variables.tensor import DynamicShapeVariable
-from torchdynamo.variables.tensor import FakeItemVariable
+from ..guards import GuardBuilder
+from ..replay_record import DummyModule
+from .dicts import ConstDictVariable
+from .tensor import DynamicShapeVariable
+from .tensor import FakeItemVariable
 
 from .. import config
 from .. import variables

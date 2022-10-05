@@ -15,12 +15,11 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-import torchdynamo
-from torchdynamo.optimizations.distributed import DDPOptimizer
-from torchdynamo.utils import checkpoint_params
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import compile_times
-from torchdynamo.utils import same
+from .optimizations.distributed import DDPOptimizer
+from .utils import checkpoint_params
+from .utils import clone_inputs
+from .utils import compile_times
+from .utils import same
 
 from . import config
 from . import convert_frame
@@ -65,7 +64,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from torchdynamo import reset
+        from . import reset
 
         reset()
         log.warning("could not determine __code__ for %s", f)

@@ -13,9 +13,7 @@ import numpy as np
 import torch
 from functorch.experimental.ops import PyOperator
 
-import torchdynamo
-from torchdynamo import replay_record
-
+from .. import replay_record
 from .. import config
 from .. import mutation_guard
 from .. import skipfiles
@@ -103,7 +101,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx: "torchdynamo.symbolic_convert.InstructionTranslatorBase",
+        tx,
         source: Source,
     ):
         super(VariableBuilder, self).__init__()
