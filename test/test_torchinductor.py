@@ -16,6 +16,7 @@ from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
+from torchdynamo.debug_utils import same_two_models
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 from torchinductor.utils import timed
@@ -3727,3 +3728,38 @@ if HAS_CUDA:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        def test_accuracy_issue1(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(
+                        in_features=768, out_features=2, bias=True
+                    )
+
+                def forward(self, start_positions: torch.Tensor, x: torch.Tensor):
+                    linear = self.linear(x)
+                    split = linear.split(1, dim=-1)
+                    getitem = split[0]
+                    squeeze = getitem.squeeze(-1)
+                    clamp = start_positions.clamp(0, 128)
+                    cross_entropy = torch.nn.functional.cross_entropy(
+                        squeeze, clamp, None, None, 128, None, "mean", 0.0
+                    )
+                    return cross_entropy
+
+            mod = Repro().cuda()
+            opt_mod = torchdynamo.optimize("inductor")(mod)
+            mod.eval()
+            opt_mod.eval()
+
+            args = [
+                ((1,), (1,), torch.int64, "cuda", False),
+                ((1, 128, 768), (98304, 768, 1), torch.float32, "cuda", True),
+            ]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+            with torch.cuda.amp.autocast(enabled=False):
+                assert same_two_models(mod, opt_mod, args), "Dynamo failed"
