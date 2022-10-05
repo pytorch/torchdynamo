@@ -87,6 +87,7 @@ decompositions = get_decompositions(
         aten.silu_backward,
         aten.slice_backward,
         aten.sgn,
+        aten.std_mean.correction,
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
