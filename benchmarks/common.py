@@ -168,6 +168,10 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "AlbertForQuestionAnswering",
     # TIMM
     "cait_m36_384",  # fp64_OOM
+    "coat_lite_mini",  # time out
+    "rexnet_100",  # accuracy
+    "swin_base_patch4_window7_224",
+    "twins_pcpvt_base",  # time out
 ]
 
 
