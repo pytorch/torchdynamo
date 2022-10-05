@@ -10,10 +10,10 @@ except ImportError:
     from pkg_resources import packaging
 Version = packaging.version.Version
 
-MIN_CUDA_VERSION = Version('11.6')
+MIN_CUDA_VERSION = Version("11.6")
 MIN_PYTHON_VERSION = (3, 7)
 # NOTE: dev version required, e.g. Version('1.13.0.dev123') < Version('1.13.0')
-MIN_TORCH_VERSION = Version('1.13.0.dev0')
+MIN_TORCH_VERSION = Version("1.13.0.dev0")
 
 
 def check_python():
@@ -28,10 +28,7 @@ def check_python():
 def check_pip_deps():
     proc = subprocess.run(["pip", "check"], capture_output=True)
     if proc.returncode != 0:
-        raise RuntimeError(
-            "`pip` dependencies broken:\n" + 
-            proc.stdout.decode("utf-8")
-        )
+        raise RuntimeError("`pip` dependencies broken:\n" + proc.stdout.decode("utf-8"))
     proc = subprocess.run(["pip", "show", "torchdynamo"], capture_output=True)
     if proc.returncode != 0:
         raise RuntimeError("`torchdynamo` is not installed")
@@ -42,6 +39,7 @@ def check_pip_deps():
 # is not present in PyPI.
 def check_torch():
     import torch
+
     if torch.__version__ < MIN_TORCH_VERSION:
         raise RuntimeError(
             f"torch version not supported: {torch.__version__} "
@@ -51,6 +49,7 @@ def check_torch():
 
 def check_cuda():
     import torch
+
     if not torch.cuda.is_available():
         sys.stderr.write("CUDA not available for torch\n")
         return
@@ -67,9 +66,11 @@ def check_cuda():
     if not cuda_home:
         raise RuntimeError("$CUDA_HOME not found")
 
-    nvcc = os.path.join(cuda_home, 'bin', 'nvcc')
-    nvcc_version_str = subprocess.check_output([nvcc, '--version']).strip().decode("utf-8")
-    cuda_version = re.search(r'release (\d+[.]\d+)', nvcc_version_str)
+    nvcc = os.path.join(cuda_home, "bin", "nvcc")
+    nvcc_version_str = (
+        subprocess.check_output([nvcc, "--version"]).strip().decode("utf-8")
+    )
+    cuda_version = re.search(r"release (\d+[.]\d+)", nvcc_version_str)
     if cuda_version is None:
         raise RuntimeError("CUDA version not found in `nvcc --version` output")
 
@@ -82,6 +83,7 @@ def check_cuda():
 
 def check_dynamo(backend, device, err_msg):
     import torch
+
     if device == "cuda" and not torch.cuda.is_available():
         sys.stderr.write(
             f"CUDA not available -- skipping CUDA check on {backend} backend\n"
@@ -91,6 +93,7 @@ def check_dynamo(backend, device, err_msg):
         import torchdynamo
 
         torchdynamo.reset()
+
         @torchdynamo.optimize(backend, nopython=True)
         def fn(x):
             return x + x
@@ -140,7 +143,10 @@ def check_inductor_cpu():
     check_dynamo(
         "inductor",
         "cpu",
-        "CPU inductor sanity check failed",
+        "CPU inductor sanity check failed"
+        # TODO currently, if any version of triton is installed, cpu versions
+        # require the correct version of triton.
+        + "NOTE: Please check that you installed the correct hash/version of `triton`",
     )
 
 
@@ -166,5 +172,6 @@ def main():
     check_inductor_cpu()
     print("All required checks passed")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
