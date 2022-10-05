@@ -15,6 +15,7 @@ from typing import List
 from typing import Optional
 from typing import Set
 from typing import Tuple
+from typing import Union
 from unittest.mock import patch
 
 import numpy
@@ -23,6 +24,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
+from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_float_dtype
 
 from . import config
@@ -217,13 +219,20 @@ class CeilDiv(sympy.Function):
             return IndexingDiv(base + (divisor - 1), divisor)
 
 
-def is_triton(x):
-    # TODO(jansel): a config check once we have multi-backend
+def get_device_type(x):
     if getattr(x, "get_device", None):
-        return is_triton(x.get_device())
+        return get_device_type(x.get_device())
     if isinstance(x, torch.device):
-        return x.type == "cuda"
-    return False
+        return x.type
+    return None
+
+
+def is_triton(x):
+    return get_device_type(x) == "cuda"
+
+
+def is_cpu(x):
+    return get_device_type(x) == "cpu"
 
 
 @dataclasses.dataclass
@@ -760,9 +769,20 @@ class Reduction(Loops):
     @staticmethod
     def default_value(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
-            return float("-inf") if is_float_dtype(dtype) else torch.iinfo(dtype).min
+            if is_float_dtype(dtype):
+                return float("-inf")
+            elif is_boolean_dtype(dtype):
+                return 0
+            else:
+                return torch.iinfo(dtype).min
         if reduction_type in {"min", "argmin"}:
-            return float("inf") if is_float_dtype(dtype) else torch.iinfo(dtype).max
+            if is_float_dtype(dtype):
+                return float("inf")
+            elif is_boolean_dtype(dtype):
+                return 1
+            else:
+                return torch.iinfo(dtype).max
+
         return {
             "sum": 0,
             "any": 0,
@@ -3279,12 +3299,22 @@ class StorageBox(MutableBox):
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
         """
+
+        def should_realize_on_cpu(loops: Union[Pointwise, Reduction]):
+            """
+            The heuristic for realizing reused result of heavy ops on cpu
+            """
+            heavy_ops = ["exp"]  # a list of heavy ops
+            fn_str = loops.inner_fn_str()
+            return any([fn_str.startswith(op + "(") for op in heavy_ops])
+
         if (
             users > 1
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
+                or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
             self.realize()

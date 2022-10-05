@@ -177,14 +177,17 @@ class TensorVariable(VariableTracker):
 
             options.update(specialized_props)
             return cls(proxy, **options)
-        elif (
-            istype(example_value, (torch.Size, int, bool, float))
-            and config.dynamic_shapes
-        ):
+        elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            if isinstance(example_value, torch.Size):
-                options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
+        elif istype(example_value, torch.Size) and config.dynamic_shapes:
+            proxy.node.meta["example_value"] = example_value
+            sizes = []
+            for i, v in enumerate(example_value):
+                proxy_i = proxy[i]
+                proxy_i.node.meta["example_value"] = v
+                sizes.append(DynamicShapeVariable(proxy_i, int))
+            return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
@@ -502,22 +505,18 @@ class TensorVariable(VariableTracker):
 
 
 class DynamicShapeVariable(TensorVariable):
-    def __init__(self, proxy, dyn_shape_cls, dyn_shape_len=None, **kwargs):
+    """
+    Represents a symbolic size, e.g., as returned by tensor.size(0)
+    """
+
+    def __init__(self, proxy, dyn_shape_cls, **kwargs):
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
         self.dyn_shape_cls = dyn_shape_cls
-        self.dyn_shape_len = dyn_shape_len
 
     def python_type(self):
         return self.dyn_shape_cls
 
     def unpack_var_sequence(self, tx):
-        if self.dyn_shape_len is not None:
-            return [
-                variables.BuiltinVariable(
-                    operator.getitem, **VariableTracker.propagate(self)
-                ).call_function(tx, [self, variables.ConstantVariable(i)], {})
-                for i in range(self.dyn_shape_len)
-            ]
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
 
 

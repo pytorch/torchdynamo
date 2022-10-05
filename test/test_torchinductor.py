@@ -3530,6 +3530,30 @@ class CommonTemplate:
         out = compiled(torch.randn(12, 4, device=self.device))
         self.assertEqual(out[0].shape, (24, 2))
 
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_unspec_inputs(self):
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", True)
+    def test_unspec_inputs_cudagraphs(self):
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
 
 if HAS_CPU:
 
@@ -3577,6 +3601,25 @@ if HAS_CPU:
 
             x = torch.randn((10, 20))
             assert same(x, forward(x))
+
+        def test_parallel_num_threads(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x1, x2):
+                return x1 + x2
+
+            @contextlib.contextmanager
+            def set_num_threads(num_threads):
+                orig_num_threads = torch.get_num_threads()
+                torch.set_num_threads(num_threads)
+                yield
+                torch.set_num_threads(orig_num_threads)
+
+            x1 = torch.randn((10, 20))
+            x2 = torch.randn((10, 20))
+            with set_num_threads(1):
+                assert same(x1 + x2, fn(x1, x2))
+            with set_num_threads(4):
+                assert same(x1 + x2, fn(x1, x2))
 
         @patch("torch.cuda.is_available", lambda: False)
         def test_timed_cpu_only(self):

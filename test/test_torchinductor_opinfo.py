@@ -174,6 +174,9 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # failed since moving PyTorch pin https://github.com/pytorch/torchdynamo/pull/1453
+    "dsplit": {f16, f32, f64},
+    "hsplit": {f16, f32, f64},
 }
 
 
@@ -251,7 +254,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "mvlgamma.mvlgamma_p_1": {f32, f64},
     "mvlgamma.mvlgamma_p_3": {f32, f64},
     "mvlgamma.mvlgamma_p_5": {f32, f64},
-    "nan_to_num": {b8, f16, i32, i64},
+    "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
@@ -382,12 +385,9 @@ inductor_expected_failures_single_sample["cuda"] = {
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "matrix_exp": {f16},
-    "max.reduction_no_dim": {b8},
     "max.reduction_with_dim": {b8, i32, i64},
-    "min.reduction_no_dim": {b8},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "nan_to_num": {b8, i32, i64},
     "new_empty": {f16, f32, f64, i32, i64},
     "new_empty_strided": {f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
