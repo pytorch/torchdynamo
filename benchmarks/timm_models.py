@@ -264,6 +264,12 @@ class TimmRunnner(BenchmarkRunner):
         else:
             model.eval()
 
+        if device == "cuda":
+            # capturable is only supported on cuda at the moment
+            self.optimizer = torch.optim.Adam(model.parameters(), capturable=True)
+        else:
+            self.optimizer = None
+
         self.validate_model(model, example_inputs)
 
         return device, model_name, model, example_inputs, batch_size
@@ -323,6 +329,8 @@ class TimmRunnner(BenchmarkRunner):
                 pred = pred[0]
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
+        if self.optimizer is not None:
+            self.optimizer.step()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None
