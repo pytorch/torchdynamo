@@ -11,6 +11,7 @@ from functools import partial
 from typing import Any
 from typing import Callable
 from typing import ClassVar
+from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
@@ -2195,6 +2196,7 @@ class ConcatKernel(NopKernel):
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
+    kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
@@ -2334,6 +2336,10 @@ class ExternKernel(InputsKernel):
         args.extend(map(repr, self.constant_args))
         return args
 
+    def codegen_kwargs(self):
+        kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
+        return kwargs
+
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
@@ -2394,14 +2400,19 @@ class ExternKernelOut(ExternKernel):
 
     def codegen(self, wrapper):
         args = self.codegen_args()
+
+        kwargs = self.codegen_kwargs()
+        if kwargs:
+            args.extend(kwargs)
+
         if self.output_view:
             args.append(f"out={self.output_view.codegen_reference()}")
         else:
             args.append(f"out={self.codegen_reference()}")
         wrapper.writeline(f"{self.kernel}({', '.join(args)})")
 
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
+    def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
+        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args, kwargs)
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
 
@@ -2608,12 +2619,12 @@ class MatrixMultiply(ExternKernelOut):
 
 
 class MatrixMultiplyAdd(ExternKernelOut):
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super().__init__(layout, inputs, constant_args, output_view)
+    def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
+        super().__init__(layout, inputs, constant_args, kwargs, output_view)
         self.kernel = "aten.addmm.out"
 
     @classmethod
-    def create(cls, inp, a, b):
+    def create(cls, inp, a, b, beta, alpha):
         m, k1 = a.get_size()
         k2, n = b.get_size()
         V.graph.sizevars.guard_equals(k1, k2)
@@ -2629,6 +2640,7 @@ class MatrixMultiplyAdd(ExternKernelOut):
                 size=[m] + [n],
             ),
             inputs=[inp, a, b],
+            kwargs={"beta": beta, "alpha": alpha},
         )
 
 

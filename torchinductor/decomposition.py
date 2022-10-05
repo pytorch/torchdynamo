@@ -131,9 +131,14 @@ def floordiv(a, b):
 
 
 @register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2):
+def addmm(input, mat1, mat2, *, beta=1, alpha=1):
     if config.triton.mm != "aten":
-        return torch.mm(mat1, mat2) + input
+        out = torch.mm(mat1, mat2)
+        if not isinstance(alpha, numbers.Number) or alpha != 1:
+            out = out * alpha
+        if not isinstance(beta, numbers.Number) or beta != 1:
+            input = input * beta
+        return input + out
     else:
         return NotImplemented  # go directly to lowering
 
