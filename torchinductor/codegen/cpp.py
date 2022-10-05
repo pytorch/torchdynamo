@@ -111,7 +111,7 @@ def float16_reduction_prefix(rtype):
     # errors, float32 accumulation should be used instead.
     assert rtype in (
         "sum",
-        "any"
+        "any",
     ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
     prefix = [
         f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
