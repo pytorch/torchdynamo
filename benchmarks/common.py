@@ -1198,11 +1198,12 @@ class BenchmarkRunner:
 
             compilation_time = dynamo_latency - eager_latency
             compression_ratio = eager_peak_mem / dynamo_peak_mem
-            # print(
-            #     f"memory: eager: {eager_peak_mem:.2f} GB, "
-            #     f"dynamo: {dynamo_peak_mem:.2f} GB, "
-            #     f"ratio: {compression_ratio:.2f}"
-            # )
+            print(
+                f"memory: eager: {eager_peak_mem:.2f} GB, "
+                f"dynamo: {dynamo_peak_mem:.2f} GB, "
+                f"ratio: {compression_ratio:.2f}"
+            )
+            exit(0)
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1303,7 +1304,8 @@ class BenchmarkRunner:
         elif branch:
             print("RUNNING ON BRANCH:", branch)
         mode = "train" if self.args.training else "eval"
-        print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
+        # print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
+        print(f"{current_device:4} {mode:5} {current_name:34} ", flush=True)
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment

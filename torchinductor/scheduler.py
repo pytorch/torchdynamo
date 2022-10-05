@@ -910,6 +910,7 @@ class Scheduler:
         else:  # nodes don't depend on each other, but may have common reads
             if node1.is_template():
                 return False
+            # return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):

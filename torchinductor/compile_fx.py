@@ -13,7 +13,7 @@ from torch.utils._mode_utils import no_dispatch
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.training import is_aot_autograd_safe_to_run
-from torchdynamo.utils import dynamo_timed
+from torchdynamo.utils import count_calls, dynamo_timed
 from torchdynamo.utils import preserve_rng_state
 
 from . import config
@@ -75,6 +75,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
 ):
+    # print("--> start compile_fx_inner", torch.cuda.max_memory_allocated() / 10**9)
     log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
     V.debug.fx_graph(gm, example_inputs)
 
@@ -111,7 +112,10 @@ def compile_fx_inner(
             elif complex_memory_overlap_inputs:
                 log.warning("skipping cudagraphs due to complex input striding")
 
-    return align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    a = align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    # print("--> end compile_fx_inner", torch.cuda.max_memory_allocated() / 10**9)
+    # return gm
+    return a
 
 
 def clone_preserve_strides(x):
@@ -288,6 +292,9 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
 
+    if count_calls(model_.graph) < 20:
+        return model_
+
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
@@ -299,6 +306,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
 
     @dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        return model
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
             model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
