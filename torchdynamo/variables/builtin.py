@@ -11,17 +11,13 @@ from typing import List
 import numpy as np
 import torch
 
-from torchdynamo.guards import GuardBuilder
-from torchdynamo.replay_record import DummyModule
-from torchdynamo.variables.dicts import ConstDictVariable
-from torchdynamo.variables.tensor import DynamicShapeVariable
-from torchdynamo.variables.tensor import FakeItemVariable
-
 from .. import config
 from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import Unsupported
 from ..exc import unimplemented
+from ..guards import GuardBuilder
+from ..replay_record import DummyModule
 from ..source import AttrSource
 from ..source import TypeSource
 from ..source import is_constant_source
@@ -32,6 +28,9 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
+from .dicts import ConstDictVariable
+from .tensor import DynamicShapeVariable
+from .tensor import FakeItemVariable
 
 log = logging.getLogger(__name__)
 

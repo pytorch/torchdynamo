@@ -20,18 +20,11 @@ from unittest.mock import patch
 
 import torch
 
-import torchdynamo.side_effects
-import torchdynamo.variables.base
-from torchdynamo import config
-from torchdynamo.source import AttrSource
-from torchdynamo.source import GetItemSource
-from torchdynamo.source import GlobalSource
-from torchdynamo.source import GlobalWeakRefSource
-from torchdynamo.source import LocalSource
-from torchdynamo.variables.builder import VariableBuilder
-
+from . import config
 from . import exc
+from . import side_effects
 from . import skipfiles
+from . import variables
 from .allowed_functions import is_allowed
 from .allowed_functions import is_builtin_callable
 from .allowed_functions import is_builtin_constant
@@ -51,6 +44,11 @@ from .replay_record import DummyModule
 from .replay_record import ExecutionRecorder
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
+from .source import AttrSource
+from .source import GetItemSource
+from .source import GlobalSource
+from .source import GlobalWeakRefSource
+from .source import LocalSource
 from .utils import counters
 from .utils import fake_tensors_available
 from .utils import graph_break_dup_warning_checker
@@ -58,6 +56,7 @@ from .utils import istype
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
+from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
@@ -263,17 +262,11 @@ class InstructionTranslatorBase(object):
             self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        if isinstance(
-            oldvar.mutable_local, torchdynamo.side_effects.MutableSideEffects
-        ):
+        if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
-            assert isinstance(
-                oldvar.mutable_local, torchdynamo.variables.base.MutableLocal
-            )
-            newvar = newvar.clone(
-                mutable_local=torchdynamo.variables.base.MutableLocal()
-            )
+            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
+            newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
@@ -1614,7 +1607,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             if isinstance(
                 self.symbolic_locals.get(inst.argval),
-                torchdynamo.variables.NewCellVariable,
+                variables.NewCellVariable,
             ):
                 self.output.side_effects.store_cell(
                     self.symbolic_locals[inst.argval], self.pop()
@@ -1631,7 +1624,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(self.output.side_effects.load_cell(cell))
         else:
             maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
-            if isinstance(maybe_sym_local, torchdynamo.variables.NewCellVariable):
+            if isinstance(maybe_sym_local, variables.NewCellVariable):
                 self.push(self.output.side_effects.load_cell(maybe_sym_local))
             else:
                 super().LOAD_DEREF(inst)

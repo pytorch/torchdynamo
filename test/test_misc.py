@@ -2579,6 +2579,26 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
 
+    def test_user_function_variable_supports_enum_argument(self):
+        class Foo(enum.Enum):
+            FOO = 0
+            BAR = 1
+
+        def gn(x, y=Foo.FOO):
+            if y is Foo.FOO:
+                return x
+            else:
+                return x + 1
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(2, 3)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(torch.allclose(ref, res))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod

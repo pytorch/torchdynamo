@@ -1,11 +1,10 @@
+import enum
 import functools
 import inspect
 import itertools
 import types
 from typing import Dict
 from typing import List
-
-import torchdynamo.side_effects
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -27,6 +26,8 @@ def wrap_bound_arg(val, options):
         return cls([wrap_bound_arg(x, options) for x in val], **options)
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
+    elif isinstance(val, enum.Enum):
+        return variables.EnumVariable(val, **options)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
@@ -41,7 +42,7 @@ def wrap_args_kwargs(result, options):
 
 def init_cellvars(parent, result, code):
     closure_cells = dict()
-    side_effects: torchdynamo.side_effects.SideEffects = parent.output.side_effects
+    side_effects = parent.output.side_effects
 
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
