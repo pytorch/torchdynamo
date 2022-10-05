@@ -24,6 +24,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
+from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_float_dtype
 
 from . import config
@@ -768,9 +769,20 @@ class Reduction(Loops):
     @staticmethod
     def default_value(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
-            return float("-inf") if is_float_dtype(dtype) else torch.iinfo(dtype).min
+            if is_float_dtype(dtype):
+                return float("-inf")
+            elif is_boolean_dtype(dtype):
+                return 0
+            else:
+                return torch.iinfo(dtype).min
         if reduction_type in {"min", "argmin"}:
-            return float("inf") if is_float_dtype(dtype) else torch.iinfo(dtype).max
+            if is_float_dtype(dtype):
+                return float("inf")
+            elif is_boolean_dtype(dtype):
+                return 1
+            else:
+                return torch.iinfo(dtype).max
+
         return {
             "sum": 0,
             "any": 0,
