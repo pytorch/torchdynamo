@@ -251,7 +251,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "mvlgamma.mvlgamma_p_1": {f32, f64},
     "mvlgamma.mvlgamma_p_3": {f32, f64},
     "mvlgamma.mvlgamma_p_5": {f32, f64},
-    "nan_to_num": {f16, i32, i64},
+    "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
