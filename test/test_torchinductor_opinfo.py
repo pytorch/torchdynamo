@@ -524,7 +524,12 @@ class TestInductorOpInfo(TestCase):
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
                     self.check_model_cuda(
-                        fn, args, kwargs, check_lowp=False, nopython=True, copy_to_cuda=False
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        copy_to_cuda=False,
                     )
                 elif device_type == "cpu":
                     self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
