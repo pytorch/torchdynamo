@@ -107,7 +107,12 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
 
 
 def float16_reduction_prefix(rtype):
-    assert rtype in ("sum", "any"), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
+    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
+    # errors, float32 accumulation should be used instead.
+    assert rtype in (
+        "sum",
+        "any"
+    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
     prefix = [
         f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
         + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
