@@ -2,7 +2,7 @@ import dataclasses
 import os
 import textwrap
 
-from torchdynamo.utils import counters
+from .utils import counters
 
 
 class TorchDynamoException(RuntimeError):

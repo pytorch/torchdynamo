@@ -1,3 +1,4 @@
 [flake8]
+exclude = minifier_launcher.py,repro.py
 ignore = E203,W503,C101,C4,EXE,B,Y
 max-line-length = 120

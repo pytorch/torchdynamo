@@ -8,6 +8,8 @@ import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch import Tensor
 from torch._decomp import get_decompositions
+from torch._prims_common import is_boolean_dtype
+from torch._prims_common import is_integer_dtype
 
 from torchinductor import config
 
@@ -85,6 +87,7 @@ decompositions = get_decompositions(
         aten.silu_backward,
         aten.slice_backward,
         aten.sgn,
+        aten.std_mean.correction,
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
@@ -195,6 +198,9 @@ def masked_fill(value, mask, other):
 
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
+        return x
+
     if nan is None:
         nan = 0.0
     if posinf is None:

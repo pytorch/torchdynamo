@@ -174,6 +174,9 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # failed since moving PyTorch pin https://github.com/pytorch/torchdynamo/pull/1453
+    "dsplit": {f16, f32, f64},
+    "hsplit": {f16, f32, f64},
 }
 
 
@@ -251,7 +254,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "mvlgamma.mvlgamma_p_1": {f32, f64},
     "mvlgamma.mvlgamma_p_3": {f32, f64},
     "mvlgamma.mvlgamma_p_5": {f32, f64},
-    "nan_to_num": {b8, f16, i32, i64},
+    "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
@@ -295,7 +298,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
@@ -358,8 +360,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "inner": {f16, f32, f64},
-    "isinf": {b8, i32, i64},
-    "isnan": {b8, i32, i64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
@@ -382,14 +382,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "matrix_exp": {f16},
-    "max.reduction_no_dim": {b8},
     "max.reduction_with_dim": {b8, i32, i64},
-    "min.reduction_no_dim": {b8},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "nan_to_num": {b8, i32, i64},
-    "new_empty": {f16, f32, f64, i32, i64},
-    "new_empty_strided": {f16, f32, f64, i32, i64},
+    "new_empty": {b8, f16, f32, f64, i32, i64},
+    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
     "nn.functional.conv_transpose3d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
@@ -422,7 +419,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
-    "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
@@ -521,8 +517,15 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
+                    # opinfo test case have already place the input on the correct device
+                    # so we don't need do additional copy by setting copy_to_cuda=False
                     self.check_model_cuda(
-                        fn, args, kwargs, check_lowp=False, nopython=True
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        copy_to_cuda=False,
                     )
                 elif device_type == "cpu":
                     self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)

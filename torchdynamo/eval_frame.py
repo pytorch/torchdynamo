@@ -15,19 +15,17 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-import torchdynamo
-from torchdynamo.optimizations.distributed import DDPOptimizer
-from torchdynamo.utils import checkpoint_params
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import compile_times
-from torchdynamo.utils import same
-
 from . import config
 from . import convert_frame
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
+from .optimizations.distributed import DDPOptimizer
+from .utils import checkpoint_params
+from .utils import clone_inputs
+from .utils import compile_times
+from .utils import same
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +63,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from torchdynamo import reset
+        from . import reset
 
         reset()
         log.warning("could not determine __code__ for %s", f)
@@ -312,7 +310,7 @@ class WrapperBackend:
 
 
 def get_compiler_fn(compiler_fn):
-    from torchdynamo.debug_utils import wrap_backend_debug
+    from .debug_utils import wrap_backend_debug
 
     """Expand backend strings to functions"""
     compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
@@ -379,7 +377,9 @@ def optimize(
 @patch("torchdynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    torchdynamo.reset()
+    from . import reset
+
+    reset()
 
     out_guards = []
     graphs = []
@@ -439,7 +439,7 @@ def explain(f, *args, **kwargs):
     explanation += compile_times()
 
     # TODO(voz): Do we want a decorator for this?
-    torchdynamo.reset()
+    reset()
     return explanation, out_guards, graphs, ops_per_graph, break_reasons
 
 

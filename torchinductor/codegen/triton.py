@@ -138,17 +138,18 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
-        # wonkyness to work around https://github.com/openai/triton/issues/532
-        # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
-        a = ops.identity(a)
-        b = ops.identity(b)
-        c = ops.identity(c)
-        a = ops.identity(
-            f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
-        )
-        a = ops.identity(
-            f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
-        )
+        if not config.triton.simple_where:
+            # wonkyness to work around https://github.com/openai/triton/issues/532
+            # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
+            a = ops.identity(a)
+            b = ops.identity(b)
+            c = ops.identity(c)
+            a = ops.identity(
+                f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
+            )
+            a = ops.identity(
+                f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
+            )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
@@ -765,7 +766,14 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         else:
             ep = ""
-        line = f"tl.load({var} + {index}, {mask}{ep})"
+        # "other" below is a workaround for https://github.com/openai/triton/issues/737
+        # for bool, even though it's likely subject to the same bug, setting `other` leads
+        # to LLVM errors so we are skipping it for now
+        if "tmp" in mask and V.graph.get_dtype(name) != torch.bool:
+            other = ", other=0"
+        else:
+            other = ""
+        line = f"tl.load({var} + {index}, {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
