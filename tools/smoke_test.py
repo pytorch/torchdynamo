@@ -80,9 +80,14 @@ def check_cuda():
         )
 
 
-def check_dynamo(backend, device, err_msg, exit_on_fail):
+def check_dynamo(backend, device, err_msg):
+    import torch
+    if device == "cuda" and not torch.cuda.is_available():
+        sys.stderr.write(
+            f"CUDA not available -- skipping CUDA check on {backend} backend\n"
+        )
+        return
     try:
-        import torch
         import torchdynamo
 
         torchdynamo.reset()
@@ -96,8 +101,7 @@ def check_dynamo(backend, device, err_msg, exit_on_fail):
         torch.testing.assert_close(y, x + x)
     except Exception:
         sys.stderr.write(traceback.format_exc() + "\n" + err_msg + "\n\n")
-        if exit_on_fail:
-            sys.exit(1)
+        sys.exit(1)
 
 
 def check_eager_cpu():
@@ -105,7 +109,6 @@ def check_eager_cpu():
         "eager",
         "cpu",
         "CPU eager sanity check failed",
-        True
     )
 
 
@@ -113,8 +116,7 @@ def check_eager_cuda():
     check_dynamo(
         "eager",
         "cuda",
-        "CUDA eager sanity check failed - CUDA not supported",
-        False
+        "CUDA eager sanity check failed",
     )
 
 
@@ -123,7 +125,6 @@ def check_aot_eager_cpu():
         "aot_eager",
         "cpu",
         "CPU aot_eager sanity check failed",
-        True
     )
 
 
@@ -131,8 +132,7 @@ def check_aot_eager_cuda():
     check_dynamo(
         "aot_eager",
         "cuda",
-        "CUDA aot_eager sanity check failed - CUDA not supported",
-        False
+        "CUDA aot_eager sanity check failed",
     )
 
 
@@ -140,8 +140,7 @@ def check_inductor_cpu():
     check_dynamo(
         "inductor",
         "cpu",
-        "CPU aot_eager sanity check failed",
-        True
+        "CPU inductor sanity check failed",
     )
 
 
@@ -149,9 +148,8 @@ def check_inductor_cuda():
     check_dynamo(
         "inductor",
         "cuda",
-        "CUDA aot_eager sanity check failed - CUDA not supported\n"
+        "CUDA inductor sanity check failed\n"
         + "NOTE: Please check that you installed the correct hash/version of `triton`",
-        False
     )
 
 
@@ -160,12 +158,12 @@ def main():
     check_pip_deps()
     check_torch()
     check_cuda()
-    check_eager_cpu()
     check_eager_cuda()
-    check_aot_eager_cpu()
+    check_eager_cpu()
     check_aot_eager_cuda()
-    check_inductor_cpu()
+    check_aot_eager_cpu()
     check_inductor_cuda()
+    check_inductor_cpu()
     print("All required checks passed")
 
 if __name__ == '__main__':
