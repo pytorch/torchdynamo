@@ -41,8 +41,12 @@ tensor_dunder_fns = [
     torch._C._TensorBase.__ror__,
     torch._C._TensorBase.__rxor__,
     torch._C._TensorBase.__rand__,
+    torch.testing._internal.common_utils.disable_functorch,
 ]
 
+torch_special_class_types = (
+    torch._C.Generator,
+)
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -119,6 +123,8 @@ class TorchVariable(VariableTracker):
             self_should_be_none, type(torch._C._get_tracing_state.__self__)
         ):
             # some _C functions have __self__ as a null capsule
+            pass
+        elif isinstance(self_should_be_none, torch_special_class_types):
             pass
         else:
             assert False, f"{value} found with __self__ set"

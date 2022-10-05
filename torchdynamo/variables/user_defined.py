@@ -250,6 +250,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 example_value
             )
 
+        import pdb
+        pdb.set_trace()
+
         return super().call_function(tx, args, kwargs)
 
     def _check_for_getattribute(self):

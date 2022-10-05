@@ -77,6 +77,7 @@ from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
 from .torch import tensor_dunder_fns
+from .torch import torch_special_class_types
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -176,6 +177,8 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        # import pdb
+        # pdb.set_trace()
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
@@ -208,6 +211,8 @@ class VariableBuilder:
                 )(tuple_iterator_getitem(value, i)).add_guards(guards)
                 for i in range(tuple_iterator_len(value))
             ]
+            import pdb
+            pdb.set_trace()
             return ListIteratorVariable(
                 output, mutable_local=MutableLocal(), guards=guards
             )
@@ -355,18 +360,23 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
+        elif value in tensor_dunder_fns:
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif (
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
-            import pdb
-            pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
             new_value_or_none = _extract_context_manager_fn(value)
             if new_value_or_none:
                 # re-enter the builder
-                import pdb
-                pdb.set_trace()
+                # import pdb
+                # pdb.set_trace()
                 return self._wrap(new_value_or_none)
 
             return SkipFilesVariable(
@@ -377,11 +387,6 @@ class VariableBuilder:
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
-            )
-        elif value in tensor_dunder_fns:
-            return TorchVariable(
-                value,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, types.FunctionType):
             return UserFunctionVariable(
@@ -434,6 +439,11 @@ class VariableBuilder:
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
+            )
+        elif type(value).__name__ == 'builtin_function_or_method' and isinstance(value.__self__, torch_special_class_types):
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

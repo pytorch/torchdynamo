@@ -190,8 +190,8 @@ def check_model(
     run = torchdynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
 
     torch.manual_seed(0)
-    import pdb
-    pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
     actual = run(*example_inputs, **kwargs)
     # if not called:
     #     exp = torchdynamo.explain(run, *example_inputs)

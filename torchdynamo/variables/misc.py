@@ -226,6 +226,8 @@ class ContextWrappingVariable(VariableTracker):
                 create_instruction("RERAISE"),
             ]
 
+        import pdb
+        pdb.set_trace()
         return (prologue, epilogue)
 
     def _call_func(self, tx, initial_values):
@@ -255,11 +257,19 @@ class SimpleEnterExitContextWrappingVariable(ContextWrappingVariable):
         self.cm = cm
 
     def enter(self, tx):
-        self.cm.__enter__()
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        def enter_functional():
+            return self.cm.__enter__()
+
+        self.mode = tx.output.graph.create_node(
+            "call_function", enter_functional, (), {}
+        )
+        # result = self.cm.__enter__()
+        # import pdb
+        # pdb.set_trace()
+        # return variables.ConstantVariable(result, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        self.cm.__exit__(None, None, None)
+        # self.cm.__exit__(None, None, None)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
 
