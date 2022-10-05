@@ -325,8 +325,6 @@ class SchedulerNode(BaseSchedulerNode):
             return super().allocate()
 
         if config.inplace_buffers:
-            assert False, "https://github.com/pytorch/torchdynamo/issues/823"
-            """
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
@@ -350,7 +348,17 @@ class SchedulerNode(BaseSchedulerNode):
                             input_node.get_name(), self.get_name()
                         )
                         return
-            """
+            buffer_names_for_reuse = self.scheduler.buffer_names_no_longer_needed - self.last_usage
+            for buffer_name in buffer_names_for_reuse:
+                node_for_reuse = self.scheduler.name_to_node.get(buffer_name)
+                if self._sizes == node_for_reuse._sizes:
+                    V.graph.wrapper_code.codegen_inplace_reuse(
+                        node_for_reuse.node, self.node
+                    )
+                    V.kernel.args.make_inplace(
+                        node_for_reuse.get_name(), self.get_name()
+                    )
+                    return
         super().allocate()
 
     def run(self, *index_vars):
@@ -436,6 +444,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
         } - self.read_writes.writes
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
+        self.last_usage = functools.reduce(
+            set.union, [x.last_usage for x in snodes]
+        )
 
     @cache_on_self
     def get_name(self) -> str:
@@ -597,8 +608,8 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
-        self.fuse_nodes()
         self.compute_last_usage()
+        self.fuse_nodes()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
@@ -1083,5 +1094,7 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            self.available_buffer_names.update(node.get_names())
 
         self.flush()
