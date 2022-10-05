@@ -11,10 +11,9 @@ from typing import Callable
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
-import torchdynamo.logging
-
 from . import config
 from . import exc
+from . import logging as torchdynamo_logging
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
@@ -399,7 +398,7 @@ def _compile(
         output_codes.add(out_code)
 
         log.log(
-            torchdynamo.logging.INFO_CODE,
+            torchdynamo_logging.INFO_CODE,
             format_bytecode(
                 "ORIGINAL BYTECODE",
                 code.co_name,
@@ -409,7 +408,7 @@ def _compile(
             ),
         )
         log.log(
-            torchdynamo.logging.INFO_CODE,
+            torchdynamo_logging.INFO_CODE,
             format_bytecode(
                 "MODIFIED BYTECODE",
                 code.co_name,
@@ -427,7 +426,7 @@ def _compile(
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.log(torchdynamo.logging.INFO_CODE, guard_str)
+        log.log(torchdynamo_logging.INFO_CODE, guard_str)
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)

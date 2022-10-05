@@ -15,6 +15,7 @@ import torch.nn
 from torch import fx
 
 from . import config
+from . import logging as torchdynamo_logging
 from . import variables
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
@@ -394,7 +395,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    torchdynamo.logging.INFO_CODE,
+                    torchdynamo_logging.INFO_CODE,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
