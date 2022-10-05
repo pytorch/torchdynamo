@@ -766,8 +766,10 @@ class TritonKernel(Kernel):
         else:
             ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
-        if "tmp" in mask:
-            other = ", other=0"
+        # for bool, even though it's likely subject to the same bug, setting `other` leads
+        # to LLVM errors so we are skipping it for now
+        if "tmp" in mask and V.graph.get_dtype(name) != torch.bool:
+            other = ", other=False"
         else:
             other = ""
         line = f"tl.load({var} + {index}, {mask}{ep}{other})"
