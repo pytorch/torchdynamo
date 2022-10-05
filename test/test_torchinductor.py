@@ -2918,6 +2918,15 @@ class CommonTemplate:
             rtol=1e-3,
         )
 
+    def test_scatter4(self):
+        def fn(x, ind, src):
+            return torch.scatter(x, 0, ind, src)
+
+        self.common(
+            fn,
+            (torch.randn(196, 992), torch.randint(196, (1, 992)), torch.randn(1, 992)),
+        )
+
     @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
