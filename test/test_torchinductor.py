@@ -267,7 +267,7 @@ def check_model_cuda(
         rtol=rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
-        reference_in_float=reference_in_float
+        reference_in_float=reference_in_float,
     )
 
     if check_lowp:
@@ -291,7 +291,7 @@ def check_model_cuda(
             rtol=rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
-            reference_in_float=reference_in_float
+            reference_in_float=reference_in_float,
         )
 
 
