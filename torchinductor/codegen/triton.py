@@ -766,7 +766,14 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         else:
             ep = ""
-        line = f"tl.load({var} + {index}, {mask}{ep})"
+        # "other" below is a workaround for https://github.com/openai/triton/issues/737
+        # for bool, even though it's likely subject to the same bug, setting `other` leads
+        # to LLVM errors so we are skipping it for now
+        if "tmp" in mask and V.graph.get_dtype(name) != torch.bool:
+            other = ", other=0"
+        else:
+            other = ""
+        line = f"tl.load({var} + {index}, {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
