@@ -7,7 +7,6 @@ import subprocess
 import sys
 import time
 import warnings
-from urllib.error import HTTPError
 
 import torch
 from common import BenchmarkRunner
@@ -216,7 +215,7 @@ class TimmRunnner(BenchmarkRunner):
                     # drop_block_rate=kwargs.pop('drop_block', None),
                 )
                 success = True
-            except HTTPError:
+            except Exception:
                 wait = retries * 30
                 time.sleep(wait)
                 retries += 1
