@@ -56,7 +56,15 @@ compile_threads = 1
 
 # config specific to codegen/cpp.pp
 class cpp:
-    threads = -1  # set to cpu_count()
+    # set to torch.get_num_threads()
+    threads = -1
+
+    # Assume number of threads is dynamic, don't specialize thread number.
+    # Kernels don't recompile on thread number changes with this flag on.
+    # For single-threaded workload, turning it on would incur a slight
+    # performance degradation.
+    dynamic_threads = False
+
     simdlen = None
     min_chunk_size = 4096
     cxx = (
