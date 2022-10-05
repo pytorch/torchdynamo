@@ -143,10 +143,7 @@ def check_inductor_cpu():
     check_dynamo(
         "inductor",
         "cpu",
-        "CPU inductor sanity check failed"
-        # TODO currently, if any version of triton is installed, cpu versions
-        # require the correct version of triton.
-        + "NOTE: Please check that you installed the correct hash/version of `triton`",
+        "CPU inductor sanity check failed",
     )
 
 
@@ -164,12 +161,12 @@ def main():
     check_pip_deps()
     check_torch()
     check_cuda()
-    check_eager_cuda()
     check_eager_cpu()
-    check_aot_eager_cuda()
+    check_eager_cuda()
     check_aot_eager_cpu()
-    check_inductor_cuda()
+    check_aot_eager_cuda()
     check_inductor_cpu()
+    check_inductor_cuda()
     print("All required checks passed")
 
 

@@ -17,6 +17,8 @@ VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 @functools.lru_cache(None)
 def has_triton():
+    if not torch.cuda.is_available():
+        return False
     try:
         import triton
 
