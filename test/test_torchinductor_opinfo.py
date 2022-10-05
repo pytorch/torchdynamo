@@ -174,6 +174,8 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # failed since moving PyTorch pin https://github.com/pytorch/torchdynamo/pull/1453
+    "dspli": {f32},
 }
 
 
