@@ -1,3 +1,4 @@
+import enum
 import functools
 import inspect
 import itertools
@@ -27,6 +28,8 @@ def wrap_bound_arg(val, options):
         return cls([wrap_bound_arg(x, options) for x in val], **options)
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
+    elif isinstance(val, enum.Enum):
+        return variables.EnumVariable(val, **options)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
