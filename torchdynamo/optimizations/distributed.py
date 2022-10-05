@@ -163,8 +163,8 @@ class DDPOptimizer:
                                 dump_file.write(f"\n---{n.target} graph---")
                                 dump_file.write(str(submod.graph))
                         compiled_submod = self.compile_submod(submod, args, kwargs)
-                        n.target = "compiled_" + n.target
                         self.module.delete_submodule(n.target)
+                        n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod)
 
                     # then we execute the modified node using the usual logic
@@ -172,6 +172,7 @@ class DDPOptimizer:
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, self.debug)
         submod_compiler.run(*example_inputs)
+        split_gm.recompile()
 
         if self.debug:
             with open("debug_ddp_optimizer.log", "a") as dump_file:
