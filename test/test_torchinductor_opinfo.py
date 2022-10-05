@@ -388,8 +388,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "max.reduction_with_dim": {b8, i32, i64},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "new_empty": {f16, f32, f64, i32, i64},
-    "new_empty_strided": {f16, f32, f64, i32, i64},
+    "new_empty": {b8, f16, f32, f64, i32, i64},
+    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
     "nn.functional.conv_transpose3d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
@@ -521,8 +521,15 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
+                    # opinfo test case have already place the input on the correct device
+                    # so we don't need do additional copy by setting copy_to_cuda=False
                     self.check_model_cuda(
-                        fn, args, kwargs, check_lowp=False, nopython=True
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        copy_to_cuda=False,
                     )
                 elif device_type == "cpu":
                     self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
