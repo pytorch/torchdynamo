@@ -99,6 +99,8 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
+        # Node => computed real value (see TensorVariable.get_real_value)
+        self.real_value_cache = {}
 
         # Not checkpointed
         self.compiler_fn = compiler_fn
@@ -146,6 +148,7 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
+                self.real_value_cache.pop(node, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -387,6 +390,7 @@ class OutputGraph(fx.Tracer):
             for node in self.graph.nodes:
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
+            self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
@@ -459,6 +463,7 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
+                self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -493,6 +498,7 @@ class OutputGraph(fx.Tracer):
         for node in self.graph.nodes:
             if "example_value" in node.meta:
                 del node.meta["example_value"]
+        self.real_value_cache.clear()
 
     def create_proxy(
         self,
