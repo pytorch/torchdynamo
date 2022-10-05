@@ -2337,7 +2337,9 @@ class ExternKernel(InputsKernel):
         return args
 
     def codegen_kwargs(self):
-        kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
+        kwargs = []
+        if self.kwargs:
+            kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
