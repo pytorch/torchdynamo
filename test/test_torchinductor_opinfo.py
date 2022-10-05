@@ -388,7 +388,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "max.reduction_with_dim": {b8, i32, i64},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "nan_to_num": {b8, i32, i64},
     "new_empty": {b8, f16, f32, f64, i32, i64},
     "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
