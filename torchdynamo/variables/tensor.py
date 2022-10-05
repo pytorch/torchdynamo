@@ -20,9 +20,8 @@ if fake_tensors_available:
     from torch._subclasses.fake_tensor import DataDependentOutputException
     from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
-
+import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map
 
 from torchdynamo.guards import GuardBuilder
@@ -38,6 +37,7 @@ from ..utils import istype
 from ..utils import preserve_rng_state
 from ..utils import product
 from ..utils import proxy_args_kwargs
+from ..utils import tensortype_to_dtype
 from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
@@ -82,7 +82,7 @@ class TensorVariable(VariableTracker):
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
-        if "guards" in options:
+        if "guards" in options and options["guards"] is not None:
             tx.output.guards.update(options["guards"])
 
         assert "example_value" not in proxy.node.meta
@@ -117,7 +117,10 @@ class TensorVariable(VariableTracker):
                         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
                     def context():
-                        return enable_torch_dispatch_mode(tx.fake_mode)
+                        if hasattr(py_dispatch, "enable_torch_dispatch_mode"):
+                            return py_dispatch.enable_torch_dispatch_mode(tx.fake_mode)
+                        else:
+                            return tx.fake_mode
 
                 else:
                     context = contextlib.nullcontext
@@ -174,14 +177,17 @@ class TensorVariable(VariableTracker):
 
             options.update(specialized_props)
             return cls(proxy, **options)
-        elif (
-            istype(example_value, (torch.Size, int, bool, float))
-            and config.dynamic_shapes
-        ):
+        elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            if isinstance(example_value, torch.Size):
-                options["dyn_shape_len"] = len(example_value)
             return DynamicShapeVariable(proxy, type(example_value), **options)
+        elif istype(example_value, torch.Size) and config.dynamic_shapes:
+            proxy.node.meta["example_value"] = example_value
+            sizes = []
+            for i, v in enumerate(example_value):
+                proxy_i = proxy[i]
+                proxy_i.node.meta["example_value"] = v
+                sizes.append(DynamicShapeVariable(proxy_i, int))
+            return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
@@ -303,19 +309,6 @@ class TensorVariable(VariableTracker):
         return self.class_type
 
     def call_isinstance(self, tensor_type):
-        tensortype_to_dtype = {
-            torch.FloatTensor: (torch.float32, torch.float),
-            torch.DoubleTensor: (torch.float64, torch.double),
-            torch.HalfTensor: (torch.float16, torch.half),
-            torch.BFloat16Tensor: (torch.bfloat16,),
-            torch.ByteTensor: (torch.uint8,),
-            torch.CharTensor: (torch.int8,),
-            torch.LongTensor: (torch.int64, torch.long),
-            torch.IntTensor: (torch.int32, torch.int),
-            torch.ShortTensor: (torch.int16, torch.short),
-            torch.BoolTensor: (torch.bool,),
-        }
-
         def check_type(ty):
             if ty not in tensortype_to_dtype:
                 return issubclass(self.python_type(), ty)
@@ -380,7 +373,7 @@ class TensorVariable(VariableTracker):
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
-            result = result.add_guard(self.create_guard(GuardBuilder.TYPE_MATCH))
+            result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
         if result is None:
             raise NotImplementedError()
@@ -512,22 +505,18 @@ class TensorVariable(VariableTracker):
 
 
 class DynamicShapeVariable(TensorVariable):
-    def __init__(self, proxy, dyn_shape_cls, dyn_shape_len=None, **kwargs):
+    """
+    Represents a symbolic size, e.g., as returned by tensor.size(0)
+    """
+
+    def __init__(self, proxy, dyn_shape_cls, **kwargs):
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
         self.dyn_shape_cls = dyn_shape_cls
-        self.dyn_shape_len = dyn_shape_len
 
     def python_type(self):
         return self.dyn_shape_cls
 
     def unpack_var_sequence(self, tx):
-        if self.dyn_shape_len is not None:
-            return [
-                variables.BuiltinVariable(
-                    operator.getitem, **VariableTracker.propagate(self)
-                ).call_function(tx, [self, variables.ConstantVariable(i)], {})
-                for i in range(self.dyn_shape_len)
-            ]
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
 
 

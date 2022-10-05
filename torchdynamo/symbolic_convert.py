@@ -22,6 +22,7 @@ import torch
 
 import torchdynamo.side_effects
 import torchdynamo.variables.base
+from torchdynamo import config
 from torchdynamo.source import AttrSource
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import GlobalSource
@@ -46,6 +47,8 @@ from .exc import unimplemented
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason
 from .output_graph import OutputGraph
+from .replay_record import DummyModule
+from .replay_record import ExecutionRecorder
 from .resume_execution import ContinueExecutionCache
 from .resume_execution import ReenterWith
 from .utils import counters
@@ -67,7 +70,7 @@ from .variables.lists import ListVariable
 from .variables.lists import SliceVariable
 from .variables.lists import TupleVariable
 from .variables.misc import ClosureVariable
-from .variables.misc import ContextManagerVariable
+from .variables.misc import ContextWrappingVariable
 from .variables.misc import GetAttrVariable
 from .variables.misc import GradModeVariable
 from .variables.misc import PythonModuleVariable
@@ -85,7 +88,7 @@ log = logging.getLogger(__name__)
 class BlockStackEntry:
     target: Instruction
     stack_index: int = None
-    with_context: ContextManagerVariable = None
+    with_context: ContextWrappingVariable = None
 
     def can_restore(self):
         return self.with_context is not None
@@ -299,6 +302,7 @@ class InstructionTranslatorBase(object):
             self.next_instruction = None
         if inst.starts_line:
             self.lineno = inst.starts_line
+            log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
@@ -338,7 +342,10 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
-        except Exception:
+        except Exception as e:
+            if config.replay_record_enabled:
+                e.exec_record = self.exec_recorder.get_record()
+
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -368,6 +375,10 @@ class InstructionTranslatorBase(object):
 
     def LOAD_FAST(self, inst):
         name = inst.argval
+
+        if name in self.f_locals and config.replay_record_enabled:
+            self.exec_recorder.add_local_var(name, self.f_locals[name])
+
         if name.startswith(".") and name not in self.symbolic_locals:
             # This happens in dict/list comprehensions
             name = name.replace(".", "implicit")
@@ -380,6 +391,10 @@ class InstructionTranslatorBase(object):
 
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
+
+        if inst.argval in self.f_locals and config.replay_record_enabled:
+            self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
+
         if inst.argval not in self.symbolic_locals:
             unimplemented(f"undefined LOAD_DEREF {inst.argval}")
         self.push(self.symbolic_locals[inst.argval])
@@ -415,6 +430,14 @@ class InstructionTranslatorBase(object):
 
     def LOAD_GLOBAL(self, inst):
         name = inst.argval
+
+        if config.replay_record_enabled:
+            if name in self.f_globals:
+                self.exec_recorder.add_global_var(name, self.f_globals[name])
+            else:
+                assert name in self.f_builtins
+                self.exec_recorder.builtins[name] = self.f_builtins[name]
+
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
@@ -497,31 +520,42 @@ class InstructionTranslatorBase(object):
         fromlist = fromlist.as_python_constant()
         module_name = inst.argval
 
-        value = __import__(
-            module_name,
-            fromlist=fromlist,
-            level=level,
-            globals=self.f_globals,
+        # Are we replaying? if so, load recorded module
+        recorded_name = (
+            f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_{level}_{fromlist}_{module_name}"
         )
-
-        if level != 0:
-            pkg = self.calc_package()
-            module_name = self.resolve_name(module_name, pkg, level)
-
-        # For __import__, when the name variable is of the form package.module,
-        # normally, the top-level package (the name up till the first dot) is
-        # returned, not the module named by module_name. However, when a
-        # non-empty fromlist argument is given, the module named by name is
-        # returned. Therefore, we set the source correctly here.
-        if not fromlist:
-            top_level_module_name = module_name.partition(".")[0]
-            source = self.import_source(top_level_module_name)
+        if recorded_name in self.f_globals:
+            value = self.f_globals[recorded_name]
+            source = GlobalSource(recorded_name)
         else:
-            source = self.import_source(module_name)
+            value = __import__(
+                module_name,
+                fromlist=fromlist,
+                level=level,
+                globals=self.f_globals,
+            )
+
+            if level != 0:
+                pkg = self.calc_package()
+                module_name = self.resolve_name(module_name, pkg, level)
+
+            # For __import__, when the name variable is of the form package.module,
+            # normally, the top-level package (the name up till the first dot) is
+            # returned, not the module named by module_name. However, when a
+            # non-empty fromlist argument is given, the module named by name is
+            # returned. Therefore, we set the source correctly here.
+            if not fromlist:
+                top_level_module_name = module_name.partition(".")[0]
+                source = self.import_source(top_level_module_name)
+            else:
+                source = self.import_source(module_name)
+
+        if config.replay_record_enabled:
+            self.exec_recorder.add_local_mod(recorded_name, value)
 
         if is_allowed(value):
             self.push(TorchVariable(value, source=source))
-        elif istype(value, types.ModuleType):
+        elif istype(value, (types.ModuleType, DummyModule)):
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")
@@ -565,7 +599,7 @@ class InstructionTranslatorBase(object):
 
     def SETUP_WITH(self, inst):
         ctx = self.pop()
-        if not isinstance(ctx, ContextManagerVariable):
+        if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"SETUP_WITH {ctx}")
         self.output.guards.update(ctx.guards)
 
@@ -1241,7 +1275,7 @@ class InstructionTranslatorBase(object):
 
     def store_dict_key(self, name, value):
         self.output.guards.add(
-            GlobalWeakRefSource(name).create_guard(GuardBuilder.WEAKREF_ALIVE)
+            GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
         if name not in self.output.root_globals:
             self.output.install_global(name, weakref.ref(value))
@@ -1260,6 +1294,7 @@ class InstructionTranslatorBase(object):
         self,
         output: OutputGraph,
         instructions: List[Instruction],
+        f_locals: Dict[str, Any],
         f_globals: Dict[str, Any],
         f_builtins: Dict[str, Any],
         code_options: Dict[str, Any],
@@ -1283,11 +1318,16 @@ class InstructionTranslatorBase(object):
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[int, int] = {id(i): n for n, i in enumerate(instructions)}
+        self.f_locals: Dict[
+            str, Any
+        ] = f_locals  # needed for recording accessed locals for replay
         self.f_globals: Dict[str, Any] = f_globals
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
 
+        # Execution record for replaying errors
+        self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
         # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
 
@@ -1329,6 +1369,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         super(InstructionTranslator, self).__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
+            f_locals=f_locals,
             f_globals=f_globals,
             f_builtins=f_builtins,
             code_options=code_options,
@@ -1465,7 +1506,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call_(parent, func, args, kwargs):
-        assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -1541,6 +1585,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins = f_builtins.__dict__
         super(InliningInstructionTranslator, self).__init__(
             output=parent.output,
+            f_locals={},
             f_globals=f_globals,
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,

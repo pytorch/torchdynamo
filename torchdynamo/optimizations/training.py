@@ -1,6 +1,8 @@
+import functools
 import logging
 import operator
 from collections import defaultdict
+from functools import partial
 from typing import Set
 
 import torch
@@ -22,6 +24,69 @@ from .backends import BACKENDS
 from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
+
+
+def is_aot_autograd_safe_to_run(gm, example_inputs):
+    """
+    There are some known issues with Aot Autograd. This is a workaround to catch
+    such cases, and fallback to eager. We should fix these quickly.
+
+    Issues
+    1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
+    2) LSTM - https://github.com/pytorch/functorch/issues/586
+    3) New op - https://github.com/pytorch/torchdynamo/issues/1448
+    4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
+    """
+
+    def raise_or_warn(reason):
+        msg = f"Unable to use Aot Autograd because of presence of {reason}"
+        if config.raise_on_unsafe_aot_autograd:
+            raise NotImplementedError(msg)
+        else:
+            log.warning(msg)
+        return False
+
+    import functorch.compile
+
+    # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+    for submod in gm.modules():
+        if submod.__class__.__name__ == "LSTM":
+            return raise_or_warn("LSTM")
+
+    # 2) new does not work with fake tensor and aot autograd
+    for node in gm.graph.nodes:
+        if node.op == "call_method" and node.target == "new":
+            return raise_or_warn("new operator")
+
+    # 2) Mutation in the graph
+    mutated = False
+    try:
+        if functorch.compile.config.use_functionalize:
+            # There are two problematic classes we still exclude for now with
+            # functionalization:
+            #   - data mutation of inputs (fixed when we stop recording the
+            #   copy_ directly into the graph)
+            #   - metadata mutation of inputs (fixed if we do an extra partition
+            #   to avoid AotAutograd on the mutated inputs, or if we some how
+            #   get custom autograd function to reflect metadata changes to the
+            #   original tensor)
+            mutated = has_mutation(gm, example_inputs, inputs_only=True)
+        else:
+            mutated = has_mutation(gm, example_inputs)
+    except NotImplementedError as e:
+        if "SparseTensorImpl" not in str(e):
+            # TODO - TorchDynamo mutation analysis cannot handle sparse tensors.
+            # So, there is a chance that we could call Aot Autograd when it is
+            # unsafe.
+            # The exception is fairly guarded with string check, so any other
+            # mutation analysis bugs will raise exceptions and will be caught.
+            raise e
+        pass
+
+    if mutated:
+        return raise_or_warn("mutation")
+
+    return True
 
 
 class AotAutogradStrategy(object):
@@ -53,33 +118,7 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
-
-        # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
-        for submod in self.gm.modules():
-            if submod.__class__.__name__ == "LSTM":
-                self.use_fallback = True
-
-        # 2) set_grad_enabled
-        has_set_grad_enabled = False
-        for node in self.gm.graph.nodes:
-            if node.target == torch._C._set_grad_enabled:
-                has_set_grad_enabled = True
-
-        if functorch.compile.config.use_functionalize:
-            # There are two problematic classes we still exclude for now with
-            # functionalization:
-            #   - data mutation of inputs (fixed when we stop recording the
-            #   copy_ directly into the graph)
-            #   - metadata mutation of inputs (fixed if we do an extra partition
-            #   to avoid AotAutograd on the mutated inputs, or if we some how
-            #   get custom autograd function to reflect metadata changes to the
-            #   original tensor)
-            mutated = has_mutation(self.gm, self.example_inputs, inputs_only=True)
-        else:
-            mutated = has_mutation(self.gm, self.example_inputs)
-
-        if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
+        if not is_aot_autograd_safe_to_run(gm, example_inputs):
             self.use_fallback = True
 
     @property
@@ -159,7 +198,6 @@ def mem_efficient_fusion_kwargs(use_decomps):
         "fw_compiler": ts_compile,
         "bw_compiler": ts_compile,
         "partition_fn": min_cut_rematerialization_partition,
-        "hasher_type": "StaticShapeHasher",
     }
 
     if use_decomps:
@@ -182,6 +220,33 @@ class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+class AotInductorDebug(AotAutogradStrategy):
+    """
+    Uses TorchInductor Aot Autograd decopms and partitioner to isolate aot vs
+    inductor problems.
+    """
+
+    def candidate(self):
+        from functorch.compile import min_cut_rematerialization_partition
+        from functorch.compile import nop
+
+        from torchinductor.compile_fx import select_decomp_table
+
+        kwargs = {
+            # these are taken from memory_efficient_fusion()
+            "fw_compiler": nop,
+            "bw_compiler": nop,
+            "decompositions": select_decomp_table(),
+            "partition_fn": functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
+        }
+        return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
+
+
+aot_inductor_debug = AotInductorDebug.compile_fn
 
 
 class AOTMemEfficientFusionWithContext:
@@ -254,12 +319,49 @@ class AotPrimsNvfuser(AotAutogradStrategy):
             self.example_inputs,
             fw_compiler=wrap_compiler_debug(self.nvfuser, "nvfuser"),
             partition_fn=self.min_cut_rematerialization_partition,
-            hasher_type="StaticShapeHasher",
             decompositions=self.aten2aten_decompositions,
         )
 
 
 aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
+
+
+def prims_executor(gm, inputs, *, executor):
+    # This function is called once per forward/backward pass of a graph in AOT
+    # Autograd. We use it to set up the nvFuser-specific FX graph and return
+    # execute function.
+    from torch._prims.context import TorchRefsNvfuserCapabilityMode
+    from torch._prims.executor import execute
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    # First we trace the graph conditionally decomposing nodes
+    # that can be sent to the nvfuser executor
+    with TorchRefsNvfuserCapabilityMode():
+        prim_gm = make_fx(gm)(*inputs)
+
+    # Then we return a callable that executes the "prim_gm" graph
+    return partial(execute, prim_gm, executor=executor)
+
+
+def create_nvprims_backend(*, executor):
+    class NvPrims(AotAutogradStrategy):
+        def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+            super(NvPrims, self).__init__(gm, example_inputs)
+            self.executor = executor
+
+        def candidate(self):
+            return BACKENDS["aot_autograd"](
+                self.gm,
+                self.example_inputs,
+                fw_compiler=partial(prims_executor, executor=self.executor),
+                bw_compiler=partial(prims_executor, executor=self.executor),
+            )
+
+    return NvPrims
+
+
+aot_nvprims_nvfuser = create_nvprims_backend(executor="nvfuser").compile_fn
+aot_nvprims_aten = create_nvprims_backend(executor="aten").compile_fn
 
 
 def cloner(t):
@@ -373,7 +475,9 @@ def apply_cuda_graphs(gm):
             submod = gm.get_submodule(n.target)
             gm.delete_submodule(n.target)
             mutated_inputs = find_input_mutations(submod.graph)
-            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
+            gm.register_attr_or_module(
+                n.target, CudaGraphModule(submod, mutated_inputs)
+            )
     # NB: we didn't actually change the graph, no need for recompile
 
 
@@ -388,7 +492,6 @@ def raw_aot_autograd_cudagraphs(model, inputs):
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
-        "hasher_type": "StaticShapeHasher",
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
@@ -431,6 +534,12 @@ def create_aot_backends():
     # directly lowers to NVFuser without relying no Torchscript.
     BACKENDS["prims_nvfuser"] = aot_prims_nvfuser
 
+    # "nvprims" is a subset of PrimTorch primitives that are guaranteed to be
+    # supported by nvFuser. This is the preferred backend for nvFuser+PrimTorch.
+    BACKENDS["nvprims_nvfuser"] = aot_nvprims_nvfuser
+    # This is useful for debugging. Can be removed later.
+    BACKENDS["nvprims_aten"] = aot_nvprims_aten
+
     # aot_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
     # It uses min cut rematerialization algorithm, and uses nvfuser as the
     # compiler backend. This is the most optimized setting with nvfuser for
@@ -446,3 +555,7 @@ def create_aot_backends():
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
     BACKENDS["aot_cudagraphs"] = aot_cudagraphs
+
+    # aot_inductor_debug just replaces the inductor compiler with nop to help
+    # isolate inductor vs aot_eager errors
+    BACKENDS["aot_inductor_debug"] = aot_inductor_debug

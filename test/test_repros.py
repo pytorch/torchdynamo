@@ -18,6 +18,8 @@ from torch.nn import functional as F
 
 import torchdynamo.testing
 import torchdynamo.utils
+from torchdynamo.debug_utils import same_two_models
+from torchdynamo.testing import rand_strided
 from torchdynamo.testing import requires_static_shapes
 from torchdynamo.testing import same
 
@@ -883,7 +885,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(14, 11))
+        self.assertEqual(cnt.op_count, ifdyn(13, 11))
 
     def test_slicing_dynamic_shape(self):
         def fn(y):
@@ -1606,6 +1608,25 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
+    # This doesn't work without fake tensors but I don't care
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
+    def test_issue1466_size_aot_autograd(self):
+        def fn(x):
+            # do a tensor op and a size compute
+            y = x * 2
+            x_size = x.size()
+            # trigger a graph break
+            print("arf")
+            # use the tensor op and size compute
+            z = y.view(x_size) + 1
+            return z
+
+        x = torch.randn(2, 3, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("aot_eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_ellipsis(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -1631,6 +1652,42 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_mod = torchdynamo.optimize("eager", nopython=True)(mod)
 
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_reinplacing(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_layoutlm_embeddings_x_position_embeddings = (
+                    torch.nn.Embedding(1024, 768)
+                )
+                self.self_layoutlm_embeddings_y_position_embeddings = (
+                    torch.nn.Embedding(1024, 768)
+                )
+
+            def forward(self, getitem_1, getitem_2, add):
+                self_layoutlm_embeddings_x_position_embeddings = (
+                    self.self_layoutlm_embeddings_x_position_embeddings(getitem_1)
+                )
+                self_layoutlm_embeddings_y_position_embeddings = (
+                    self.self_layoutlm_embeddings_y_position_embeddings(getitem_2)
+                )
+                add_1 = add + self_layoutlm_embeddings_x_position_embeddings
+                add_2 = add_1 + self_layoutlm_embeddings_y_position_embeddings
+                return (add_2,)
+
+        mod = MockModule()
+        opt_mod = torchdynamo.optimize("aot_inductor_debug")(mod)
+
+        args = [
+            ((2, 512), (2048, 4), torch.int64, "cpu", False),
+            ((2, 512), (2048, 4), torch.int64, "cpu", False),
+            ((2, 512, 768), (393216, 768, 1), torch.float32, "cpu", True),
+        ]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+        self.assertTrue(same_two_models(mod, opt_mod, args))
 
 
 if __name__ == "__main__":

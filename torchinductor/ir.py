@@ -15,6 +15,7 @@ from typing import List
 from typing import Optional
 from typing import Set
 from typing import Tuple
+from typing import Union
 from unittest.mock import patch
 
 import numpy
@@ -217,13 +218,20 @@ class CeilDiv(sympy.Function):
             return IndexingDiv(base + (divisor - 1), divisor)
 
 
-def is_triton(x):
-    # TODO(jansel): a config check once we have multi-backend
+def get_device_type(x):
     if getattr(x, "get_device", None):
-        return is_triton(x.get_device())
+        return get_device_type(x.get_device())
     if isinstance(x, torch.device):
-        return x.type == "cuda"
-    return False
+        return x.type
+    return None
+
+
+def is_triton(x):
+    return get_device_type(x) == "cuda"
+
+
+def is_cpu(x):
+    return get_device_type(x) == "cpu"
 
 
 @dataclasses.dataclass
@@ -686,9 +694,17 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            def fn(index):
-                reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
-                return inner_fn(index, reduction_index)
+            if reduction_type in ("argmin", "argmax"):
+
+                def fn(index):
+                    assert len(index) <= 1
+                    return 0
+
+            else:
+
+                def fn(index):
+                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dst_dtype, fn, ranges)
 
@@ -717,7 +733,11 @@ class Reduction(Loops):
                 reduction_type,
                 reduction_numel,
             )
-            reduction_hint = hint if hint != ReductionHint.DEFAULT else reduction_hint
+            # intermediate reduction in split can contain complex indexing,
+            # and num_splits will fail to correctly set the hint
+            # reuse the passed hint if available
+            if reduction_hint == ReductionHint.DEFAULT:
+                reduction_hint = hint
             if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
@@ -1629,6 +1649,14 @@ class AliasedLayout(Layout):
     def make_indexer(self):
         return self.as_fixed().make_indexer()
 
+    def maybe_guard_aligned(self):
+        offset = self.view.get_layout().offset
+        if offset == 0:
+            return True
+        from .compile_fx import ALIGNMENT
+
+        return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
+
 
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
@@ -2418,6 +2446,42 @@ class InplaceBernoulliFallback(ExternKernel):
         self.name = V.graph.register_buffer(self)
 
 
+class IndexPutFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation and indices properly
+    """
+
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
+        indices = []
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(self.indices):
+            if self.indices[i] is not None:
+                indices.append(next(iter_valid_indices))
+            else:
+                indices.append("None")
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{','.join(indices)}], {values}, {repr(self.constant_args[0])})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, x, indices, values, accumulate):
+        self.indices = indices
+        valid_indices = [i for i in indices if i is not None]
+        tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            [accumulate],
+        )
+        self.name = V.graph.register_buffer(self)
+
+
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
 
@@ -3188,6 +3252,11 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    def is_input_buffer(self):
+        if isinstance(self.data, (InputBuffer, ReinterpretView)):
+            return self.data.get_name() in V.graph.graph_inputs
+        return False
+
     def realize(self):
         if isinstance(
             self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
@@ -3218,12 +3287,22 @@ class StorageBox(MutableBox):
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
         """
+
+        def should_realize_on_cpu(loops: Union[Pointwise, Reduction]):
+            """
+            The heuristic for realizing reused result of heavy ops on cpu
+            """
+            heavy_ops = ["exp"]  # a list of heavy ops
+            fn_str = loops.inner_fn_str()
+            return any([fn_str.startswith(op + "(") for op in heavy_ops])
+
         if (
             users > 1
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
+                or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
             self.realize()

@@ -1,3 +1,4 @@
+import collections
 import functools
 import operator
 import time
@@ -8,7 +9,6 @@ from typing import List
 import numpy as np
 import sympy
 import torch
-from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
 
@@ -66,7 +66,7 @@ def unique(it):
 
 def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
-    return (numer + (denom - 1)) // denom
+    return -(numer // -denom)
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -90,6 +90,11 @@ def gen_gm_and_inputs(target, args, kwargs):
 
     gm = torch.fx.GraphModule({}, g)
     return gm, a_args
+
+
+def synchronize():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 
 def timed(model, example_inputs, times=1):
@@ -221,3 +226,8 @@ def has_incompatible_cudagraph_ops(gm):
         if str(node.target) in forbidden_list:
             return True
     return False
+
+
+instance_descriptor = collections.namedtuple(
+    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+)

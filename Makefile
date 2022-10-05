@@ -9,8 +9,9 @@ CLANG_FORMAT ?= clang-format-10
 PIP ?= python -m pip
 
 # versions used in CI
-PYTORCH_VERSION ?= dev20220916
-TRITON_VERSION ?= 889d9e34a114b1fe2e8871d21e713794344d12d3
+# Also update the "Install nightly binaries" section of the README when updating these
+PYTORCH_VERSION ?= dev20221004
+TRITON_VERSION ?= d3c925db8a81ca74f14680876b9311e7d079c5a1
 
 
 default: develop
@@ -57,8 +58,7 @@ setup_nightly:
 setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
 	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
-                      torchvision==0.14.0.$(PYTORCH_VERSION) \
-                      torchaudio==0.13.0.$(PYTORCH_VERSION) \
+                      torchvision==0.15.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja

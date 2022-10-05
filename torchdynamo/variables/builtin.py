@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from torchdynamo.guards import GuardBuilder
+from torchdynamo.replay_record import DummyModule
 from torchdynamo.variables.dicts import ConstDictVariable
 from torchdynamo.variables.tensor import DynamicShapeVariable
 from torchdynamo.variables.tensor import FakeItemVariable
@@ -23,6 +24,7 @@ from ..exc import Unsupported
 from ..exc import unimplemented
 from ..source import AttrSource
 from ..source import TypeSource
+from ..source import is_constant_source
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
@@ -455,8 +457,8 @@ class BuiltinVariable(VariableTracker):
             )
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
-            if obj.source:
-                guards.add(obj.source.create_guard(GuardBuilder.LIST_LENGTH))
+            if obj.source and not is_constant_source(obj.source):
+                guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
@@ -689,8 +691,12 @@ class BuiltinVariable(VariableTracker):
                 return ConstantVariable(member, **options)
             else:
                 return VariableBuilder(tx, source)(member).add_guards(guards)
-        elif isinstance(obj, PythonModuleVariable):
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)
+
             return VariableBuilder(tx, source)(member).add_guards(guards)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable(

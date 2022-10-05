@@ -4,13 +4,16 @@ import types
 from typing import Dict
 from typing import List
 
+import numpy
 import torch._C
 import torch.nn
 
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import NNModuleSource
+from torchdynamo.variables.lists import ListVariable
 from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import FakeContextWrappingVariable
+from torchdynamo.variables.misc import AutocastModeVariable
+from torchdynamo.variables.misc import AutogradProfilerContextWrapperVariable
 
 from .. import config
 from .. import variables
@@ -22,10 +25,69 @@ from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
+from ..utils import tensortype_to_dtype
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
+
+tensor_dunder_fns = [
+    torch.Tensor.__rmatmul__,
+    torch.Tensor.__rmod__,
+    torch.Tensor.__rpow__,
+    torch.Tensor.__rsub__,
+    torch._C._TensorBase.__radd__,
+    torch._C._TensorBase.__rmul__,
+    torch._C._TensorBase.__ror__,
+    torch._C._TensorBase.__rxor__,
+    torch._C._TensorBase.__rand__,
+]
+
+
+# TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
+def remap_as_fn___radd__(*args):
+    return torch._C._TensorBase.__radd__(*args)
+
+
+def remap_as_fn___rmul__(*args):
+    return torch._C._TensorBase.__rmul__(*args)
+
+
+def remap_as_fn___ror__(*args):
+    return torch._C._TensorBase.__ror__(*args)
+
+
+def remap_as_fn___rxor__(*args):
+    return torch._C._TensorBase.__rxor__(*args)
+
+
+def remap_as_fn___rand__(*args):
+    return torch._C._TensorBase.__rand__(*args)
+
+
+tensor_dunder_fns_remap = {
+    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+}
+
+try:
+    # Wed need to monkeypatch transformers here, sadly.
+    # TODO(voz): Upstream to transformers lib
+    import transformers
+
+    def _dynamo_overriden_transformers_eq(self, other):
+        if not hasattr(other, "__dict__"):
+            return False
+        return self.__dict__ == other.__dict__
+
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
+except ImportError:
+    pass
 
 
 class TorchVariable(VariableTracker):
@@ -34,6 +96,8 @@ class TorchVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(TorchVariable, self).__init__(**kwargs)
 
+        if value in tensor_dunder_fns_remap:
+            value = tensor_dunder_fns_remap[value]
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -202,18 +266,32 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
+        elif self.value is torch.amp.autocast_mode.autocast:
+            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
         elif self.value is torch.autograd.profiler.profile:
             if len(args) == 0 or len(args) > 0 and args[0]:
                 log.warning("Profiler will be ignored")
-            return FakeContextWrappingVariable(**options)
+            return AutogradProfilerContextWrapperVariable(**options)
         elif self.value is torch.autograd.profiler.record_function:
             assert len(args) == 1
             log.warning("Profiler will be ignored")
-            return FakeContextWrappingVariable(**options)
+            return AutogradProfilerContextWrapperVariable(**options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
         else:
+            # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
+            # as FX symbolic trace doesn't support numpy int/float as base types.
+            if (
+                self.value in tensortype_to_dtype
+                and len(args) == 1
+                and isinstance(args[0], ListVariable)
+                and args[0].is_python_constant()
+            ):
+                for x in args[0].items:
+                    if isinstance(x.value, numpy.generic):
+                        x.value = x.value.item()
+
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -453,7 +531,7 @@ class TorchPyOperator(VariableTracker):
             gm.__name__ = next_name
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
-            tx.output.add_submodule(gm, next_name, source=src)
+            tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name, gm, guards
 
         # Get args as proxies

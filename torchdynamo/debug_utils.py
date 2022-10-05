@@ -14,13 +14,19 @@ import torch.fx as fx
 
 import torchdynamo
 from torchdynamo import config
+from torchdynamo.optimizations.backends import register_backend
 from torchdynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
 
 
 def minifier_dir():
-    return f"/tmp/minifier_{getpass.getuser()}"
+    path = config.repro_dir
+    if path is None:
+        path = f"/tmp/minifier_{getpass.getuser()}"
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+    return path
 
 
 class NNModuleToString:
@@ -48,10 +54,8 @@ class NNModuleToString:
                 cant_convert.add(module)
 
         if len(cant_convert) > 0:
-            log.warning(
-                f"Was not able to save the following children modules as reprs {cant_convert}"
-            )
-            return False
+            log.warning(f"We have not tested reprs of some modules - {cant_convert}")
+        # TODO - Assuming that all modules can be safely repr'd. Check if that assumption is correct.
         return True
 
     @staticmethod
@@ -101,12 +105,16 @@ def _cuda_system_info_comment():
         return "# torch.cuda.is_available()==False, no GPU info collected\n"
 
     model_str = "# CUDA Info: \n"
-    cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
-    cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
-    cuda_version_out = "".join(
-        [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
-    )
-    model_str += f"{cuda_version_out}\n"
+    try:
+        cuda_version_out = subprocess.run(["nvcc", "--version"], stdout=subprocess.PIPE)
+        cuda_version_lines = cuda_version_out.stdout.decode().split("\n")
+        cuda_version_out = "".join(
+            [f"# {s} \n" for s in cuda_version_lines if s not in [""]]
+        )
+        model_str += f"{cuda_version_out}\n"
+    except FileNotFoundError:
+        model_str += "nvcc not found\n"
+
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
         stdout=subprocess.PIPE,
@@ -135,8 +143,10 @@ def generate_compiler_repro_string(gm, args):
         """
     )
     model_str += f"# torch version: {torch.version.__version__}\n"
-    model_str += f"# torch cuda version: {torch.version.cuda}\n"
-    model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
+    if hasattr(torch.version, "cuda"):
+        model_str += f"# torch cuda version: {torch.version.cuda}\n"
+    if hasattr(torch.version, "git_version"):
+        model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
     model_str += _cuda_system_info_comment()
 
     model_str += NNModuleToString.convert(gm)
@@ -163,7 +173,7 @@ COMPILER_REPRO_OPTIONS = {
 
 
 def dump_compiler_graph_state(gm, args, compiler_name):
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
@@ -270,35 +280,51 @@ def nvfuser_fails(fx_g, args, check_str=None):
     return False
 
 
+def helper_for_dump_minify(contents):
+    minified_repro_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+    log.warning(f"Writing minified repro to {minified_repro_path}")
+    try:
+        with open(minified_repro_path, "w") as fd:
+            fd.write(contents)
+    except OSError as e:
+        log.exception(e)
+        raise NotImplementedError("Could not write to {minified_repro_path}")
+
+    local_path = os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py")
+    try:
+        shutil.copyfile(minified_repro_path, local_path)
+        log.warning(
+            f"Copying minified repro from {minified_repro_path} to {local_path} for convenience"
+        )
+    except OSError:
+        log.warning(f"Don't have write permissions for {local_path}")
+
+
 def dump_to_minify(gm, args, compiler_name: str):
     favored_device = 1 if torch.cuda.device_count() >= 2 else 0
-    with open(
-        os.path.join(torchdynamo.config.base_dir, "minifier_launcher.py"), "w"
-    ) as fd:
-        fd.write(generate_compiler_repro_string(gm, args))
-        fd.write("\n")
-        fd.write(
-            textwrap.dedent(
-                f"""
-                from functools import partial
-                from torchdynamo.debug_utils import (
-                    isolate_fails,
-                    dump_compiler_graph_state,
-                )
-                from functorch.compile import minifier
 
-                env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
+    contents = textwrap.dedent(
+        f"""
+{generate_compiler_repro_string(gm, args)}
 
-                minifier(
-                    mod,
-                    args,
-                    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}"),
-                    dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
-                )
-                """
-            )
-        )
-    print("wrote out to minifier_launcher.py")
+from functools import partial
+from torchdynamo.debug_utils import (
+    isolate_fails,
+    dump_compiler_graph_state,
+)
+from functorch.compile import minifier
+
+env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
+
+minifier(
+    mod,
+    args,
+    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}"),
+    dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
+)
+        """
+    )
+    return helper_for_dump_minify(contents)
 
 
 def wrap_compiler_debug(compiler, compiler_name: str):
@@ -314,20 +340,39 @@ def wrap_compiler_debug(compiler, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
-        if config.repro_after == "aot":
+
+        def deferred_for_real_inputs(*real_inputs):
+            """
+            Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
+            example_inputs can be fake tensors. We can call compiler (which is
+            inductor or nvfuser) with fake tensors but the actualy compiled_fn
+            should be called with real tensors. Therefore, the actual invocation
+            is deffered.
+            """
+            if config.repro_level == 3:
+                # Always dump the original module in case we have segfaults
+                dump_to_minify(
+                    fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                )
             try:
+                # Call the compiler - which is either aot_autograd or inductor
+                # with fake inputs
                 compiled_fn = compiler(gm, example_inputs, **kwargs)
-                compiled_fn(*example_inputs)
+                # Call the compiled function with real inputs
+                return compiled_fn(*real_inputs)
             except Exception as e:
                 if config.repro_level == 1:
                     dump_compiler_graph_state(
-                        fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                        fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
                     )
                 elif config.repro_level == 2:
                     dump_to_minify(
-                        fx.GraphModule(gm, orig_graph), example_inputs, compiler_name
+                        fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
                     )
                 raise e
+
+        if config.repro_after == "aot":
+            compiled_fn = deferred_for_real_inputs
         else:
             compiled_fn = compiler(gm, example_inputs, **kwargs)
 
@@ -346,7 +391,8 @@ def run_fwd_maybe_bwd(gm, args):
 
     gm = copy.deepcopy(gm)
     args = clone_inputs(args)
-    gm.zero_grad(True)
+    if hasattr(gm, "zero_grad"):
+        gm.zero_grad(True)
     out = gm(*args)
     if requires_bwd_pass(out):
         loss = reduce_to_scalar_loss(out)
@@ -399,114 +445,111 @@ def generate_dynamo_fx_repro_string(model_str, args, compiler_name):
     Generate a repro string for backend-agnostic minified version.
     """
 
-    imports = textwrap.dedent(
-        """
-        import torch
-        import torchdynamo
-        from torch import tensor, device
-        import torch.fx as fx
-        from torchdynamo.testing import rand_strided
-        from math import inf
-        from torchdynamo.debug_utils import run_fwd_maybe_bwd
-
-        """
-    )
-
-    prep_inputs = textwrap.dedent(
+    return textwrap.dedent(
         f"""
-        args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
-        args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
+import torch
+import torchdynamo
+from torch import tensor, device
+import torch.fx as fx
+from torchdynamo.testing import rand_strided
+from math import inf
+from torchdynamo.debug_utils import run_fwd_maybe_bwd
 
+args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
+args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
+
+{model_str}
+
+mod = Repro().cuda()
+opt_mod = torchdynamo.optimize("{compiler_name}")(mod)
+
+with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
+    ref = run_fwd_maybe_bwd(mod, args)
+    res = run_fwd_maybe_bwd(opt_mod, args)
         """
     )
-
-    setup_module = textwrap.dedent(
-        f"""
-        mod = Repro().cuda()
-        opt_mod = torchdynamo.optimize("{compiler_name}")(mod)
-
-        """
-    )
-
-    run_module = textwrap.dedent(
-        f"""
-        with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
-            ref = run_fwd_maybe_bwd(mod, args)
-            res = run_fwd_maybe_bwd(opt_mod, args)
-        """
-    )
-
-    return imports + model_str + setup_module + prep_inputs + run_module
 
 
 def dump_backend_repro_as_file(gm, args, compiler_name):
     """
     Saves the repro to a repro.py file
     """
-    subdir = f"{minifier_dir()}/checkpoints"
+    subdir = os.path.join(minifier_dir())
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
-    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+    log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
 
     model_str = NNModuleToString.convert(gm)
     with open(file_name, "w") as fd:
         fd.write(generate_dynamo_fx_repro_string(model_str, args, compiler_name))
-    print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to repro.py")
-    repro_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
-    shutil.copyfile(file_name, repro_path)
+    latest_repro = os.path.join(subdir, "repro.py")
+    log.warning(f"Copying {file_name} to {latest_repro} for convenience")
+    shutil.copyfile(file_name, latest_repro)
 
-
-def dump_backend_repro_as_tarfile(gm, args, compiler_name):
-    """
-    Saves the repro in repro.tar.gz, as opposed to a file. This is used for
-    cases, where we can't convert a Fx GraphModule to a string, and therefore
-    fallback to to_folder for serialization. We accompany this with a repro.py
-    script that imports the saved module, sets it up and runs the model to repro
-    the error.
-    """
-    import tarfile
-
-    subdir = f"{minifier_dir()}/checkpoints"
-    if not os.path.exists(subdir):
-        os.makedirs(subdir, exist_ok=True)
-
-    tmp_dir = os.path.join(subdir, f"{len(gm.graph.nodes)}")
-    if os.path.exists(tmp_dir):
-        shutil.rmtree(tmp_dir)
-    os.makedirs(tmp_dir, exist_ok=True)
-
-    file_name = os.path.join(tmp_dir, "repro.py")
-    gm_dir = os.path.join(tmp_dir, "module")
-    if not os.path.exists(gm_dir):
-        os.makedirs(gm_dir, exist_ok=True)
-    for node in gm.graph.nodes:
-        new_kwargs = {}
-        for k, v in node.kwargs.items():
-            if isinstance(v, torch.device):
-                v = v.type
-            new_kwargs[k] = v
-        node.kwargs = new_kwargs
-    gm.recompile()
-
-    print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
-    with open(file_name, "w") as fd:
-        # TODO - Add the readable version of to_folder when available
-        gm.to_folder(gm_dir, "Repro")
-        fd.write(
-            generate_dynamo_fx_repro_string(
-                "from module import Repro", args, compiler_name
-            )
+    local_path = os.path.join(torchdynamo.config.base_dir, "repro.py")
+    try:
+        shutil.copyfile(file_name, local_path)
+        log.warning(
+            f"Copying minified repro from {file_name} to {local_path} for convenience"
         )
+    except OSError:
+        log.warning("No write permissions for {local_path}")
 
-    local_dir = os.path.join(torchdynamo.config.base_dir, "repro")
-    if os.path.exists(local_dir):
-        shutil.rmtree(local_dir)
-    shutil.copytree(tmp_dir, local_dir)
-    local_tar_file = os.path.join(torchdynamo.config.base_dir, "repro.tar.gz")
-    print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to {local_tar_file}")
-    with tarfile.open(local_tar_file, "w:gz") as tar:
-        tar.add(local_dir, arcname=os.path.basename(local_dir))
+
+# TODO - Commented because we are assuming that nn.Modules can be safely repr'd
+# If that does not work, we might have to bring this code back. So, keeping it
+# as it is for now.
+# def dump_backend_repro_as_tarfile(gm, args, compiler_name):
+#     """
+#     Saves the repro in repro.tar.gz, as opposed to a file. This is used for
+#     cases, where we can't convert a Fx GraphModule to a string, and therefore
+#     fallback to to_folder for serialization. We accompany this with a repro.py
+#     script that imports the saved module, sets it up and runs the model to repro
+#     the error.
+#     """
+#     import tarfile
+
+#     subdir = os.path.join(minifier_dir(), "checkpoints")
+#     if not os.path.exists(subdir):
+#         os.makedirs(subdir, exist_ok=True)
+
+#     tmp_dir = os.path.join(subdir, f"{len(gm.graph.nodes)}")
+#     if os.path.exists(tmp_dir):
+#         shutil.rmtree(tmp_dir)
+#     os.makedirs(tmp_dir, exist_ok=True)
+
+#     file_name = os.path.join(tmp_dir, "repro.py")
+#     gm_dir = os.path.join(tmp_dir, "module")
+#     if not os.path.exists(gm_dir):
+#         os.makedirs(gm_dir, exist_ok=True)
+#     for node in gm.graph.nodes:
+#         new_kwargs = {}
+#         for k, v in node.kwargs.items():
+#             if isinstance(v, torch.device):
+#                 v = v.type
+#             new_kwargs[k] = v
+#         node.kwargs = new_kwargs
+#     gm.recompile()
+
+#     print(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
+#     with open(file_name, "w") as fd:
+#         # TODO - Add the readable version of to_folder when available
+#         gm.to_folder(gm_dir, "Repro")
+#         fd.write(
+#             generate_dynamo_fx_repro_string(
+#                 "from module import Repro", args, compiler_name
+#             )
+#         )
+
+#     local_dir = os.path.join(torchdynamo.config.base_dir, "repro")
+#     if os.path.exists(local_dir):
+#         shutil.rmtree(local_dir)
+#     shutil.copytree(tmp_dir, local_dir)
+#     local_tar_file = os.path.join(torchdynamo.config.base_dir, "repro.tar.gz")
+#     print(f"Writing checkpoint with {len(gm.graph.nodes)} locally to {local_tar_file}")
+#     with tarfile.open(local_tar_file, "w:gz") as tar:
+#         tar.add(local_dir, arcname=os.path.basename(local_dir))
 
 
 def dump_backend_state(gm, args, compiler_name):
@@ -517,9 +560,9 @@ def dump_backend_state(gm, args, compiler_name):
     2) If we can't convert Fx GraphModule to a string, we use to_folder to save
     the module and save a tar file.
     """
-    if NNModuleToString.can_convert_to_string(gm):
-        return dump_backend_repro_as_file(gm, args, compiler_name)
-    return dump_backend_repro_as_tarfile(gm, args, compiler_name)
+    assert NNModuleToString.can_convert_to_string(gm)
+    return dump_backend_repro_as_file(gm, args, compiler_name)
+    # return dump_backend_repro_as_tarfile(gm, args, compiler_name)
 
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
@@ -547,6 +590,44 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
         return False
 
 
+def dump_to_minify_after_dynamo(gm, args, compiler_name):
+    model_str = NNModuleToString.convert(gm)
+
+    contents = textwrap.dedent(
+        f"""
+import torch
+import torchdynamo
+from torch import tensor, device
+import torch.fx as fx
+from torchdynamo.testing import rand_strided
+from math import inf
+from torchdynamo.debug_utils import run_fwd_maybe_bwd
+from torchdynamo.optimizations.backends import BACKENDS
+import functools
+import os
+
+torchdynamo.config.repro_dir = \"{minifier_dir()}\"
+
+args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
+args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
+
+{model_str}
+mod = Repro().cuda()
+
+# Setup debug minifier compiler
+compiler_fn = BACKENDS["dynamo_minifier_backend"]
+dynamo_minifier_backend = functools.partial(
+    compiler_fn,
+    compiler_name="{compiler_name}",
+)
+opt_mod = torchdynamo.optimize(dynamo_minifier_backend)(mod)
+
+opt_mod(*args)
+        """
+    )
+    helper_for_dump_minify(contents)
+
+
 def wrap_backend_debug(compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
@@ -556,7 +637,6 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     tracing.  If an error is found, we minify and save the minified repro in
     repro.tar.gz.
     """
-    from functorch.compile import minifier
 
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
@@ -564,43 +644,26 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
         if config.repro_after == "dynamo":
             # Ensure that we fail when backend fails
             config.raise_on_backend_error = True
+            if config.repro_level == 3:
+                dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
             try:
                 compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
                 run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
             except Exception as exc:
-                orig_failure = str(exc)
                 log.warning(
-                    f"Compiled Fx GraphModule failed with {orig_failure}. Starting minifier."
+                    "Compiled Fx GraphModule failed with following error. Setting up minifier."
                 )
-                dump_state_fn = functools.partial(
-                    dump_backend_state, compiler_name=compiler_name
-                )
-                dump_state_fn(
-                    fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
-                )
-                if config.repro_level > 1:
-                    # As opposed to using dump_to_minify, like we do in
-                    # wrap_compiler_debug, we directly run minifier here. This
-                    # is because we can't serialize compiler_fn here.
-
-                    # The minified version uses
-                    # torchdynamo.optimize(compiler_str) to repro the error.
-
-                    # Directly running the minifier could be bad if something
-                    # goes bad while minification is running. We will have to
-                    # investigate how to add isolation.
-                    fails_fn = functools.partial(
-                        backend_fails,
-                        compiler_fn=compiler_fn,
-                        orig_failure=orig_failure,
+                log.exception(exc)
+                if config.repro_level == 1:
+                    dump_state_fn = functools.partial(
+                        dump_backend_state, compiler_name=compiler_name
                     )
-                    minifier(
-                        gm,
-                        example_inputs,
-                        module_fails=fails_fn,
-                        dump_state=dump_state_fn,
+                    dump_state_fn(
+                        fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
                     )
-                    raise exc
+                elif config.repro_level == 2:
+                    dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
+                raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -609,3 +672,44 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     debug_wrapper._torchdynamo_orig_callable = compiler_fn
 
     return debug_wrapper
+
+
+@register_backend
+def dynamo_minifier_backend(gm, example_inputs, compiler_name):
+    from functorch.compile import minifier
+
+    from torchdynamo.optimizations.backends import BACKENDS
+
+    if compiler_name == "inductor":
+        from torchinductor.compile_fx import compile_fx
+
+        compiler_fn = compile_fx
+    else:
+        compiler_fn = BACKENDS[compiler_name]
+
+    try:
+        compiled_gm = compiler_fn(gm, example_inputs)
+        run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+        raise ValueError("No issue was detected")
+    except Exception as exc:
+        orig_failure = str(exc)
+        log.warning(
+            "Compiled Fx GraphModule failed with following error. Starting minifier."
+        )
+        log.exception(exc)
+        dump_state_fn = functools.partial(
+            dump_backend_state, compiler_name=compiler_name
+        )
+        dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
+        fails_fn = functools.partial(
+            backend_fails,
+            compiler_fn=compiler_fn,
+            orig_failure=orig_failure,
+        )
+        minifier(
+            gm,
+            example_inputs,
+            module_fails=fails_fn,
+            dump_state=dump_state_fn,
+        )
+    return gm

@@ -28,6 +28,15 @@ _NP_DTYPE = {
 }
 
 
+def register_backend(fn):
+    @functools.wraps(fn)
+    def inner(gm, example_inputs, **kwargs):
+        return fn(gm, example_inputs, **kwargs)
+
+    BACKENDS[fn.__name__] = inner
+    return inner
+
+
 def create_backend(fn):
     @functools.wraps(fn)
     def inner(model, example_inputs=None, **kwargs):

@@ -4,12 +4,10 @@ isort==5.10.1
 mypy==0.960
 click>=8.1
 expecttest
-Jinja2
 networkx
 ninja
 numpy
 pytest
 pyyaml
 sympy
-tabulate
 torch>=1.12.0

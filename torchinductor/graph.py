@@ -91,6 +91,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_dynamic_inputs = num_dynamic_inputs
         self.num_static_inputs = None
         self.mutated_inputs = set()
+        self.unaligned_buffers = set()
         self.randomness_offset = sympy.Integer(0)
         self.randomness_seeds = []
         self.name_to_buffer = {}
@@ -224,7 +225,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.device_types.add(example.device.type)
+        if example.dim() != 0:
+            self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):

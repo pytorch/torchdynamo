@@ -51,6 +51,8 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+compile_threads = 1
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -99,6 +101,8 @@ class triton:
     tiling_prevents_reduction_fusion = True
     # should we give different names to kernels
     ordered_kernel_names = False
+    # should we use natural codegen for where, needs newer triton version
+    simple_where = True
 
 
 # create a directory containing lots of debug information
@@ -129,3 +133,7 @@ class trace:
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
+
+    # Upload the .tar.gz file
+    # Needs to be overriden based on specific environment needs
+    upload_tar = None
