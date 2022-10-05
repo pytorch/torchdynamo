@@ -89,6 +89,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "convit_base",  # fp64_OOM
     "mobilevit_s",  # Accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
+    "tacotron2",
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [

@@ -1,7 +1,9 @@
 from typing import Dict
 from typing import List
+from typing import Optional
 
 import torch
+import torch.fx
 
 from .. import config
 from .. import variables
@@ -38,6 +40,7 @@ class BaseListVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
+        assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
@@ -247,8 +250,58 @@ class TupleVariable(BaseListVariable):
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        proxy: Optional[torch.fx.Proxy] = None,
+        **kwargs,
+    ):
+        self.proxy = proxy
+        super().__init__(items, **kwargs)
+
     def python_type(self):
         return torch.Size
+
+    def as_proxy(self):
+        if self.proxy is not None:
+            return self.proxy
+
+        # torch.Size needs special handling.  Normally, we pun a list-like
+        # container to directly contain Proxy/Node objects from FX, and FX
+        # knows to look inside containers (via map_aggregate).  But torch.Size
+        # is weird; although it subclasses from tuple, it doesn't allow
+        # members which aren't int-like (rejecting Proxy and Node).  This
+        # means we can't use the normal representation trick
+        # torch.Size([proxy0, proxy1]).  I looked into seeing if I could
+        # relax torch.Size in PyTorch proper, but if torch.Size constructor
+        # sees a type that it doesn't recognize, it will try to call
+        # __index__() on it, so there is no BC way to actually change this
+        # behavior (though it occurs to me that I could have just added a
+        # YOLO no checking alternate constructor.)
+        #
+        # To work around this problem, I represent a torch.Size proxy as
+        # a straight up proxy, that would have been constructed by taking
+        # the constituent proxies as arguments.  This trick can be generally
+        # used for any construct that we need a proxy for but we can't
+        # directly represent as an aggregate; I don't see very many examples
+        # of this in torchdynamo though!
+
+        # Look for a proxy.  If there are none, do the legacy behavior
+        tracer = None
+        proxies = self._as_proxy()
+        for proxy in proxies:
+            if isinstance(proxy, torch.fx.Proxy):
+                tracer = proxy.tracer
+                break
+
+        if tracer is None:
+            return torch.Size(proxies)
+
+        proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
+        proxy.node.meta["example_value"] = torch.Size(
+            [p.node.meta["example_value"] for p in proxies]
+        )
+        return proxy
 
     def reconstruct(self, codegen):
         codegen.load_import_from("torch", "Size")
