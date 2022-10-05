@@ -320,9 +320,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "addbmm": {f16},
     "addmm": {f16, f32, f64},
-    "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
@@ -335,7 +333,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
-    "cumsum": {f16},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8},
     "fft.fft": {f16, f32, f64},
@@ -526,6 +523,7 @@ class TestInductorOpInfo(TestCase):
                         check_lowp=False,
                         nopython=True,
                         copy_to_cuda=False,
+                        reference_in_float=False,
                     )
                 elif device_type == "cpu":
                     self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
