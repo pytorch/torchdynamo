@@ -197,17 +197,15 @@ def masked_fill(value, mask, other):
 
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
-    if is_boolean_dtype(x.dtype):
+    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
         return x
 
     if nan is None:
         nan = 0.0
-
-    dtype_info = torch.iinfo if is_integer_dtype(x.dtype) else torch.finfo
     if posinf is None:
-        posinf = dtype_info(x.dtype).max
+        posinf = torch.finfo(x.dtype).max
     if neginf is None:
-        neginf = dtype_info(x.dtype).min
+        neginf = torch.finfo(x.dtype).min
     nan, posinf, neginf = (
         torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
     )
