@@ -24,12 +24,11 @@ import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
 
-from torchdynamo.guards import GuardBuilder
-
 from .. import config
 from .. import variables
 from ..exc import TorchRuntimeError
 from ..exc import unimplemented
+from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import clone_input
 from ..utils import is_lazy_module
@@ -608,9 +607,9 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         The caller is responsible for wrapping the return value, if needed.
         """
-        from torchdynamo.variables import UserDefinedClassVariable
-        from torchdynamo.variables.builder import TupleVariable
-        from torchdynamo.variables.builder import VariableBuilder
+        from . import UserDefinedClassVariable
+        from .builder import TupleVariable
+        from .builder import VariableBuilder
 
         source = AttrSource(
             AttrSource(tensor_with_tf_override_source, "__torch_function__"),
