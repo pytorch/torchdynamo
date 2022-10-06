@@ -1689,6 +1689,33 @@ class ReproTests(torchdynamo.testing.TestCase):
         ]
         self.assertTrue(same_two_models(mod, opt_mod, args))
 
+    def test_amp_einsum(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, self_s_emb, add_3):
+                einsum_2 = torch.functional.einsum("ah,th->t", self_s_emb, add_3)
+                log_softmax_2 = einsum_2.log_softmax(-1)
+                return (log_softmax_2,)
+
+        mod = Repro().cuda()
+        opt_mod = torchdynamo.optimize("aot_eager")(mod)
+
+        args = [
+            ((1, 256), (256, 1), torch.float32, "cuda", True),
+            ((30, 256), (256, 1), torch.float16, "cuda", False),
+        ]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+
+        with torch.cuda.amp.autocast(enabled=True):
+            ref = mod(*args)
+            res = opt_mod(*args)
+        self.assertTrue(same(ref, res))
+
 
 if __name__ == "__main__":
     unittest.main()

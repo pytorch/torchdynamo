@@ -68,7 +68,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "pytorch_struct",
     "speech_transformer",
     "vision_maskrcnn",
-    "moco",
     # Huggingface
     "AlbertForMaskedLM",  # OOM
     "AlbertForQuestionAnswering",  # OOM
