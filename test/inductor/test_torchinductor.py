@@ -150,6 +150,7 @@ def check_model(
     nopython=True,
     copy_to_cuda=True,
     reference_in_float=True,
+    assert_equal=True,
 ):
     torchdynamo.reset()
 
@@ -219,14 +220,28 @@ def check_model(
         )
         correct = tree_unflatten(correct_flat, correct_spec)
 
-    self.assertEqual(
-        actual,
-        correct,
-        atol=atol,
-        rtol=rtol,
-        equal_nan=True,
-        exact_dtype=exact_dtype,
-    )
+    if assert_equal:
+        self.assertEqual(
+            actual,
+            correct,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            exact_dtype=exact_dtype,
+        )
+    else:
+        correct_flat, _ = tree_flatten(correct)
+        actual_flat, _ = tree_flatten(actual)
+
+        for correct_val, actual_val in zip(correct_flat, actual_flat):
+            if isinstance(correct_val, torch.Tensor):
+                assert correct_val.device == actual_val.device
+                assert correct_val.size() == actual_val.size()
+                assert correct_val.stride() == actual_val.stride()
+                assert correct_val.layout == actual_val.layout
+                if exact_dtype:
+                    assert correct_val.dtype == actual_val.dtype
+
     torchdynamo.reset()
 
 
@@ -244,6 +259,7 @@ def check_model_cuda(
     nopython=True,
     copy_to_cuda=True,
     reference_in_float=True,
+    assert_equal=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -269,6 +285,7 @@ def check_model_cuda(
         exact_dtype=exact_dtype,
         nopython=nopython,
         reference_in_float=reference_in_float,
+        assert_equal=assert_equal,
     )
 
     if check_lowp:
@@ -293,6 +310,7 @@ def check_model_cuda(
             exact_dtype=exact_dtype,
             nopython=nopython,
             reference_in_float=reference_in_float,
+            assert_equal=assert_equal,
         )
 
 
