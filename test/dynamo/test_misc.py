@@ -2636,7 +2636,6 @@ class MiscTests(torchdynamo.testing.TestCase):
                 finally:
                     dist.destroy_process_group()
                 self.assertEqual(res, 1)
->>>>>>> 39ffc5f1c3483f004ca6266f5fb5e8f352ef7900
 
 
 class CustomFunc(torch.autograd.Function):
