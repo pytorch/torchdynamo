@@ -10,23 +10,23 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
-import torchdynamo.logging
-from torchdynamo.optimizations.backends import aot_autograd
-from torchdynamo.optimizations.normalize import normalize_ir
-from torchdynamo.optimizations.training import is_aot_autograd_safe_to_run
-from torchdynamo.utils import dynamo_timed
-from torchdynamo.utils import preserve_rng_state
-
 from . import config
 from . import overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import dynamo_logging
+from .utils import dynamo_optimizations
+from .utils import dynamo_utils
 from .utils import has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
+
+aot_autograd = dynamo_optimizations.backends.aot_autograd
+normalize_ir = dynamo_optimizations.normalize.normalize_ir
+is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
 
 
 @dataclasses.dataclass
@@ -69,7 +69,7 @@ def is_unspec_input(t):
 
 @functools.lru_cache(None)
 def _step_logger():
-    return torchdynamo.logging.get_step_logger(log)
+    return dynamo_logging.get_step_logger(log)
 
 
 @DebugContext.wrap
@@ -82,12 +82,16 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
+    if dynamo_utils.count_calls(gm.graph) == 0:
+        return gm
+
     _step_logger()(
         logging.INFO,
         "torchinductor compiling "
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
+
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
@@ -164,7 +168,7 @@ def align_inputs(model, inputs, static_input_idxs=()):
     return run
 
 
-@dynamo_timed
+@dynamo_utils.dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
@@ -175,7 +179,7 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     def run(*new_inputs):
         nonlocal compiled_fn
         if compiled_fn is None:
-            with preserve_rng_state():
+            with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
 
         return compiled_fn(*new_inputs)
@@ -323,7 +327,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     graph_id = _graph_counter
     _graph_counter += 1
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
@@ -334,7 +338,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             graph_id=graph_id,
         )
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
         return compile_fx_inner(

@@ -8,6 +8,7 @@ import threading
 import traceback
 import types
 import warnings
+from importlib import import_module
 from unittest.mock import patch
 
 import torch
@@ -318,18 +319,21 @@ class WrapperBackend:
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
-    """Expand backend strings to functions"""
     compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
-    if compiler_fn == "inductor":
-        from torchinductor.compile_fx import compile_fx
+    compiler_fn = lookup_backend(compiler_fn)
+    return wrap_backend_debug(compiler_fn, compiler_str)
 
-        compiler_fn = compile_fx
+
+@functools.lru_cache(1)
+def lookup_backend(compiler_fn):
+    """Expand backend strings to functions"""
+    if compiler_fn == "inductor":
+        compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
     elif isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
         compiler_fn = BACKENDS[compiler_fn]
-
-    return wrap_backend_debug(compiler_fn, compiler_str)
+    return compiler_fn
 
 
 class _NullDecorator(contextlib.nullcontext):

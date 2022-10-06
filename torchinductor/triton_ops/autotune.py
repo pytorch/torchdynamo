@@ -20,12 +20,11 @@ from triton.runtime.jit import KernelInterface
 from triton.runtime.jit import get_cuda_stream
 from triton.testing import do_bench
 
-from torchinductor import config
-from torchinductor.ir import ReductionHint
-from torchinductor.triton_ops.mm_perf_model import estimate_matmul_time
-from torchinductor.utils import conditional_product
-
+from .. import config
 from ..codecache import AsyncCompile
+from ..ir import ReductionHint
+from ..triton_ops.mm_perf_model import estimate_matmul_time
+from ..utils import conditional_product
 from .conv_perf_model import early_config_prune as conv_early_config_prune
 from .conv_perf_model import estimate_conv_time
 

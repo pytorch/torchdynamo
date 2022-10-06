@@ -101,11 +101,6 @@ if COLLECT_EXPECT:
 inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
-    # the return value of empty is undefined
-    "empty": {b8, f16, f32, f64, i32, i64},
-    "empty_like": {b8, f16, f32, f64, i32, i64},
-    "new_empty": {b8, f16, f32, f64, i32, i64},
-    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -119,15 +114,10 @@ inductor_skips["cuda"] = {
     "mvlgamma.mvlgamma_p_1": {f16, f32, f64, i32, i64},
     "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
     "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
-    "cumprod": {f16, f32, f64},
     "masked.prod": {f16, f32, f64},
-    "empty_like": {b8, f16, f32, f64, i32, i64},
-    "empty": {b8, f16, f32, f64, i32, i64},
-    "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "nn.functional.conv_transpose1d": {f16},
-    "nn.functional.conv_transpose2d": {f16},
+    "broadcast_tensors": {f32},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
     "cos": {f64},
@@ -188,7 +178,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "addmm": {f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f16, f32, f64},
@@ -226,7 +215,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {b8, f16, f32, f64, i32, i64},
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
-    "inner": {f32, f64, i32, i64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
@@ -241,7 +229,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
     "logdet": {f32, f64},
-    "logsumexp": {b8, f32, f64, i32, i64},
     "masked.norm": {f16},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
@@ -259,6 +246,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.dropout": {f32, f64},
     "nn.functional.dropout2d": {f32, f64},
@@ -286,7 +274,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint_like": {f16, f32, f64, i32, i64},
     "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
-    "reciprocal": {b8, i32, i64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
     "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64},
@@ -302,7 +289,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "tensordot": {f32, f64, i32, i64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     "tril": {f16},
@@ -320,9 +306,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "addbmm": {f16},
-    "addmm": {f16, f32, f64},
-    "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
@@ -335,7 +318,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
-    "cumsum": {f16},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8},
     "fft.fft": {f16, f32, f64},
@@ -359,7 +341,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "index_add": {b8, f16, f32, f64, i32, i64},
     "index_copy": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
-    "inner": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
@@ -374,25 +355,23 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
-    "logsumexp": {b8, f16, f32, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "matrix_exp": {f16},
     "max.reduction_with_dim": {b8, i32, i64},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "new_empty": {b8, f16, f32, f64, i32, i64},
-    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
     "nn.functional.conv_transpose3d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.dropout": {f16, f32, f64},
     "nn.functional.dropout2d": {f16, f32, f64},
     "nn.functional.dropout3d": {f16, f32, f64},
+    "nn.functional.grid_sample": {f16},
     "nn.functional.feature_alpha_dropout.with_train": {f16, f32, f64},
     "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
     "nn.functional.fractional_max_pool2d": {f16, f32, f64},
@@ -401,7 +380,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.soft_margin_loss": {f16},
+    "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
@@ -423,7 +402,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "tensordot": {f16, f32, f64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16, f32, f64},
@@ -442,6 +420,14 @@ inductor_should_fail_with_exception["cuda"] = {
         i32: "Pow input must be floating point.",
         i64: "Pow input must be floating point.",
     }
+}
+# key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
+inductor_override_kwargs = {
+    # the return value of empty is undefined
+    "empty": {"assert_equal": False},
+    "empty_like": {"assert_equal": False},
+    "new_empty": {"assert_equal": False},
+    "new_empty_strided": {"assert_equal": False},
 }
 
 
@@ -486,6 +472,14 @@ class TestInductorOpInfo(TestCase):
         else:
             test_expect = TestExpect.SUCCESS
 
+        additional_kwargs = {}
+        if op_name in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[op_name]
+        elif (op_name, device_type) in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[(op_name, device_type)]
+        elif (op_name, device_type, dtype) in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
+
         func = op.get_op()
 
         def fn(*args, **kwargs):
@@ -526,9 +520,18 @@ class TestInductorOpInfo(TestCase):
                         check_lowp=False,
                         nopython=True,
                         copy_to_cuda=False,
+                        reference_in_float=False,
+                        **additional_kwargs,
                     )
                 elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
+                    self.check_model(
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        **additional_kwargs,
+                    )
 
             except Exception as e:
 
