@@ -101,11 +101,6 @@ if COLLECT_EXPECT:
 inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
-    # the return value of empty is undefined
-    "empty": {b8, f16, f32, f64, i32, i64},
-    "empty_like": {b8, f16, f32, f64, i32, i64},
-    "new_empty": {b8, f16, f32, f64, i32, i64},
-    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -120,8 +115,6 @@ inductor_skips["cuda"] = {
     "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
     "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "masked.prod": {f16, f32, f64},
-    "empty_like": {b8, f16, f32, f64, i32, i64},
-    "empty": {b8, f16, f32, f64, i32, i64},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "broadcast_tensors": {f32},
@@ -371,8 +364,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "max.reduction_with_dim": {b8, i32, i64},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "new_empty": {b8, f16, f32, f64, i32, i64},
-    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
     "nn.functional.conv_transpose3d": {f16},
@@ -430,6 +421,14 @@ inductor_should_fail_with_exception["cuda"] = {
         i64: "Pow input must be floating point.",
     }
 }
+# key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
+inductor_override_kwargs = {
+    # the return value of empty is undefined
+    "empty": {"assert_equal": False},
+    "empty_like": {"assert_equal": False},
+    "new_empty": {"assert_equal": False},
+    "new_empty_strided": {"assert_equal": False},
+}
 
 
 class TestInductorOpInfo(TestCase):
@@ -473,6 +472,14 @@ class TestInductorOpInfo(TestCase):
         else:
             test_expect = TestExpect.SUCCESS
 
+        additional_kwargs = {}
+        if op_name in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[op_name]
+        elif (op_name, device_type) in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[(op_name, device_type)]
+        elif (op_name, device_type, dtype) in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
+
         func = op.get_op()
 
         def fn(*args, **kwargs):
@@ -514,9 +521,17 @@ class TestInductorOpInfo(TestCase):
                         nopython=True,
                         copy_to_cuda=False,
                         reference_in_float=False,
+                        **additional_kwargs,
                     )
                 elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
+                    self.check_model(
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        **additional_kwargs,
+                    )
 
             except Exception as e:
 
