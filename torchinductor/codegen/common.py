@@ -310,7 +310,8 @@ class KernelArgs:
             self.inplace_buffers[output_name] = buf
         else:
             buf = InplacedBuffer(
-                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}", [input_name, output_name]
+                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                [input_name, output_name],
             )
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf

@@ -24,6 +24,7 @@ from . import ir
 from .codegen.triton_template import should_use_template
 from .codegen.triton_template import template_can_fuse
 from .codegen.triton_template import template_codegen
+from .codegen.wrapper import buffer_reuse_key
 from .dependencies import MemoryDep
 from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
@@ -326,7 +327,6 @@ class SchedulerNode(BaseSchedulerNode):
             return super().allocate()
 
         if config.inplace_buffers:
-            from .codegen.wrapper import buffer_reuse_key
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
@@ -342,8 +342,12 @@ class SchedulerNode(BaseSchedulerNode):
                         len(remaining_uses) == 1
                         and remaining_uses[0].can_inplace
                         and remaining_uses[0].node is self
-                        and not isinstance(input_node.node.get_layout(), (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout))
-                        and buffer_reuse_key(input_node.node) == buffer_reuse_key(self.node)
+                        and not isinstance(
+                            input_node.node.get_layout(),
+                            (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout),
+                        )
+                        and buffer_reuse_key(input_node.node)
+                        == buffer_reuse_key(self.node)
                     ):
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
@@ -353,24 +357,6 @@ class SchedulerNode(BaseSchedulerNode):
                         )
                         V.kernel.must_keep_buffers.add(input_node.get_name())
                         return
-            """
-            buffer_names_for_reuse = self.scheduler.buffer_names_no_longer_needed - self.last_usage
-            for buffer_name in buffer_names_for_reuse:
-                node_for_reuse = self.scheduler.name_to_node.get(buffer_name)
-                if node_for_reuse is None:
-                    continue
-                if (
-                    not isinstance(node_for_reuse.node.get_layout(), ir.MultiOutputLayout)
-                    and buffer_reuse_key(node_for_reuse.node) == buffer_reuse_key(self.node)
-                ):
-                    V.graph.wrapper_code.codegen_inplace_reuse(
-                        node_for_reuse.node, self.node
-                    )
-                    V.kernel.args.make_inplace(
-                        node_for_reuse.get_name(), self.get_name()
-                    )
-                    return
-            """
         super().allocate()
 
     def run(self, *index_vars):
@@ -456,9 +442,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         } - self.read_writes.writes
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
-        self.last_usage = functools.reduce(
-            set.union, [x.last_usage for x in snodes]
-        )
 
     @cache_on_self
     def get_name(self) -> str:
@@ -620,8 +603,8 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
-        self.compute_last_usage()
         self.fuse_nodes()
+        self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
