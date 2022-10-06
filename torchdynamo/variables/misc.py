@@ -260,9 +260,7 @@ class SimpleEnterExitContextWrappingVariable(ContextWrappingVariable):
         def enter_functional():
             return self.cm.__enter__()
 
-        tx.output.graph.create_node(
-            "call_function", enter_functional, (), {}
-        )
+        tx.output.graph.create_node("call_function", enter_functional, (), {})
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
