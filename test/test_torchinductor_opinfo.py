@@ -108,6 +108,7 @@ inductor_skips["cpu"] = {
     "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "reciprocal": {b8, i32, i64}, #segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_unpack": {b8, f16, f32, f64, i32, i64},  # segfault
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
@@ -148,6 +149,7 @@ inductor_skips["cuda"] = {
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f64},
+    "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
@@ -291,9 +293,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
+    # "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
-    "reciprocal": {b8, i32, i64},
+    # "reciprocal": {b8, i32, i64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
     "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64},
@@ -462,6 +464,16 @@ inductor_should_fail_with_exception["cuda"] = {
     }
 }
 
+def wrapper_set_seed(op, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(*args, **kwargs)
+
+
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
@@ -533,16 +545,16 @@ class TestInductorOpInfo(TestCase):
             try:
                 # import pdb
                 # pdb.set_trace()
-                # with torch.testing._internal.common_utils.freeze_rng_state():
-                # with open("test_output.txt", "a") as f:
-                #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-                #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
-                if device_type == "cuda":
-                    self.check_model_cuda(
-                        fn, args, kwargs, check_lowp=False, nopython=False
-                    )
-                elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=False)
+                with torch.testing._internal.common_utils.freeze_rng_state():
+                    with open("test_output.txt", "a") as f:
+                        print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+                        print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
+                    if device_type == "cuda":
+                        self.check_model_cuda(
+                            fn, args, kwargs, check_lowp=False, nopython=True
+                        )
+                    elif device_type == "cpu":
+                        self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
 
             except Exception as e:
 
@@ -567,8 +579,8 @@ class TestInductorOpInfo(TestCase):
                 if not known_failure:
                     raise e
             else:
-                # with open("test_output.txt", "a") as f:
-                #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+                with open("test_output.txt", "a") as f:
+                    print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
             if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:

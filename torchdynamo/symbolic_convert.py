@@ -597,6 +597,8 @@ class InstructionTranslatorBase(object):
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
+        # import pdb
+        # pdb.set_trace()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             import pdb
