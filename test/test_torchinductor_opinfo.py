@@ -124,6 +124,7 @@ inductor_skips["cuda"] = {
     "empty": {b8, f16, f32, f64, i32, i64},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "broadcast_tensors": {f32},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
     "cos": {f64},
