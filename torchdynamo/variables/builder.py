@@ -3,6 +3,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import pathlib
 import re
 import types
 from abc import ABCMeta
@@ -12,7 +13,6 @@ from typing import List
 import numpy as np
 import torch
 from functorch.experimental.ops import PyOperator
-import pathlib
 
 from .. import config
 from .. import mutation_guard
@@ -34,6 +34,7 @@ from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..source import is_constant_source
+from ..utils import extract_wrapped
 from ..utils import getfile
 from ..utils import global_key_name
 from ..utils import is_namedtuple
@@ -43,7 +44,6 @@ from ..utils import istype
 from ..utils import tuple_iterator
 from ..utils import tuple_iterator_getitem
 from ..utils import tuple_iterator_len
-from ..utils import extract_wrapped
 from .base import MutableLocal
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
@@ -175,8 +175,6 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
-        # import pdb
-        # pdb.set_trace()
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
@@ -209,8 +207,6 @@ class VariableBuilder:
                 )(tuple_iterator_getitem(value, i)).add_guards(guards)
                 for i in range(tuple_iterator_len(value))
             ]
-            import pdb
-            pdb.set_trace()
             return ListIteratorVariable(
                 output, mutable_local=MutableLocal(), guards=guards
             )
@@ -368,13 +364,9 @@ class VariableBuilder:
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
-            # import pdb
-            # pdb.set_trace()
             new_value_or_none = _extract_context_manager_fn(value)
             if new_value_or_none:
                 # re-enter the builder
-                # import pdb
-                # pdb.set_trace()
                 return self._wrap(new_value_or_none)
 
             return SkipFilesVariable(
@@ -443,7 +435,9 @@ class VariableBuilder:
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
             )
-        elif type(value).__name__ == 'builtin_function_or_method' and isinstance(value.__self__, torch_special_class_types):
+        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
+            value.__self__, torch_special_class_types
+        ):
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
@@ -544,17 +538,16 @@ class VariableBuilder:
 
 def _extract_context_manager_fn(value):
     path_str = getfile(value)
-    assert skipfiles.check(path_str, allow_torch=True), "We should only try extraction if we fail a skipfile check"
+    assert skipfiles.check(
+        path_str, allow_torch=True
+    ), "We should only try extraction if we fail a skipfile check"
     path = pathlib.PurePath(path_str)
-    if path.name == 'contextlib.py':
+    if path.name == "contextlib.py":
         # Context
         new_value = extract_wrapped(value)
         if new_value != value:
             return new_value
     return None
-
-
-    
 
 
 def _dataclasses_fields_lambda(obj):

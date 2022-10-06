@@ -21,6 +21,7 @@ from .functions import UserMethodVariable
 from .functions import WrappedUserFunctionVariable
 from .functions import WrappedUserMethodVariable
 
+
 class SuperVariable(VariableTracker):
     def __init__(self, typevar, objvar=None, **kwargs):
         super(SuperVariable, self).__init__(**kwargs)
@@ -225,8 +226,6 @@ class ContextWrappingVariable(VariableTracker):
                 create_instruction("RERAISE"),
             ]
 
-        import pdb
-        pdb.set_trace()
         return (prologue, epilogue)
 
     def _call_func(self, tx, initial_values):
@@ -252,7 +251,9 @@ class ContextWrappingVariable(VariableTracker):
 
 class SimpleEnterExitContextWrappingVariable(ContextWrappingVariable):
     def __init__(self, cm, **kwargs):
-        super(SimpleEnterExitContextWrappingVariable, self).__init__(target_values=True, initial_values=False, **kwargs)
+        super(SimpleEnterExitContextWrappingVariable, self).__init__(
+            target_values=True, initial_values=False, **kwargs
+        )
         self.cm = cm
 
     def enter(self, tx):
@@ -263,17 +264,15 @@ class SimpleEnterExitContextWrappingVariable(ContextWrappingVariable):
             "call_function", enter_functional, (), {}
         )
         # result = self.cm.__enter__()
-        # import pdb
-        # pdb.set_trace()
         # return variables.ConstantVariable(result, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
         # self.cm.__exit__(None, None, None)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-
     def _func_name(self):
         return self.cm.__name__
+
 
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
@@ -646,8 +645,6 @@ class SkipFilesVariable(VariableTracker):
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            import pdb
-            pdb.set_trace()
             unimplemented("call_function in skip_files " + path)
 
 

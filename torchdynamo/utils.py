@@ -523,6 +523,7 @@ def extract_wrapped(decorated):
     closure = (c.cell_contents for c in decorated.__closure__)
     return next((c for c in closure if isinstance(c, types.FunctionType)), None)
 
+
 def getfile(obj):
     try:
         return inspect.getfile(obj)

@@ -103,7 +103,7 @@ SKIP_DIRS = [
 ]
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
-    torch.set_rng_state.__code__.co_filename
+    torch.set_rng_state.__code__.co_filename,
 }
 
 # Include optimizer code for tracing
@@ -191,8 +191,6 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    # import pdb
-    # pdb.set_trace()
     return any(
         filename.startswith(_module_dir(mod))
         for mod in config.skipfiles_inline_module_allowlist

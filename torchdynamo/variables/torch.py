@@ -40,12 +40,10 @@ tensor_dunder_fns = [
     torch._C._TensorBase.__ror__,
     torch._C._TensorBase.__rxor__,
     torch._C._TensorBase.__rand__,
-    torch.testing._internal.common_utils.disable_functorch
+    torch.testing._internal.common_utils.disable_functorch,
 ]
 
-torch_special_class_types = (
-    torch._C.Generator,
-)
+torch_special_class_types = (torch._C.Generator,)
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -214,8 +212,6 @@ class TorchVariable(VariableTracker):
         from . import ConstantVariable
         from . import GradModeVariable
         from . import TensorVariable
-        # import pdb
-        # pdb.set_trace()
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -332,21 +328,6 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
-        # elif type(self.value).__name__ == 'builtin_function_or_method' and isinstance(self.value.__self__, torch_special_class_types):
-        #     import pdb
-        #     pdb.set_trace()
-        #     args_and_self = (self.value.__self__, *proxy_args_kwargs(args, kwargs))
-        #     return TensorVariable.create(
-        #         tx=tx,
-        #         proxy=tx.output.create_proxy(
-        #             "call_method",
-        #             self.value.__name__,
-        #             *args_and_self,
-        #             current_tx=tx,
-        #         ),
-        #         **options,
-        #     )
-
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.

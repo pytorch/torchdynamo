@@ -77,8 +77,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
     def __init__(self, fn, is_constant=False, **kwargs):
-        # import pdb
-        # pdb.set_trace()
         super(UserFunctionVariable, self).__init__(**kwargs)
         if (
             hasattr(fn, "_dynamo_marked_constant")

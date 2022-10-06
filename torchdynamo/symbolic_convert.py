@@ -591,12 +591,8 @@ class InstructionTranslatorBase(object):
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
-        # import pdb
-        # pdb.set_trace()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
-            import pdb
-            pdb.set_trace()
             unimplemented(f"SETUP_WITH {ctx}")
         self.output.guards.update(ctx.guards)
 
@@ -1558,8 +1554,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         log.debug(f"DONE INLINING {code}")
 
         if is_generator(code):
-            import pdb
-            pdb.set_trace()
             assert tracer.symbolic_result.as_python_constant() is None
             return ListIteratorVariable(
                 tracer.generated_items,

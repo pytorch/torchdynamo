@@ -268,17 +268,17 @@ class TensorVariable(VariableTracker):
                 )
         elif isinstance(example_value, contextlib._GeneratorContextManager):
             from .misc import SimpleEnterExitContextWrappingVariable
+
             return SimpleEnterExitContextWrappingVariable(example_value)
         elif proxy.node.target == torch._C._DisableFuncTorch:
             from . import UserDefinedObjectVariable
-            return UserDefinedObjectVariable(
-                example_value
-            )
-        elif proxy.node.target.__name__ == 'set_state' and isinstance(proxy.node.target.__self__, torch._C.Generator):
+
+            return UserDefinedObjectVariable(example_value)
+        elif proxy.node.target.__name__ == "set_state" and isinstance(
+            proxy.node.target.__self__, torch._C.Generator
+        ):
             return ConstantVariable(None)
         else:
-            import pdb
-            pdb.set_trace()
             assert (
                 False
             ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
