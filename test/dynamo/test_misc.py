@@ -2579,6 +2579,48 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
 
+    def test_user_function_variable_supports_enum_argument(self):
+        class Foo(enum.Enum):
+            FOO = 0
+            BAR = 1
+
+        def gn(x, y=Foo.FOO):
+            if y is Foo.FOO:
+                return x
+            else:
+                return x + 1
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(2, 3)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_empty_graph(self):
+        import torch.distributed as dist
+
+        with patch.dict(os.environ, {"MASTER_ADDR": "localhost"}):
+            with patch.dict(os.environ, {"MASTER_PORT": "12355"}):
+                # initialize the process group
+                dist.init_process_group("gloo", rank=0, world_size=1)
+
+                def fn():
+                    get_world_size = torch.distributed.distributed_c10d.get_world_size()
+                    return (get_world_size,)
+
+                opt_fn = torchdynamo.optimize("inductor")(fn)
+                res = None
+                try:
+                    res = opt_fn()[0]
+                except Exception:
+                    pass
+                finally:
+                    dist.destroy_process_group()
+                self.assertEqual(res, 1)
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod

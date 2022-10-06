@@ -9,8 +9,6 @@ from typing import List
 
 import torch.nn
 
-from torchdynamo.variables.lists import SliceVariable
-
 from .. import skipfiles
 from .. import variables
 from ..allowed_functions import is_allowed
@@ -29,6 +27,7 @@ from .base import MutableLocal
 from .base import VariableTracker
 from .base import typestr
 from .functions import invoke_and_store_as_constant
+from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
 
 

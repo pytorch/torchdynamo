@@ -12,13 +12,11 @@ from typing import List
 import numpy as np
 import torch
 from functorch.experimental.ops import PyOperator
-
-import torchdynamo
 import pathlib
-from torchdynamo import replay_record
 
 from .. import config
 from .. import mutation_guard
+from .. import replay_record
 from .. import skipfiles
 from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin_callable
@@ -106,7 +104,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx: "torchdynamo.symbolic_convert.InstructionTranslatorBase",
+        tx,
         source: Source,
     ):
         super(VariableBuilder, self).__init__()
@@ -387,6 +385,11 @@ class VariableBuilder:
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif value in tensor_dunder_fns:
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, types.FunctionType):
             return UserFunctionVariable(

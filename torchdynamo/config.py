@@ -7,8 +7,6 @@ from types import ModuleType
 
 import torch
 
-import torchdynamo.utils
-
 try:
     import torch._prims
     import torch._refs
@@ -141,12 +139,17 @@ enforce_cond_guards_match = True
 # to allow DDP comm/compute overlap
 optimize_ddp = False
 
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
+
+# How to import torchdynamo, either torchdynamo or torch.dynamo
+dynamo_import = __name__.replace(".config", "")
+
+# How to import torchinductor, either torchinductor or torch.inductor
+inductor_import = dynamo_import.replace("dynamo", "inductor")
 
 
 class _AccessLimitingConfig(ModuleType):
@@ -155,7 +158,9 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            torchdynamo.utils.set_loggers_level(value)
+            from .utils import set_loggers_level
+
+            set_loggers_level(value)
         return object.__setattr__(self, name, value)
 
 
