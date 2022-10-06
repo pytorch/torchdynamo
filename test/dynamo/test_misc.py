@@ -2599,7 +2599,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
-
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -2613,7 +2612,6 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         m = Mod()
         graph, _ = torchdynamo.export(m, torch.randn(3, 3))
-
 
     def test_empty_graph(self):
         import torch.distributed as dist
