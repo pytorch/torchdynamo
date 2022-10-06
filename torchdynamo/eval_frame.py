@@ -17,6 +17,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from . import config
 from . import convert_frame
+from . import logging as torchdynamo_logging
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
@@ -84,6 +85,11 @@ def innermost_fn(fn):
         unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
         assert callable(unaltered_fn)
     return unaltered_fn
+
+
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
 
 
 class _TorchDynamoContext:
@@ -158,7 +164,7 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             if self.first_ctx:
-                log.info("Step 1: torchdynamo begin tracing")
+                _step_logger()(logging.INFO, "torchdynamo begin tracing")
 
             on_enter()
             prior = set_eval_frame(callback)
@@ -167,7 +173,7 @@ class _TorchDynamoContext:
             try:
                 result = fn(*args, **kwargs)
                 if self.first_ctx:
-                    log.info("Step 1: torchdynamo done tracing")
+                    _step_logger()(logging.INFO, "torchdynamo done tracing")
                 return result
             finally:
                 set_eval_frame(prior)

@@ -398,7 +398,7 @@ def _compile(
         output_codes.add(out_code)
 
         log.log(
-            torchdynamo_logging.INFO_CODE,
+            torchdynamo_logging.VERBOSE,
             format_bytecode(
                 "ORIGINAL BYTECODE",
                 code.co_name,
@@ -408,7 +408,7 @@ def _compile(
             ),
         )
         log.log(
-            torchdynamo_logging.INFO_CODE,
+            torchdynamo_logging.VERBOSE,
             format_bytecode(
                 "MODIFIED BYTECODE",
                 code.co_name,
@@ -426,7 +426,7 @@ def _compile(
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.log(torchdynamo_logging.INFO_CODE, guard_str)
+        log.log(torchdynamo_logging.VERBOSE, guard_str)
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)

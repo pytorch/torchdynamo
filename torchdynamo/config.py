@@ -18,12 +18,12 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# torchdynamo.logging.INFO_CODE print compiled functions + graphs
+# torchdynamo.logging.VERBOSE print compiled functions + graphs
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
-log_level = logging.WARNING
+log_level = logging.INFO
 
 # the name of a file to write the logs to
 log_file_name = None

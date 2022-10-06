@@ -2,7 +2,7 @@ import logging
 import os
 
 # logging level for dynamo generated graphs/bytecode/guards
-INFO_CODE = 15
+VERBOSE = 15
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
@@ -61,3 +61,28 @@ def init_logging(log_level, log_file_name=None):
                 logger.addHandler(log_file)
 
     set_loggers_level(log_level)
+
+
+# Creates a logging function that logs a message with a step # prepended.
+# get_step_logger should be lazily called (i.e. at runtime, not at module-load time)
+# so that step numbers are initialized properly. e.g.:
+
+# @functools.lru_cache(None)
+# def _step_logger():
+#     return get_step_logger(logging.getLogger(...))
+
+# def fn():
+#     _step_logger()(logging.INFO, "msg")
+
+_step_counter = 1
+
+
+def get_step_logger(logger):
+    global _step_counter
+    step = _step_counter
+    _step_counter += 1
+
+    def log(level, msg):
+        logger.log(level, f"Step {step}: {msg}")
+
+    return log

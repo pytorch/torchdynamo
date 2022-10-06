@@ -10,6 +10,7 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
+import torchdynamo.logging
 from torchdynamo.optimizations.backends import aot_autograd
 from torchdynamo.optimizations.normalize import normalize_ir
 from torchdynamo.optimizations.training import is_aot_autograd_safe_to_run
@@ -66,6 +67,11 @@ def is_unspec_input(t):
     return t.device.type == "cpu" and t.dim() == 0
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo.logging.get_step_logger(log)
+
+
 @DebugContext.wrap
 @no_dispatch()
 def compile_fx_inner(
@@ -76,10 +82,11 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
-    log.info(
-        "Step 4: torchinductor compiling %s graph %s",
-        "BACKWARDS" if is_backward else "FORWARDS",
-        graph_id,
+    _step_logger()(
+        logging.INFO,
+        "torchinductor compiling "
+        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
+        f"graph {graph_id}",
     )
     V.debug.fx_graph(gm, example_inputs)
 
@@ -117,10 +124,11 @@ def compile_fx_inner(
                 log.warning("skipping cudagraphs due to complex input striding")
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
-    log.info(
-        "Step 4: torchinductor done compiling %s graph %a",
-        "BACKWARDS" if is_backward else "FORWARDS",
-        graph_id,
+    _step_logger()(
+        logging.INFO,
+        "torchinductor done compiling "
+        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
+        f"graph {graph_id}",
     )
     return result
 
@@ -340,19 +348,16 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
 
     with overrides.patch_functions():
 
-        def aot_autograd_and_log(*args, **kwargs):
-            log.info("Step 3: running AOT autograd")
-            result = aot_autograd(
-                model_,
-                example_inputs_,
-                fw_compiler=make_boxed_compiler(fw_compiler),
-                bw_compiler=make_boxed_compiler(bw_compiler),
-                decompositions=select_decomp_table(),
-                partition_fn=functools.partial(
-                    min_cut_rematerialization_partition, compiler="inductor"
-                ),
-            )(*args, **kwargs)
-            log.info("Step 3: done AOT autograd")
-            return result
-
-        return aot_autograd_and_log
+        # TODO: can add logging before/after the call to create_aot_dispatcher_function
+        # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+        # once torchdynamo is merged into pytorch
+        return aot_autograd(
+            model_,
+            example_inputs_,
+            fw_compiler=make_boxed_compiler(fw_compiler),
+            bw_compiler=make_boxed_compiler(bw_compiler),
+            decompositions=select_decomp_table(),
+            partition_fn=functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
+        )

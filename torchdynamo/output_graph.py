@@ -1,4 +1,5 @@
 import collections
+import functools
 import itertools
 import logging
 import operator
@@ -68,6 +69,11 @@ class FakeRootModule(torch.nn.Module):
 
     def __repr__(self):
         return "FakeRootModule(...)"
+
+
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
 
 
 class OutputGraph(fx.Tracer):
@@ -395,7 +401,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    torchdynamo_logging.INFO_CODE,
+                    torchdynamo_logging.VERBOSE,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -411,9 +417,9 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            log.info("Step 2: calling compiler function")
+            _step_logger()(logging.INFO, "calling compiler function")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            log.info("Step 2: done compiler function")
+            _step_logger()(logging.INFO, "done compiler function")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             log.warning("-" * 40 + "\n")

@@ -12,6 +12,7 @@ from typing import List
 import sympy
 import torch
 
+import torchdynamo.logging
 import torchinductor
 
 from .. import config
@@ -1194,7 +1195,7 @@ class TritonScheduling:
             if node not in (EnableReduction, DisableReduction):
                 node.mark_run()
 
-        log.info("schedule: %s", node_schedule)
+        log.log(torchdynamo.logging.VERBOSE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
