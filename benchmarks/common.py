@@ -54,9 +54,11 @@ output_filename = None
 
 CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
+    "demucs",  # OOM
     "speech_transformer",
     # Huggingface
     "AllenaiLongformerBase",
+    "BartForConditionalGeneration",  # OOM
 ]
 
 CI_SKIP_AOT_EAGER_TRAINING = [
@@ -68,9 +70,15 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "vision_maskrcnn",
     "moco",
     # Huggingface
+    "AlbertForMaskedLM",  # OOM
+    "AlbertForQuestionAnswering",  # OOM
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",
     "BigBird",
+    "M2M100ForConditionalGeneration",
+    "PegasusForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # OOM
+    "XLNetLMHeadModel",  # OOM
     "YituTechConvBert",
     # TIMM
     "cait_m36_384",  # fp64_OOM
