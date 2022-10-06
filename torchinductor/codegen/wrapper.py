@@ -26,8 +26,6 @@ pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    if isinstance(node.get_layout(), ir.MutationLayout):
-        node = node.get_layout().target
     size = node.get_size()
     stride = node.get_stride()
     last_element = sympy_dot([s - 1 for s in size], stride)
