@@ -3,16 +3,15 @@ import builtins
 import torch
 import triton
 
-import torchinductor
-import torchinductor.triton_ops
-from torchdynamo.testing import rand_strided
-
+from .. import config
+from .. import triton_ops
 from ..triton_ops.autotune import mm_autotune
 from ..triton_ops.autotune import mm_heuristics
+from ..utils import dynamo_testing
 from ..virtualized import V
 
 aten = torch.ops.aten
-triton_ops = torchinductor.triton_ops
+rand_strided = dynamo_testing.rand_strided
 
 
 def str2func(str):
@@ -134,7 +133,7 @@ def tuned_conv(
                 timing = timing * adjust_triton
             timings[kernel] = timing
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        if torchinductor.config.debug:
+        if config.debug:
             print("for key = ", key)
             print("timing", timings)
             print("best_kernel", autotune.cache[key])
@@ -209,7 +208,7 @@ def tuned_mm(
         # bench_end = time.time()
         # bench_time = bench_end - bench_start
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        if torchinductor.config.debug:
+        if config.debug:
             print("for key = ", key)
             print("timing", timings)
             print("best_kernel", autotune.cache[key])
@@ -269,7 +268,7 @@ def tuned_conv_layout(
             timing, _, _ = autotune._bench(runnable_kernel, *run_args)
             timings[memory_format] = timing
         autotune.cache[key] = builtins.min(timings, key=timings.get)
-        if torchinductor.config.debug:
+        if config.debug:
             print("for key = ", key)
             print("timing", timings)
             print("best_layout", autotune.cache[key])
