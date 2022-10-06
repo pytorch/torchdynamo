@@ -33,8 +33,7 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     Issues
     1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
     2) LSTM - https://github.com/pytorch/functorch/issues/586
-    3) New op - https://github.com/pytorch/torchdynamo/issues/1448
-    4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
+    3) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
     """
 
     def raise_or_warn(reason):
@@ -51,11 +50,6 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     for submod in gm.modules():
         if submod.__class__.__name__ == "LSTM":
             return raise_or_warn("LSTM")
-
-    # 2) new does not work with fake tensor and aot autograd
-    for node in gm.graph.nodes:
-        if node.op == "call_method" and node.target == "new":
-            return raise_or_warn("new operator")
 
     # 2) Mutation in the graph
     mutated = False
