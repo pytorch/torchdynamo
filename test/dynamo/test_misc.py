@@ -2612,7 +2612,14 @@ class MiscTests(torchdynamo.testing.TestCase):
                     return (get_world_size,)
 
                 opt_fn = torchdynamo.optimize("inductor")(fn)
-                self.assertEqual(opt_fn()[0], 1)
+                res = None
+                try:
+                    res = opt_fn()[0]
+                except:
+                    pass
+                finally:
+                    dist.destroy_process_group()
+                self.assertEqual(res, 1)
 
 
 class CustomFunc(torch.autograd.Function):
