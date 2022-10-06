@@ -823,8 +823,8 @@ def mm(a: TensorBox, b: TensorBox):
 
 
 @register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b))
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
 
 
 @register_lowering(aten.bmm)
