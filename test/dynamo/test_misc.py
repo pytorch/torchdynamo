@@ -2615,7 +2615,7 @@ class MiscTests(torchdynamo.testing.TestCase):
                 res = None
                 try:
                     res = opt_fn()[0]
-                except:
+                except Exception:
                     pass
                 finally:
                     dist.destroy_process_group()
