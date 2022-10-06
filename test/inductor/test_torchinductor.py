@@ -55,7 +55,7 @@ try:
     CppCodeCache.load("")
     HAS_CPU = True
 except (CalledProcessError, OSError):
-    raise unittest.SkipTest("Did not find a working c++ compiler")
+    pass
 
 aten = torch.ops.aten
 
