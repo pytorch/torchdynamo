@@ -377,6 +377,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "multinomial": {f16, f32, f64},
     "new_empty": {b8, f16, f32, f64, i32, i64},
     "new_empty_strided": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
     "nn.functional.conv_transpose3d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
