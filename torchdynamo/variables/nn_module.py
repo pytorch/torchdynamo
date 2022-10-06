@@ -246,6 +246,22 @@ class NNModuleVariable(VariableTracker):
         ):
             return ConstantVariable(True, **options)
 
+        if name == "_get_item_by_idx":
+            # import pdb
+            # pdb.set_trace()
+            assert args[1].is_python_constant()
+            assert isinstance(args[0], TupleVariable)
+            mod_var = args[0].items[args[1].value]
+            key = mod_var.module_key
+            submod = tx.output.get_submodule(key)
+            return tx.output.register_attr_or_module(
+                submod,
+                key,
+                key,
+                source=NNModuleSource(GetItemSource(self.source, key)),
+                **options,
+            )
+
         if constant:
             fn = getattr(module, name)
             name = f"{module.__class__.__name__}_{name}_result"
@@ -254,6 +270,9 @@ class NNModuleVariable(VariableTracker):
         if not all(
             x.is_python_constant() for x in itertools.chain(args, kwargs.values())
         ):
+            import pdb
+
+            pdb.set_trace()
             raise unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
@@ -343,6 +362,7 @@ class NNModuleVariable(VariableTracker):
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
                 torch.nn.ParameterList.__getitem__,
+                torch.nn.Sequential.__getitem__,
             ), typestr(module)
             assert self.source
 

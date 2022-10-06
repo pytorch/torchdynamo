@@ -325,6 +325,8 @@ class BuiltinVariable(VariableTracker):
             return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
+        # import pdb
+        # pdb.set_trace()
 
         if handler:
             try:
@@ -336,9 +338,14 @@ class BuiltinVariable(VariableTracker):
         if handler:
             try:
                 result = handler(tx, *args, **kwargs)
+                # import pdb
+                # pdb.set_trace()
                 if result is not None:
                     return result.add_options(options)
             except Unsupported as exc:
+                import pdb
+
+                pdb.set_trace()
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
@@ -355,6 +362,9 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
 
+        import pdb
+
+        pdb.set_trace()
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
