@@ -263,11 +263,8 @@ class SimpleEnterExitContextWrappingVariable(ContextWrappingVariable):
         self.mode = tx.output.graph.create_node(
             "call_function", enter_functional, (), {}
         )
-        # result = self.cm.__enter__()
-        # return variables.ConstantVariable(result, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        # self.cm.__exit__(None, None, None)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def _func_name(self):
