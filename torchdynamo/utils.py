@@ -712,12 +712,13 @@ try:
         try:
             return fn()
         except UnsupportedFakeTensorException as e:
-            from .exc import FakeTensorError
+            from .exc import unimplemented
 
-            raise FakeTensorError(
+            log.warning(
                 f"Unsupported: {e.reason} with fake tensor propagation. "
                 "Run with config.fake_tensor_propagation=False"
-            ) from e
+            )
+            raise unimplemented(f"Unsupported: {e.reason} with fake tensor propagation")
 
     def wrap_to_fake_tensor(e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
