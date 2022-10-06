@@ -75,7 +75,7 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",
     "BigBird",
-    "M2M100ForConditionalGeneration",
+    "M2M100ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
@@ -98,6 +98,8 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "tacotron2",
     "yolov3",  # Accuracy
     # Huggingface
+    "AllenaiLongformerBase",  # OOM
+    "BartForConditionalGeneration",  # OOM
     "BigBird",
     "YituTechConvBert",
     # TIMM
@@ -144,10 +146,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "DebertaForQuestionAnswering",
     "DebertaV2ForMaskedLM",
     "GPTNeoForCausalLM",
-    "M2M100ForConditionalGeneration",
-    "MT5ForConditionalGeneration",
-    "MegatronBertForCausalLM",
-    "MegatronBertForQuestionAnswering",
     "MobileBertForMaskedLM",
     "PegasusForConditionalGeneration",
     "T5ForConditionalGeneration",
