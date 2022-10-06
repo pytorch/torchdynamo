@@ -134,11 +134,12 @@ inductor_skips["cuda"] = {
     "nn.functional.poisson_nll_loss": {f64},
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
-    "nn.functional.tanhshrink": {f64},
+    "nn.functional.tanhshrink": {f16, f64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.softmin": {f64},  # segfault
     "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.triplet_margin_loss": {f16},
     "sigmoid": {f64},
     "sin": {f64},
     "special.log_ndtr": {f64},
