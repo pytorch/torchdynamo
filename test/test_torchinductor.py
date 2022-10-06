@@ -148,32 +148,38 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
 ):
     torchdynamo.reset()
 
-    # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+    ref_inputs = example_inputs
+    ref_kwargs = kwargs
     has_lowp_args = False
 
-    def upcast_fn(x):
-        nonlocal has_lowp_args
-        if isinstance(x, torch.Tensor) and (
-            x.dtype == torch.float16 or x.dtype == torch.bfloat16
-        ):
-            has_lowp_args = True
-            return x.float()
-        else:
-            return x
+    if reference_in_float:
+        # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+        def upcast_fn(x):
+            nonlocal has_lowp_args
+            if isinstance(x, torch.Tensor) and (
+                x.dtype == torch.float16 or x.dtype == torch.bfloat16
+            ):
+                has_lowp_args = True
+                return x.float()
+            else:
+                return x
 
-    upcasted_inputs = list(map(upcast_fn, example_inputs))
-    upcasted_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
-    if has_lowp_args:
-        if hasattr(model, "to"):
-            model = model.to(torch.float)
+        ref_inputs = list(map(upcast_fn, example_inputs))
+        ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
+        if has_lowp_args:
+            if hasattr(model, "to"):
+                model = model.to(torch.float)
+
     torch.manual_seed(0)
 
-    correct = model(*upcasted_inputs, **upcasted_kwargs)
+    correct = model(*ref_inputs, **ref_kwargs)
     # downcast the model back if needed
-    if has_lowp_args:
+    if reference_in_float and has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.half)
 
@@ -201,15 +207,17 @@ def check_model(
     assert called, "Ran graph without calling compile_fx"
 
     assert type(actual) == type(correct)
-    correct_flat, correct_spec = tree_flatten(correct)
-    actual_flat, _ = tree_flatten(actual)
-    correct_flat = tuple(
-        y.to(x.dtype)
-        if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
-        else y
-        for x, y in zip(actual_flat, correct_flat)
-    )
-    correct = tree_unflatten(correct_flat, correct_spec)
+
+    if reference_in_float:
+        correct_flat, correct_spec = tree_flatten(correct)
+        actual_flat, _ = tree_flatten(actual)
+        correct_flat = tuple(
+            y.to(x.dtype)
+            if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
+            else y
+            for x, y in zip(actual_flat, correct_flat)
+        )
+        correct = tree_unflatten(correct_flat, correct_spec)
 
     self.assertEqual(
         actual,
@@ -235,6 +243,7 @@ def check_model_cuda(
     exact_dtype=True,
     nopython=True,
     copy_to_cuda=True,
+    reference_in_float=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -259,6 +268,7 @@ def check_model_cuda(
         rtol=rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
+        reference_in_float=reference_in_float,
     )
 
     if check_lowp:
@@ -282,6 +292,7 @@ def check_model_cuda(
             rtol=rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
+            reference_in_float=reference_in_float,
         )
 
 
