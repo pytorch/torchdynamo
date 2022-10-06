@@ -40,10 +40,7 @@ tensor_dunder_fns = [
     torch._C._TensorBase.__ror__,
     torch._C._TensorBase.__rxor__,
     torch._C._TensorBase.__rand__,
-<<<<<<< HEAD
-    torch.testing._internal.common_utils.disable_functorch,
-=======
->>>>>>> 39ffc5f1c3483f004ca6266f5fb5e8f352ef7900
+    torch.testing._internal.common_utils.disable_functorch
 ]
 
 torch_special_class_types = (
