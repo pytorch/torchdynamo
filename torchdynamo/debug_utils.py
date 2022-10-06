@@ -8,6 +8,7 @@ import subprocess
 import textwrap
 import uuid
 from collections import Counter
+from importlib import import_module
 
 import torch
 import torch.fx as fx
@@ -156,8 +157,8 @@ def generate_compiler_repro_string(gm, args):
     return model_str
 
 
-INDUCTOR_IMPORT = """
-from torchinductor.compile_fx import compile_fx_inner
+INDUCTOR_IMPORT = f"""
+from {config.inductor_import}.compile_fx import compile_fx_inner
 """
 
 NVFUSER_IMPORT = """
@@ -240,10 +241,11 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
 
 
 def inductor_fails(fx_g, args, check_str=None):
-    from torchinductor import config
-    from torchinductor.compile_fx import compile_fx_inner
+    compile_fx_inner = import_module(
+        f"{config.inductor_import}.compile_fx"
+    ).compile_fx_inner
 
-    config.triton.autotune = False
+    import_module(f"{config.inductor_import}.config").triton.autotune = False
 
     try:
         result = fx_g(*args)
@@ -254,7 +256,7 @@ def inductor_fails(fx_g, args, check_str=None):
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
-        compile_mod = compile_mod(*args)
+        compile_mod(*args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -677,14 +679,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
 def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from .optimizations.backends import BACKENDS
+    from .eval_frame import lookup_backend
 
-    if compiler_name == "inductor":
-        from torchinductor.compile_fx import compile_fx
-
-        compiler_fn = compile_fx
-    else:
-        compiler_fn = BACKENDS[compiler_name]
+    compiler_fn = lookup_backend(compiler_name)
 
     try:
         compiled_gm = compiler_fn(gm, example_inputs)

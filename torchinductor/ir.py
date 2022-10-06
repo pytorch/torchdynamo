@@ -2951,7 +2951,7 @@ class Convolution(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.kernel == "triton_ops.conv":
             wrapper.header.writeline(
-                f"import torchinductor.triton_ops.conv as {self.kernel}"
+                f"import {config.inductor_import}.triton_ops.conv as {self.kernel}"
             )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
