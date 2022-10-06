@@ -122,7 +122,6 @@ inductor_skips["cuda"] = {
     "masked.prod": {f16, f32, f64},
     "empty_like": {b8, f16, f32, f64, i32, i64},
     "empty": {b8, f16, f32, f64, i32, i64},
-    "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     # Call parameter type does not match function signature!
@@ -284,7 +283,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint_like": {f16, f32, f64, i32, i64},
     "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
-    "reciprocal": {b8, i32, i64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
     "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64},
@@ -405,7 +403,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pinverse": {f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
-    "reciprocal": {b8, i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randn": {f16, f32, f64},
