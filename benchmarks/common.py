@@ -966,6 +966,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -1069,11 +1073,14 @@ class BenchmarkRunner:
                 ("dev", "name", "batch_size", "accuracy"),
                 [current_device, current_name, current_batch_size, accuracy_status],
             )
-            return "PASS" if accuracy_status == "pass" else "FAIL"
+            return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             self.args.training, current_device, name
         )
+
+        if name in self.skip_accuracy_checks_large_models_dashboard:
+            return record_status("pass_due_to_skip")
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
@@ -1375,6 +1382,9 @@ def parse_args():
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
         "--skip-fp64-check", action="store_true", help="skip accuracy check using fp64"
