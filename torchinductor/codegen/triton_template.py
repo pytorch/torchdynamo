@@ -6,6 +6,7 @@ from jinja2 import Environment
 from jinja2 import FileSystemLoader
 from jinja2 import StrictUndefined
 
+from .. import config
 from .. import ir
 from ..virtualized import V
 from .common import IndentedBuffer
@@ -191,7 +192,7 @@ class TritonTemplateKernel(TritonKernel):
                     assert "delta_x_ptr" not in self.args_dict.keys()
                     self.args_dict["delta_x_ptr"] = f"delta_x_{kernel_name}"
                     wrapper.writeline(
-                        "from torchinductor.triton_ops import _conv as _conv"
+                        f"from {config.inductor_import}.triton_ops import _conv"
                     )
                     wrapper.writeline(
                         f"delta_x_{kernel_name} = _conv._delta_x_ptr("
@@ -209,7 +210,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.args_dict["delta_xw_ptr"] = f"delta_xw_{kernel_name}"
                     self.args_dict["delta_xc_ptr"] = f"delta_xc_{kernel_name}"
                     wrapper.writeline(
-                        "from torchinductor.triton_ops import _conv as _conv"
+                        f"from {config.inductor_import}.triton_ops import _conv"
                     )
                     wrapper.writeline(
                         f"delta_xh_{kernel_name}, delta_xw_{kernel_name}, delta_xc_{kernel_name}"

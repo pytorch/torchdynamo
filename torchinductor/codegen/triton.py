@@ -12,10 +12,9 @@ from typing import List
 import sympy
 import torch
 
-import torchinductor
-
 from .. import config
 from .. import ir
+from .. import scheduler
 from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
@@ -773,9 +772,17 @@ class TritonKernel(Kernel):
             other = ", other=0"
         else:
             other = ""
-        line = f"tl.load({var} + {index}, {mask}{ep}{other})"
+        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
+        """
+        elif V.graph.get_dtype(name) == torch.bool:
+            # This is a fix for https://github.com/pytorch/torchdynamo/issues/1450
+            # The root cause of the problem is a one-element bool tensor was stored as
+            # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
+            # which confuses the backward pass when it calls sum on the bool tensor.
+            line = f"({line} != 0)"
+        """
 
         if (
             self.inside_reduction
@@ -797,9 +804,9 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
-            line = f"tl.store({var} + {index}, {value}, {mask})"
+            line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
+            line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
@@ -950,9 +957,9 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from torchinductor.ir import ReductionHint
-                    from torchinductor.triton_ops.autotune import {heuristics}
-                    from torchinductor.utils import instance_descriptor
+                    from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.triton_ops.autotune import {heuristics}
+                    from {config.inductor_import}.utils import instance_descriptor
                 """
             )
 
@@ -1358,7 +1365,7 @@ class TritonScheduling:
             if all(
                 TritonKernel.is_compatible(new_groups, node.get_ranges())
                 for node in node_schedule
-                if isinstance(node, torchinductor.scheduler.SchedulerNode)
+                if isinstance(node, scheduler.SchedulerNode)
             ):
                 return new_groups
 
