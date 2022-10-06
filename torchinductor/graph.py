@@ -24,7 +24,8 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_logging, dynamo_utils
+from .utils import dynamo_logging
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
