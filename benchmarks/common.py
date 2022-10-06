@@ -76,10 +76,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "BartForConditionalGeneration",
     "BigBird",
     "M2M100ForConditionalGeneration",  # OOM
-    "MBartForConditionalGeneration",  # OOM
-    "MT5ForConditionalGeneration",  # OOM
-    "MegatronBertForCausalLM",  # OOM
-    "MegatronBertForQuestionAnswering",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
@@ -151,9 +147,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "DebertaV2ForMaskedLM",
     "GPTNeoForCausalLM",
     "M2M100ForConditionalGeneration",
-    "MT5ForConditionalGeneration",
-    "MegatronBertForCausalLM",
-    "MegatronBertForQuestionAnswering",
     "MobileBertForMaskedLM",
     "PegasusForConditionalGeneration",
     "T5ForConditionalGeneration",
