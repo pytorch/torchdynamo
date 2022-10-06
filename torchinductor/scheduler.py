@@ -322,7 +322,6 @@ class SchedulerNode(BaseSchedulerNode):
             not self.node.should_allocate()
             or self.node.get_alias_names()
             or self.node.get_mutation_names()
-            or isinstance(self.node.get_layout(), ir.MultiOutputLayout)
         ):
             return super().allocate()
 
