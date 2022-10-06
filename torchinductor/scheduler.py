@@ -321,10 +321,12 @@ class SchedulerNode(BaseSchedulerNode):
             not self.node.should_allocate()
             or self.node.get_alias_names()
             or self.node.get_mutation_names()
+            or isinstance(self.node.get_layout(), ir.MultiOutputLayout)
         ):
             return super().allocate()
 
         if config.inplace_buffers:
+            from .codegen.wrapper import buffer_reuse_key
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
@@ -340,6 +342,8 @@ class SchedulerNode(BaseSchedulerNode):
                         len(remaining_uses) == 1
                         and remaining_uses[0].can_inplace
                         and remaining_uses[0].node is self
+                        and not isinstance(input_node.node.get_layout(), (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout))
+                        and buffer_reuse_key(input_node.node) == buffer_reuse_key(self.node)
                     ):
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
@@ -347,11 +351,18 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
+                        V.kernel.must_keep_buffers.add(input_node.get_name())
                         return
+            """
             buffer_names_for_reuse = self.scheduler.buffer_names_no_longer_needed - self.last_usage
             for buffer_name in buffer_names_for_reuse:
                 node_for_reuse = self.scheduler.name_to_node.get(buffer_name)
-                if self._sizes == node_for_reuse._sizes:
+                if node_for_reuse is None:
+                    continue
+                if (
+                    not isinstance(node_for_reuse.node.get_layout(), ir.MultiOutputLayout)
+                    and buffer_reuse_key(node_for_reuse.node) == buffer_reuse_key(self.node)
+                ):
                     V.graph.wrapper_code.codegen_inplace_reuse(
                         node_for_reuse.node, self.node
                     )
@@ -359,6 +370,7 @@ class SchedulerNode(BaseSchedulerNode):
                         node_for_reuse.get_name(), self.get_name()
                     )
                     return
+            """
         super().allocate()
 
     def run(self, *index_vars):

@@ -303,11 +303,17 @@ class KernelArgs:
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):
-        buf = InplacedBuffer(
-            f"in_out_ptr{len(self.inplace_buffers)}", [input_name, output_name]
-        )
-        self.inplace_buffers[input_name] = buf
-        self.inplace_buffers[output_name] = buf
+        assert output_name not in self.inplace_buffers
+        if input_name in self.inplace_buffers:
+            buf = self.inplace_buffers[input_name]
+            buf.other_names.append(output_name)
+            self.inplace_buffers[output_name] = buf
+        else:
+            buf = InplacedBuffer(
+                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}", [input_name, output_name]
+            )
+            self.inplace_buffers[input_name] = buf
+            self.inplace_buffers[output_name] = buf
 
     def size(self, name):
         if str(name) == "seed":

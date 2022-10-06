@@ -26,6 +26,8 @@ pexpr = texpr
 
 
 def buffer_reuse_key(node: ir.Buffer):
+    if isinstance(node.get_layout(), ir.MutationLayout):
+        node = node.get_layout().target
     size = node.get_size()
     stride = node.get_stride()
     last_element = sympy_dot([s - 1 for s in size], stride)
@@ -40,13 +42,16 @@ def buffer_reuse_key(node: ir.Buffer):
 
 def make_buffer_reuse(old, new):
     assert old.get_dtype() == new.get_dtype()
+    del_line = ""
+    if old.get_name() not in V.graph.get_output_names():
+        del_line = f"; del {old.get_name()}"
     if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-        return f"{new.get_name()} = {old.get_name()}; del {old.get_name()}"
+        return f"{new.get_name()} = {old.get_name()}{del_line}"
 
     return (
         f"{new.get_name()} = as_strided({old.get_name()}, "
         f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}); del {old.get_name()}"
+        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}){del_line}"
     )
 
 
@@ -69,6 +74,7 @@ class MemoryPlanningState:
         self.reuse_pool: Dict[
             Any, List["FreeIfNotReusedLine"]
         ] = collections.defaultdict(list)
+        self.reused_as_map = {}
 
     def __contains__(self, key):
         return bool(self.reuse_pool.get(key, None))
@@ -142,8 +148,12 @@ class ReuseLine(MemoryPlanningLine):
         if self.reused_as.get_name() in V.graph.removed_buffers:
             # we hit this case only for inplace buffers
             return FreeLine(self.node).plan(state)
-        assert self.node.get_name() not in V.graph.removed_buffers
-        return self
+        reuse_line = self
+        if self.node.get_name() in state.reused_as_map:
+            reuse_line = ReuseLine(state.reused_as_map[self.node.get_name()], self.reused_as)
+        state.reused_as_map[self.node.get_name()] = self.reused_as
+        assert reuse_line.node.get_name() not in V.graph.removed_buffers
+        return reuse_line
 
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
@@ -267,6 +277,9 @@ class WrapperCodeGen(CodeGen):
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
+
+        if isinstance(buffer, ir.ExternKernelAlloc):
+            return
 
         layout = buffer.get_layout()
         if isinstance(layout, ir.MutationLayout):
