@@ -8,17 +8,12 @@ import numpy
 import torch._C
 import torch.nn
 
-from torchdynamo.source import GetItemSource
-from torchdynamo.source import NNModuleSource
-from torchdynamo.variables.lists import ListVariable
-from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import AutocastModeVariable
-from torchdynamo.variables.misc import AutogradProfilerContextWrapperVariable
-
 from .. import config
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
+from ..source import GetItemSource
+from ..source import NNModuleSource
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
@@ -27,13 +22,71 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from ..utils import tensortype_to_dtype
 from .base import VariableTracker
+from .lists import ListVariable
+from .lists import TupleVariable
+from .misc import AutocastModeVariable
+from .misc import AutogradProfilerContextWrapperVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 
 tensor_dunder_fns = [
     torch.Tensor.__rmatmul__,
+    torch.Tensor.__rmod__,
+    torch.Tensor.__rpow__,
+    torch.Tensor.__rsub__,
+    torch._C._TensorBase.__radd__,
+    torch._C._TensorBase.__rmul__,
+    torch._C._TensorBase.__ror__,
+    torch._C._TensorBase.__rxor__,
+    torch._C._TensorBase.__rand__,
 ]
+
+
+# TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
+def remap_as_fn___radd__(*args):
+    return torch._C._TensorBase.__radd__(*args)
+
+
+def remap_as_fn___rmul__(*args):
+    return torch._C._TensorBase.__rmul__(*args)
+
+
+def remap_as_fn___ror__(*args):
+    return torch._C._TensorBase.__ror__(*args)
+
+
+def remap_as_fn___rxor__(*args):
+    return torch._C._TensorBase.__rxor__(*args)
+
+
+def remap_as_fn___rand__(*args):
+    return torch._C._TensorBase.__rand__(*args)
+
+
+tensor_dunder_fns_remap = {
+    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+}
+
+try:
+    # Wed need to monkeypatch transformers here, sadly.
+    # TODO(voz): Upstream to transformers lib
+    import transformers
+
+    def _dynamo_overriden_transformers_eq(self, other):
+        if not hasattr(other, "__dict__"):
+            return False
+        return self.__dict__ == other.__dict__
+
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
+except ImportError:
+    pass
 
 
 class TorchVariable(VariableTracker):
@@ -42,6 +95,8 @@ class TorchVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(TorchVariable, self).__init__(**kwargs)
 
+        if value in tensor_dunder_fns_remap:
+            value = tensor_dunder_fns_remap[value]
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -459,9 +514,9 @@ class TorchPyOperator(VariableTracker):
                 return arg
 
         def register_as_subgraph(fn, name, args):
-            import torchdynamo
+            from .. import export
 
-            gm, guards = torchdynamo.export(fn, *args)
+            gm, guards = export(fn, *args)
 
             next_name = None
             i = 0
@@ -483,7 +538,7 @@ class TorchPyOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-            import torchdynamo.config as config
+            from .. import config
 
             if config.fake_tensor_propagation:
                 unimplemented("Fake tensor mode not yet supported for cond")

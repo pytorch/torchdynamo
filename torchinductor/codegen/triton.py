@@ -12,10 +12,9 @@ from typing import List
 import sympy
 import torch
 
-import torchinductor
-
 from .. import config
 from .. import ir
+from .. import scheduler
 from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
@@ -138,17 +137,18 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
-        # wonkyness to work around https://github.com/openai/triton/issues/532
-        # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
-        a = ops.identity(a)
-        b = ops.identity(b)
-        c = ops.identity(c)
-        a = ops.identity(
-            f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
-        )
-        a = ops.identity(
-            f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
-        )
+        if not config.triton.simple_where:
+            # wonkyness to work around https://github.com/openai/triton/issues/532
+            # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
+            a = ops.identity(a)
+            b = ops.identity(b)
+            c = ops.identity(c)
+            a = ops.identity(
+                f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
+            )
+            a = ops.identity(
+                f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
+            )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
@@ -765,9 +765,24 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         else:
             ep = ""
-        line = f"tl.load({var} + {index}, {mask}{ep})"
+        # "other" below is a workaround for https://github.com/openai/triton/issues/737
+        # for bool, even though it's likely subject to the same bug, setting `other` leads
+        # to LLVM errors so we are skipping it for now
+        if "tmp" in mask and V.graph.get_dtype(name) != torch.bool:
+            other = ", other=0"
+        else:
+            other = ""
+        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
+        """
+        elif V.graph.get_dtype(name) == torch.bool:
+            # This is a fix for https://github.com/pytorch/torchdynamo/issues/1450
+            # The root cause of the problem is a one-element bool tensor was stored as
+            # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
+            # which confuses the backward pass when it calls sum on the bool tensor.
+            line = f"({line} != 0)"
+        """
 
         if (
             self.inside_reduction
@@ -789,9 +804,9 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
-            line = f"tl.store({var} + {index}, {value}, {mask})"
+            line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
+            line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
@@ -942,9 +957,9 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from torchinductor.ir import ReductionHint
-                    from torchinductor.triton_ops.autotune import {heuristics}
-                    from torchinductor.utils import instance_descriptor
+                    from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.triton_ops.autotune import {heuristics}
+                    from {config.inductor_import}.utils import instance_descriptor
                 """
             )
 
@@ -1350,7 +1365,7 @@ class TritonScheduling:
             if all(
                 TritonKernel.is_compatible(new_groups, node.get_ranges())
                 for node in node_schedule
-                if isinstance(node, torchinductor.scheduler.SchedulerNode)
+                if isinstance(node, scheduler.SchedulerNode)
             ):
                 return new_groups
 

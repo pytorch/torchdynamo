@@ -493,6 +493,22 @@ def squeeze_(x, dim=None):
     return x
 
 
+@register_lowering(aten.isinf)
+def isinf(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isinf")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
+@register_lowering(aten.isnan)
+def isnan(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isnan")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
 @register_lowering(aten.ceil)
 def ceil(x):
     if is_integer_type(x):
@@ -807,8 +823,8 @@ def mm(a: TensorBox, b: TensorBox):
 
 
 @register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b))
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
 
 
 @register_lowering(aten.bmm)
@@ -999,7 +1015,6 @@ if has_torchvision_roi_align():
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.as_strided_scatter)
-make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -2788,7 +2803,7 @@ def _validate_reduction_axis(x, axis):
     for i in range(len(axis)):
         if axis[i] < 0:
             axis[i] += len(size)
-        assert 0 <= axis[i] < len(size)
+        assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
     assert len(set(axis)) == len(axis), "reduction axis not unique"
     return axis
 
@@ -2933,8 +2948,21 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
+def _is_ir_node_and_cuda(x):
+    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
+        return True
+
+    return False
+
+
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
+    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
+        assert a.get_dtype() in (
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, int) and b == 1:
@@ -3089,6 +3117,17 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
+
+    # This is a temp fix for https://github.com/pytorch/torchdynamo/issues/1450
+    # The root cause of the problem is a one-element bool tensor was stored as
+    # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
+    # which confuses the backward pass when it calls sum on the bool tensor.
+    # A better place to fix is in triton.py (see the comment there), but it is
+    # blocked by a trition issue on bool comparison, causing opinfo tests like
+    # test_comprehensive_gt_cuda_bool to fail.
+    if is_boolean_dtype(x.get_dtype()):
+        x = to_dtype(to_dtype(x, dtype), torch.bool)
+
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
@@ -3108,34 +3147,51 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
-exp = register_pointwise(aten.exp)
+exp = register_pointwise(
+    aten.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 relu = register_pointwise(aten.relu)
-sigmoid = register_pointwise(aten.sigmoid)
-sqrt = register_pointwise(aten.sqrt)
+sigmoid = register_pointwise(
+    aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+sqrt = register_pointwise(
+    aten.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 
-register_pointwise(aten.cos)
-register_pointwise(aten.sin)
+register_pointwise(
+    aten.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_pointwise(
+    aten.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
-register_pointwise(aten.lgamma)
-register_pointwise(aten.log)
+register_pointwise(
+    aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_pointwise(
+    aten.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
-register_pointwise(aten.reciprocal)
+register_pointwise(
+    aten.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
-register_pointwise(aten.silu)
+register_pointwise(
+    aten.silu, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
-register_pointwise(aten.isinf, override_return_dtype=torch.bool)
-register_pointwise(aten.isnan, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)

@@ -10,8 +10,6 @@ from sympy import Integer
 from torch._decomp import get_decompositions
 from torch.utils._mode_utils import no_dispatch
 
-from torchdynamo.utils import dynamo_timed
-
 from . import config
 from . import ir
 from .codegen.wrapper import WrapperCodeGen
@@ -26,6 +24,7 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -138,7 +137,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def run(self, *args):
         if self.num_dynamic_inputs is None:
             self.num_dynamic_inputs = len(args)
@@ -225,7 +224,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.device_types.add(example.device.type)
+        if example.dim() != 0:
+            self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -329,7 +329,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate()
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 

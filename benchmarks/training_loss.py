@@ -14,7 +14,7 @@ from transformers import AutoTokenizer
 
 import torchdynamo
 
-torchdynamo.config.fake_tensor_propagation = False
+torch.backends.cuda.matmul.allow_tf32 = True
 
 # You will download around 84G dataset if you run this end to end training/evaluation example.
 
@@ -54,7 +54,7 @@ def training_iter_fn(batch, model, optimizer):
 
 
 def model_training_evaluation(
-    backend, train_dataloader, eval_dataloader, model, optimizer, num_epochs
+    backend, train_dataloader, eval_dataloader, model, optimizer, num_epochs, evaluation
 ):
     model.to(device)
     model.train()
@@ -75,22 +75,25 @@ def model_training_evaluation(
                 loss_history.append(running_loss / 100)
                 running_loss = 0.0
 
-    metric = load_metric("accuracy")
-    model.eval()
-    if not backend:
-        opt_model = model
+    if evaluation:
+        metric = load_metric("accuracy")
+        model.eval()
+        if not backend:
+            opt_model = model
+        else:
+            opt_model = torchdynamo.optimize(backend)(model)
+        for batch in eval_dataloader:
+            batch = {k: v.to(device) for k, v in batch.items()}
+            with torch.no_grad():
+                outputs = opt_model(**batch)
+
+            logits = outputs.logits
+            predictions = torch.argmax(logits, dim=-1)
+            metric.add_batch(predictions=predictions, references=batch["labels"])
+
+        return loss_history, metric.compute()
     else:
-        opt_model = torchdynamo.optimize(backend)(model)
-    for batch in eval_dataloader:
-        batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.no_grad():
-            outputs = opt_model(**batch)
-
-        logits = outputs.logits
-        predictions = torch.argmax(logits, dim=-1)
-        metric.add_batch(predictions=predictions, references=batch["labels"])
-
-    return loss_history, metric.compute()
+        return loss_history, None
 
 
 def check_loss(ref_loss, res_loss):
@@ -136,6 +139,11 @@ def parse_args():
         default="Adam",
         help="train model using a given optimizer (default: Adam)",
     )
+    parser.add_argument(
+        "--evaluation",
+        action="store_true",
+        help="running evaluation after model training",
+    )
     args = parser.parse_args()
     return args
 
@@ -154,12 +162,24 @@ def main():
     else:
         optimizer = optimizer_cls(model.parameters(), lr=args.lr)
     native_start = time.time()
-    ref_loss, _ = model_training_evaluation(
-        None, train_dataloader, eval_dataloader, model, optimizer, args.epochs
+    ref_loss, accuracy = model_training_evaluation(
+        None,
+        train_dataloader,
+        eval_dataloader,
+        model,
+        optimizer,
+        args.epochs,
+        args.evaluation,
     )
     native_end = time.time()
-    res_loss, _ = model_training_evaluation(
-        args.backend, train_dataloader, eval_dataloader, model, optimizer, args.epochs
+    res_loss, accuracy = model_training_evaluation(
+        args.backend,
+        train_dataloader,
+        eval_dataloader,
+        model,
+        optimizer,
+        args.epochs,
+        args.evaluation,
     )
     dynamo_end = time.time()
     if check_loss(ref_loss, res_loss):
@@ -170,6 +190,8 @@ def main():
         print(
             "[FAILED] TorchDynamo end to end training loss is greater than native Pytorch"
         )
+    if args.evaluation:
+        print(f"Model accuracy: {accuracy}")
     native_elapsed = native_end - native_start
     dynamo_elapsed = dynamo_end - native_end
     print(

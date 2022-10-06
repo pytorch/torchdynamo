@@ -137,6 +137,26 @@ class TestDistributed(torchdynamo.testing.TestCase):
         reason="requires pytorch landing in parallel",
     )
     @patch.object(config, "optimize_ddp", True)
+    def test_graph_split_inductor(self):
+        """
+        Same as above, but using inductor backend.
+        We observed issues with inductor/fx interface in the past.
+        """
+        m, inputs, correct_outputs = self.get_model()
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        @torchdynamo.optimize("inductor")
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+
+    @pytest.mark.skipif(
+        not hasattr(DDP, "_get_active_ddp_module"),
+        reason="requires pytorch landing in parallel",
+    )
+    @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
         """
         Ensures the DDPOptimizer returns a correct, compiled module without
