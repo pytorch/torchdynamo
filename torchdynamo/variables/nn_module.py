@@ -247,8 +247,6 @@ class NNModuleVariable(VariableTracker):
             return ConstantVariable(True, **options)
 
         if name == "_get_item_by_idx":
-            # import pdb
-            # pdb.set_trace()
             assert args[1].is_python_constant()
             assert isinstance(args[0], TupleVariable)
             mod_var = args[0].items[args[1].value]
@@ -270,9 +268,6 @@ class NNModuleVariable(VariableTracker):
         if not all(
             x.is_python_constant() for x in itertools.chain(args, kwargs.values())
         ):
-            import pdb
-
-            pdb.set_trace()
             raise unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
