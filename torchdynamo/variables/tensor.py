@@ -278,9 +278,20 @@ class TensorVariable(VariableTracker):
                 example_value
                 # guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
+        # elif proxy.node.target == torch.cuda.is_available or isinstance(example_value, bool):
+        # #     return UnspecializedPythonVariable.create(
+        # #         tx=tx,
+        # #         proxy=proxy,
+        # #         example_value=torch.tensor(example_value),
+        # #         raw_value=None if use_fake_tensors else example_value,
+        # #         need_unwrap=False,
+        # #         **options,
+        # #     )
+        #     unimplemented("Skip due to {proxy.node.target}")
+        #     return ConstantVariable(example_value)
         else:
-            import pdb
-            pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
             assert (
                 False
             ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"

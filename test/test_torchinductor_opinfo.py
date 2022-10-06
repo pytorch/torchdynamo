@@ -531,17 +531,18 @@ class TestInductorOpInfo(TestCase):
             kwargs = sample_input.kwargs
 
             try:
-                import pdb
-                pdb.set_trace()
+                # import pdb
+                # pdb.set_trace()
+                # with torch.testing._internal.common_utils.freeze_rng_state():
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
                     self.check_model_cuda(
-                        fn, args, kwargs, check_lowp=False, nopython=True
+                        fn, args, kwargs, check_lowp=False, nopython=False
                     )
                 elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
+                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=False)
 
             except Exception as e:
 
