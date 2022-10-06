@@ -47,8 +47,9 @@ The steps correspond to the following parts of the stack (according to the image
 |------|------------------|
 | 1    | TorchDynamo      | 
 | 2    | Compiler Backend |
-| 3    | AOTAutograd      |
-| 4    | TorchInductor    |
+| 3    | TorchInductor    |
+
+The beginning and end of AOTAutograd is currently not logged, but we plan to add it soon.
 
 If info logging is insufficient, then there are also some backend options which can enable you to determine which component is causing the error if you're unable to understand the error message that is generated. These are the following:
 
