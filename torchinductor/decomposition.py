@@ -11,7 +11,7 @@ from torch._decomp import get_decompositions
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
 
-from torchinductor import config
+from . import config
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten

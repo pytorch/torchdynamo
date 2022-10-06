@@ -3,6 +3,7 @@ import logging
 import operator
 from collections import defaultdict
 from functools import partial
+from importlib import import_module
 from typing import Set
 
 import torch
@@ -230,13 +231,15 @@ class AotInductorDebug(AotAutogradStrategy):
         from functorch.compile import min_cut_rematerialization_partition
         from functorch.compile import nop
 
-        from torchinductor.compile_fx import select_decomp_table
+        decompositions = import_module(
+            f"{config.inductor_import}.compile_fx"
+        ).select_decomp_table()
 
         kwargs = {
             # these are taken from memory_efficient_fusion()
             "fw_compiler": nop,
             "bw_compiler": nop,
-            "decompositions": select_decomp_table(),
+            "decompositions": decompositions,
             "partition_fn": functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),

@@ -12,10 +12,9 @@ from typing import List
 import sympy
 import torch
 
-import torchinductor
-
 from .. import config
 from .. import ir
+from .. import scheduler
 from ..ir import ReductionHint
 from ..utils import free_symbol_startswith
 from ..utils import has_triton_libdevice
@@ -950,9 +949,9 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from torchinductor.ir import ReductionHint
-                    from torchinductor.triton_ops.autotune import {heuristics}
-                    from torchinductor.utils import instance_descriptor
+                    from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.triton_ops.autotune import {heuristics}
+                    from {config.inductor_import}.utils import instance_descriptor
                 """
             )
 
@@ -1358,7 +1357,7 @@ class TritonScheduling:
             if all(
                 TritonKernel.is_compatible(new_groups, node.get_ranges())
                 for node in node_schedule
-                if isinstance(node, torchinductor.scheduler.SchedulerNode)
+                if isinstance(node, scheduler.SchedulerNode)
             ):
                 return new_groups
 
