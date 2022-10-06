@@ -30,6 +30,7 @@ from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 
+# TODO(voz): Maybe rename these later
 tensor_dunder_fns = [
     torch.Tensor.__rmatmul__,
     torch.Tensor.__rmod__,
@@ -44,6 +45,14 @@ tensor_dunder_fns = [
 ]
 
 torch_special_class_types = (torch._C.Generator,)
+
+tensor_dunder_fns_remap = {
+    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+}
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
