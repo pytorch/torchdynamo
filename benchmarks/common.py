@@ -146,6 +146,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "DebertaForQuestionAnswering",
     "DebertaV2ForMaskedLM",
     "GPTNeoForCausalLM",
+    "M2M100ForConditionalGeneration",
     "MobileBertForMaskedLM",
     "PegasusForConditionalGeneration",
     "T5ForConditionalGeneration",
