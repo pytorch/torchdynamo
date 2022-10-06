@@ -74,7 +74,8 @@ class MemoryPlanningState:
         ] = collections.defaultdict(list)
         self.reused_as_dict: Dict[
             # key (buffer name) reused as value (buffer)
-            str, ir.Buffer
+            str,
+            ir.Buffer,
         ] = {}
 
     def __contains__(self, key):
