@@ -265,30 +265,13 @@ class TensorVariable(VariableTracker):
                     **options,
                 )
         elif isinstance(example_value, contextlib._GeneratorContextManager):
-            # import pdb
-            # pdb.set_trace()
             from .misc import SimpleEnterExitContextWrappingVariable
             return SimpleEnterExitContextWrappingVariable(example_value)
         elif proxy.node.target == torch._C._DisableFuncTorch:
-            # import pdb
-            # pdb.set_trace()
             from . import UserDefinedObjectVariable
-
             return UserDefinedObjectVariable(
                 example_value
-                # guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
-        elif proxy.node.target == torch.cuda.is_available or isinstance(example_value, bool):
-        # #     return UnspecializedPythonVariable.create(
-        # #         tx=tx,
-        # #         proxy=proxy,
-        # #         example_value=torch.tensor(example_value),
-        # #         raw_value=None if use_fake_tensors else example_value,
-        # #         need_unwrap=False,
-        # #         **options,
-        # #     )
-        #     unimplemented("Skip due to {proxy.node.target}")
-            return ConstantVariable(example_value)
         elif proxy.node.target.__name__ == 'set_state' and isinstance(proxy.node.target.__self__, torch._C.Generator):
             return ConstantVariable(None)
         else:
