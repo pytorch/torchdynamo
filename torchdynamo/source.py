@@ -57,13 +57,8 @@ class Source:
             GuardSource.GLOBAL_NN_MODULE,
         )
 
-    def __eq__(self, other):
-        self_dict = dataclasses.asdict(self)
-        other_dict = dataclasses.asdict(other)
-        return self_dict == other_dict and self.name() == other.name()
 
-
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class LocalSource(Source):
     local_name: str
 
@@ -77,7 +72,7 @@ class LocalSource(Source):
         return rename_implicit(self.local_name)
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -92,7 +87,7 @@ class RandomValueSource(Source):
         return rename_implicit(f"random_value_{self.random_call_index}")
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class GlobalSource(Source):
     global_name: str
 
@@ -106,7 +101,7 @@ class GlobalSource(Source):
         return self.global_name
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class GlobalWeakRefSource(Source):
     global_name: str
 
@@ -123,7 +118,7 @@ class GlobalWeakRefSource(Source):
         return f"{self.global_name}()"
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class AttrSource(Source):
     base: Source
     member: str
@@ -150,7 +145,7 @@ class AttrSource(Source):
         return f"{self.base.name()}.{self.member}"
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class GetItemSource(Source):
     base: Source
     index: Any
@@ -176,7 +171,7 @@ class GetItemSource(Source):
             return f"{self.base.name()}[{self.index!r}]"
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
@@ -189,7 +184,7 @@ class TupleIteratorGetItemSource(GetItemSource):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class TypeSource(Source):
     base: Source
 
@@ -204,7 +199,7 @@ class TypeSource(Source):
         return f"type({self.base.name()})"
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class ODictGetItemSource(Source):
     base: Source
     index: Any
@@ -226,7 +221,7 @@ class ODictGetItemSource(Source):
         return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class NNModuleSource(Source):
     inner: Source
 
@@ -245,7 +240,7 @@ class NotNNModuleSource(NNModuleSource):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]
 
 
-@dataclasses.dataclass(eq=False)
+@dataclasses.dataclass
 class ConstantSource(Source):
     source_name: str
 
