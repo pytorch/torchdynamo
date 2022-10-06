@@ -74,6 +74,7 @@ def remap_as_fn___rxor__(*args):
 def remap_as_fn___rand__(*args):
     return torch._C._TensorBase.__rand__(*args)
 
+
 try:
     # Wed need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
