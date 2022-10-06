@@ -1540,6 +1540,7 @@ class MiscTests(torchdynamo.testing.TestCase):
         x = torch.randn(2, 2)
         cnts = torchdynamo.testing.CompileCounter()
         opt_f = torchdynamo.optimize(cnts)(f)
+        opt_f(x)
         self.assertEqual(cnts.op_count, 0)
 
         torchdynamo.reset()
