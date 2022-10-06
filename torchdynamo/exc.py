@@ -73,9 +73,6 @@ class Unsupported(TorchDynamoException):
 
 
 def unimplemented(msg: str):
-    import pdb
-
-    pdb.set_trace()
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
 
