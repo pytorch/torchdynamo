@@ -506,6 +506,7 @@ class TestInductorOpInfo(TestCase):
             kwargs = sample_input.kwargs
 
             try:
+                # UNCOMMENT TO DEBUG SEGFAULTS
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
@@ -555,12 +556,13 @@ class TestInductorOpInfo(TestCase):
                 if not known_failure:
                     raise e
             else:
-                with open("test_output.txt", "a") as f:
-                    print(
-                        f"SUCCEEDED OP {op_name} on {device_type} with {dtype}",
-                        flush=True,
-                        file=f,
-                    )
+                # UNCOMMENT TO DEBUG SEGFAULTS
+                # with open("test_output.txt", "a") as f:
+                #     print(
+                #         f"SUCCEEDED OP {op_name} on {device_type} with {dtype}",
+                #         flush=True,
+                #         file=f,
+                #     )
                 seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
             if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
