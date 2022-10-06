@@ -7,11 +7,10 @@ from typing import Any
 from typing import Dict
 from typing import List
 
-from torchdynamo.utils import dynamo_timed
-
 from .. import codecache
 from .. import config
 from .. import ir
+from ..utils import dynamo_utils
 from ..utils import has_triton
 from ..utils import sympy_dot
 from ..utils import sympy_product
@@ -197,34 +196,34 @@ class WrapperCodeGen(CodeGen):
 
         if has_triton():
             self.header.splice(
-                """
+                f"""
                 import triton
                 import triton.language as tl
-                from torchinductor.triton_ops.autotune import grid
+                from {config.inductor_import}.triton_ops.autotune import grid
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
 
             if config.triton.convolution != "aten":
                 self.header.splice(
-                    """
-                    from torchinductor.triton_ops.conv_perf_model import early_config_prune
-                    from torchinductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torchinductor.triton_ops.autotune import conv_heuristics
+                    f"""
+                    from {config.inductor_import}.triton_ops.conv_perf_model import early_config_prune
+                    from {config.inductor_import}.triton_ops.conv_perf_model import estimate_conv_time
+                    from {config.inductor_import}.triton_ops.autotune import conv_heuristics
                     """
                 )
 
             if config.triton.mm != "aten":
                 self.header.splice(
-                    """
-                    from torchinductor.triton_ops.autotune import mm_heuristics
-                    from torchinductor.triton_ops.autotune import mm_autotune
+                    f"""
+                    from {config.inductor_import}.triton_ops.autotune import mm_heuristics
+                    from {config.inductor_import}.triton_ops.autotune import mm_autotune
                     """
                 )
 
             if config.triton.use_bmm:
                 self.header.writeline(
-                    "from torchinductor.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
+                    f"from {config.inductor_import}.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
 
         self.prefix.splice(
@@ -315,7 +314,7 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.writeline(ReuseLine(input_buffer, output_buffer))
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def generate(self):
         result = IndentedBuffer()
         result.splice(self.header)
@@ -371,9 +370,9 @@ class WrapperCodeGen(CodeGen):
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
-                """
-                from torchdynamo.testing import rand_strided
-                from torchinductor.utils import print_performance
+                f"""
+                from {config.dynamo_import}.testing import rand_strided
+                from {config.inductor_import}.utils import print_performance
                 """,
                 strip=True,
             )
