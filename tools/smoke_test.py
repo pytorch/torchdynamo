@@ -12,6 +12,9 @@ Version = packaging.version.Version
 
 MIN_CUDA_VERSION = Version("11.6")
 MIN_PYTHON_VERSION = (3, 7)
+# NOTE: dev version required, e.g. Version('1.13.0.dev123') < Version('1.13.0')
+MIN_TORCH_VERSION = Version("1.13.0.dev0")
+
 
 def check_python():
     if sys.version_info < MIN_PYTHON_VERSION:
@@ -29,6 +32,19 @@ def check_pip_deps():
     proc = subprocess.run(["pip", "show", "torchdynamo"], capture_output=True)
     if proc.returncode != 0:
         raise RuntimeError("`torchdynamo` is not installed")
+
+
+# Checks for correct torch version.
+# Using check_pip_deps does not work if the minimum required torch version
+# is not present in PyPI.
+def check_torch():
+    import torch
+
+    if torch.__version__ < MIN_TORCH_VERSION:
+        raise RuntimeError(
+            f"torch version not supported: {torch.__version__} "
+            f"- minimum requirement: {MIN_TORCH_VERSION}"
+        )
 
 
 def check_cuda():

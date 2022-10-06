@@ -10,4 +10,4 @@ numpy
 pytest
 pyyaml
 sympy
-torch>=1.13.0.dev0
+torch>=1.12.0
