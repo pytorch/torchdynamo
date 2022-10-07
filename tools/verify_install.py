@@ -17,63 +17,19 @@ class VerifyInstallError(BaseException):
     pass
 
 
-# from torch/utils/cpp_extension.py
-IS_WINDOWS = sys.platform == "win32"
-SUBPROCESS_DECODE_ARGS = ("oem",) if IS_WINDOWS else ()
-
-# from torch/utils/cpp_extension.py
-def find_cuda_home():
-    import torch
-
-    r"""Finds the CUDA install path."""
-    # Guess #1
-    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
-    if cuda_home is None:
-        # Guess #2
-        try:
-            which = "where" if IS_WINDOWS else "which"
-            with open(os.devnull, "w") as devnull:
-                nvcc = (
-                    subprocess.check_output([which, "nvcc"], stderr=devnull)
-                    .decode(*SUBPROCESS_DECODE_ARGS)
-                    .rstrip("\r\n")
-                )
-                cuda_home = os.path.dirname(os.path.dirname(nvcc))
-        except Exception:
-            # Guess #3
-            if IS_WINDOWS:
-                cuda_homes = glob.glob(
-                    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*"
-                )
-                if len(cuda_homes) == 0:
-                    cuda_home = ""
-                else:
-                    cuda_home = cuda_homes[0]
-            else:
-                cuda_home = "/usr/local/cuda"
-            if not os.path.exists(cuda_home):
-                cuda_home = None
-    if cuda_home and not torch.cuda.is_available():
-        print(
-            f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'", file=sys.stderr
-        )
-    return cuda_home
-
-
-# from torch/utils/cpp_extension.py
+# based on torch/utils/cpp_extension.py
 def get_cuda_version():
-    CUDA_HOME = find_cuda_home()
+    from torch.utils import cpp_extension
+
+    CUDA_HOME = cpp_extension._find_cuda_home()
     if not CUDA_HOME:
-        raise VerifyInstallError(
-            "CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH"
-            "environment variable or add NVCC to your system PATH. The extension compilation will fail."
-        )
+        raise VerifyInstallError(cpp_extension.CUDA_NOT_FOUND_MESSAGE)
 
     nvcc = os.path.join(CUDA_HOME, "bin", "nvcc")
     cuda_version_str = (
         subprocess.check_output([nvcc, "--version"])
         .strip()
-        .decode(*SUBPROCESS_DECODE_ARGS)
+        .decode(*cpp_extension.SUBPROCESS_DECODE_ARGS)
     )
     cuda_version = re.search(r"release (\d+[.]\d+)", cuda_version_str)
     if cuda_version is None:
