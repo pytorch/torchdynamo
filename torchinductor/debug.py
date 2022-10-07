@@ -29,6 +29,7 @@ from .scheduler import NopKernelSchedulerNode
 from .scheduler import OutputNode
 from .scheduler import SchedulerNode
 from .scheduler import TemplateSchedulerNode
+from .utils import dynamo_config
 from .utils import dynamo_debug_utils
 from .utils import dynamo_utils
 from .virtualized import V
@@ -230,9 +231,8 @@ class DebugContext:
         if not log.handlers:
             dynamo_utils.init_logging()
 
-        for handler in itertools.chain([log], log.handlers):
-            if config.debug:
-                handler.setLevel(logging.DEBUG)
+        if config.debug:
+            dynamo_config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))
 

@@ -1535,14 +1535,13 @@ class MiscTests(torchdynamo.testing.TestCase):
     @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
-            return torch.quantize_per_tensor(
-                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
-            )
+            return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
 
         x = torch.randn(2, 2)
-        with self.assertRaises(RuntimeError):
-            opt_f = torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter())(f)
-            opt_f(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_f = torchdynamo.optimize(cnts)(f)
+        opt_f(x)
+        self.assertEqual(cnts.op_count, 0)
 
         torchdynamo.reset()
         with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
@@ -2598,6 +2597,20 @@ class MiscTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    def test_repro_graph_breaks_in__get_item_by_idx(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Sequential(
+                    torch.nn.Linear(3, 3), torch.nn.Linear(3, 3)
+                )
+
+            def forward(self, x):
+                return self.mod[0](x)
+
+        m = Mod()
+        graph, _ = torchdynamo.export(m, torch.randn(3, 3))
 
     def test_empty_graph(self):
         import torch.distributed as dist
