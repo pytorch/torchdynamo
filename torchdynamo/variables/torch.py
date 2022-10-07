@@ -44,7 +44,7 @@ tensor_dunder_fns = [
 ]
 
 try:
-    import torch.testing._internal
+    import torch.testing._internal.common_utils
 
     tensor_dunder_fns.append(torch.testing._internal.common_utils.disable_functorch)
 except ImportError:
