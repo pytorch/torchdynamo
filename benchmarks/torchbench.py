@@ -143,33 +143,6 @@ SLOW_BENCHMARKS = {
     "vision_maskrcnn",  # 99s
 }
 
-# https://github.com/pytorch/torchdynamo/issues/519
-AOT_AUTOGRAD_NOT_YET_WORKING = {
-    # https://github.com/pytorch/torchdynamo/issues/1147
-    "tts_angular",
-    "demucs",
-    # https://github.com/pytorch/torchdynamo/issues/739
-    "pyhpc_isoneutral_mixing",
-    "vision_maskrcnn",
-    # https://github.com/pytorch/pytorch/issues/81526
-    "moco",
-    # https://github.com/pytorch/pytorch/issues/81529
-    "speech_transformer",
-}
-
-# https://github.com/pytorch/torchdynamo/issues/332
-INDUCTOR_INFERENCE_NOT_YET_WORKING = {
-    *AOT_AUTOGRAD_NOT_YET_WORKING,
-    # Accuracy errors
-    "hf_Longformer",
-    "maml",
-    "Super_SloMo",
-}
-
-INDUCTOR_TRAINING_NOT_YET_WORKING = {
-    *INDUCTOR_INFERENCE_NOT_YET_WORKING,
-}
-
 TRT_NOT_YET_WORKING = {
     "alexnet",
     "resnet18",
@@ -228,13 +201,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_not_suitable_for_training_models(self):
         return SKIP_TRAIN
-
-    @property
-    def failing_torchinductor_models(self):
-        if self.args.training:
-            return INDUCTOR_TRAINING_NOT_YET_WORKING
-        else:
-            return INDUCTOR_INFERENCE_NOT_YET_WORKING
 
     @property
     def failing_fx2trt_models(self):
