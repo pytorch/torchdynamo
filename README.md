@@ -74,7 +74,7 @@ python setup.py develop
 
 Run
 ```shell
-python tools/smoke_test.py
+python tools/verify_install.py
 ```
 to verify that TorchDynamo is correctly installed (only checks for minimum requirements -- does not check for development requirements).
 
