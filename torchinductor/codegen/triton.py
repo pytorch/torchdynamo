@@ -16,6 +16,7 @@ from .. import config
 from .. import ir
 from .. import scheduler
 from ..ir import ReductionHint
+from ..utils import dynamo_logging
 from ..utils import free_symbol_startswith
 from ..utils import instance_descriptor
 from ..utils import sympy_product
@@ -1180,7 +1181,7 @@ class TritonScheduling:
             if node not in (EnableReduction, DisableReduction):
                 node.mark_run()
 
-        log.info("schedule: %s", node_schedule)
+        log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
