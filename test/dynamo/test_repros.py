@@ -1027,7 +1027,6 @@ class ReproTests(torchdynamo.testing.TestCase):
         cnt = torchdynamo.testing.CompileCounter()
         opt_fn = torchdynamo.optimize(cnt)(fn)
 
-        # x = torch.tensor([0.5, 0.5])
         before, after = opt_fn()
         self.assertTrue(same(before, after))
         self.assertEqual(cnt.frame_count, 1)
