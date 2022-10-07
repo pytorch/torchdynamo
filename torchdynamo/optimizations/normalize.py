@@ -220,7 +220,7 @@ def expand_module_call(prefix, graph: torch.fx.Graph, module, args, kwargs):
                 vars[node] = graph.get_attr(f"{prefix}{node.target}")
             else:
                 vars[node] = graph.node_copy(node, vars.__getitem__)
-        assert False
+        raise AssertionError("unreachable")
     except Exception:
         print(f"Error while expanding {module.__class__.__name__}")
         raise
@@ -244,7 +244,7 @@ def short_name(gm, node: torch.fx.Node):
         return node.target
     elif node.op == "output":
         return "output"
-    assert False, node.op
+    raise AssertionError(node.op)
 
 
 def long_name(gm, node: torch.fx.Node):
@@ -263,7 +263,7 @@ def long_name(gm, node: torch.fx.Node):
         return name
     elif node.op == "output":
         return "output"
-    assert False
+    raise AssertionError("unreachable")
 
 
 class Inplacifier:
@@ -380,9 +380,7 @@ class Functionalization(Transformer):
             # For inplace operators, the output dtype should be equal to the
             # dtype of tensor being inplace modified.
             if n.target in IOPERATOR_REPLACEMENTS:
-                result = getattr(self, "call_method")(
-                    "to", (result, n.args[0].meta["dtype"]), {}
-                )
+                result = self.call_method("to", (result, n.args[0].meta["dtype"]), {})
 
         for patch in patches:
             assert isinstance(

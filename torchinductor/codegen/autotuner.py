@@ -89,7 +89,7 @@ def tuned_conv(
     use_cuda = x.is_cuda
 
     # gen_key
-    key = tuple([arg for arg in id_args])
+    key = tuple(id_args)
     key = ("conv",) + key
 
     # candidate kernels
@@ -173,7 +173,7 @@ def tuned_mm(
     use_cuda = a.is_cuda
 
     # gen_key
-    key = tuple([arg for arg in id_args])
+    key = tuple(id_args)
     key = ("mm",) + key
 
     # candidate kernels
@@ -246,7 +246,7 @@ def tuned_conv_layout(
     ]
 
     # gen_key
-    key = tuple([arg for arg in id_args])
+    key = tuple(id_args)
     key = ("conv_layout",) + key
     runnable_kernel = str2func(kernel)
 

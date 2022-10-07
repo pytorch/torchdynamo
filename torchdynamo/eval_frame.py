@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 try:
     from torch.fx.experimental import proxy_tensor
-except (ModuleNotFoundError, ImportError):
+except ImportError:
     proxy_tensor = None
 
 _eval_frame = torch._C._dynamo.eval_frame
@@ -78,7 +78,7 @@ def innermost_fn(fn):
     """
     unaltered_fn = fn
     while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
-        unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
+        unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         assert callable(unaltered_fn)
     return unaltered_fn
 
@@ -464,9 +464,9 @@ def export(
                         dict_of_source_args[id(arg.item())]
                     )
                 else:
-                    assert (
-                        False
-                    ), "Dynamo input/output is not consistent with traced input/output"
+                    raise AssertionError(
+                        "Dynamo input/output is not consistent with traced input/output"
+                    )
             else:
                 assert (
                     id(arg) in dict_of_source_args
@@ -568,7 +568,7 @@ def export(
 
 
 def assume_constant_result(fn):
-    setattr(fn, "_dynamo_marked_constant", True)
+    fn._dynamo_marked_constant = True
     assert (
         not config.fake_tensor_propagation
     ), "Constant result capture is not supported with fake tensors."
@@ -669,7 +669,7 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            setattr(opt.step, "hooked", True)
+            opt.step.hooked = True
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

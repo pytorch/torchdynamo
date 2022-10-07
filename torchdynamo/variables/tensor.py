@@ -77,7 +77,7 @@ class TensorVariable(VariableTracker):
         elif op == "call_module":
             assert nnmodule is not None
             return nnmodule(*args, **kwargs)
-        assert False, op
+        raise AssertionError(op)
 
     @classmethod
     def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
@@ -267,9 +267,10 @@ class TensorVariable(VariableTracker):
                     **options,
                 )
         else:
-            assert (
-                False
-            ), f"torch.* op returned non-Tensor {typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            raise AssertionError(
+                "torch.* op returned non-Tensor "
+                + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            )
 
     def __init__(
         self,
