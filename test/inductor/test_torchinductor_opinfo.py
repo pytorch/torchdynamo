@@ -213,8 +213,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
-    "index_add": {b8, f16, f32, f64, i32, i64},
-    "index_copy": {f16, f32, f64},
+    "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
@@ -339,8 +338,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "index_add": {b8, f16, f32, f64, i32, i64},
-    "index_copy": {f16, f32, f64},
+    "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
@@ -431,6 +429,12 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
 }
 
+# Always test with all sample for following ops
+inductor_all_samples = {
+    "index_add",
+    "index_put",
+    "index_copy",
+}
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
@@ -497,17 +501,17 @@ class TestInductorOpInfo(TestCase):
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        if not ALL_SAMPLES:
+        if op_name not in inductor_all_samples and not ALL_SAMPLES:
             if isinstance(samples, (list, tuple)):
                 samples = [samples[0]]
             else:
                 samples = [next(samples)]
 
-        for sample_input in samples:
-            args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
+        try:
+            for sample_input in samples:
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
 
-            try:
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
@@ -534,38 +538,38 @@ class TestInductorOpInfo(TestCase):
                         **additional_kwargs,
                     )
 
-            except Exception as e:
+        except Exception as e:
 
-                if test_expect is TestExpect.XFAILURE:
-                    return
+            if test_expect is TestExpect.XFAILURE:
+                return
 
-                seen_failed[device_type].setdefault(op_name, set()).add(dtype)
+            seen_failed[device_type].setdefault(op_name, set()).add(dtype)
 
-                if COLLECT_EXPECT:
-                    return
+            if COLLECT_EXPECT:
+                return
 
-                known_failure = False
-                if dtype in inductor_should_fail_with_exception[device_type].get(
-                    op_name, set()
-                ):
-                    failure = inductor_should_fail_with_exception[device_type][op_name][
-                        dtype
-                    ]
-                    if failure in str(e):
-                        known_failure = True
+            known_failure = False
+            if dtype in inductor_should_fail_with_exception[device_type].get(
+                op_name, set()
+            ):
+                failure = inductor_should_fail_with_exception[device_type][op_name][
+                    dtype
+                ]
+                if failure in str(e):
+                    known_failure = True
 
-                if not known_failure:
-                    raise e
-            else:
-                # with open("test_output.txt", "a") as f:
-                #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-                seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
+            if not known_failure:
+                raise e
+        else:
+            # with open("test_output.txt", "a") as f:
+            #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+            seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
-            if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                if FAIL_ON_SUCCESS:
-                    raise RuntimeError(
-                        f"unexpected success {op_name}, {dtype}, {device_type}"
-                    )
+        if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
+            if FAIL_ON_SUCCESS:
+                raise RuntimeError(
+                    f"unexpected success {op_name}, {dtype}, {device_type}"
+                )
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals())
