@@ -22,13 +22,22 @@ def check_python():
             f"Python version not supported: {sys.version_info} "
             f"- minimum requirement: {MIN_PYTHON_VERSION}"
         )
+    print(f"Python version: {sys.version_info}")
 
 
 # Checks for correct pip dependencies, according to `install_requires` in setup.py.
 def check_pip_deps():
     proc = subprocess.run(["pip", "check"], capture_output=True)
     if proc.returncode != 0:
-        raise RuntimeError("`pip` dependencies broken:\n" + proc.stdout.decode("utf-8"))
+        dynamo_broken_deps = []
+        for line in proc.stdout.decode("utf-8").strip().split("\n"):
+            if line.startswith("torchdynamo"):
+                dynamo_broken_deps.append(line)
+        if len(dynamo_broken_deps) > 0:
+            raise RuntimeError(
+                "torchdynamo requirements not met:\n"
+                + "\n".join(map(str, dynamo_broken_deps))
+            )
     proc = subprocess.run(["pip", "show", "torchdynamo"], capture_output=True)
     if proc.returncode != 0:
         raise RuntimeError("`torchdynamo` is not installed")
@@ -46,12 +55,14 @@ def check_torch():
             f"- minimum requirement: {MIN_TORCH_VERSION}"
         )
 
+    print(f"PyTorch version: {torch.__version__}")
+
 
 def check_cuda():
     import torch
 
     if not torch.cuda.is_available():
-        sys.stderr.write("CUDA not available for torch\n")
+        print("CUDA not available for torch\n")
         return
 
     torch_cuda_ver = Version(torch.version.cuda)
@@ -80,15 +91,16 @@ def check_cuda():
             f"CUDA version mismatch, torch version: {torch_cuda_ver}, env version: {cuda_ver}"
         )
 
+    print(f"CUDA available, version: {cuda_ver}")
+
 
 def check_dynamo(backend, device, err_msg):
     import torch
 
     if device == "cuda" and not torch.cuda.is_available():
-        sys.stderr.write(
-            f"CUDA not available -- skipping CUDA check on {backend} backend\n"
-        )
+        print(f"CUDA not available -- skipping CUDA check on {backend} backend\n")
         return
+
     try:
         import torchdynamo
 
@@ -98,62 +110,42 @@ def check_dynamo(backend, device, err_msg):
         def fn(x):
             return x + x
 
-        x = torch.randn(10, 10).to(device)
-        x.requires_grad = True
-        y = fn(x)
-        torch.testing.assert_close(y, x + x)
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + x
+
+        mod = Module()
+        opt_mod = torchdynamo.optimize(backend, nopython=True)(mod)
+
+        for f in (fn, opt_mod):
+            x = torch.randn(10, 10).to(device)
+            x.requires_grad = True
+            y = f(x)
+            torch.testing.assert_close(y, x + x)
+            z = y.sum()
+            z.backward()
+            torch.testing.assert_close(x.grad, 2 * torch.ones_like(x))
     except Exception:
         sys.stderr.write(traceback.format_exc() + "\n" + err_msg + "\n\n")
         sys.exit(1)
 
 
-def check_eager_cpu():
-    check_dynamo(
-        "eager",
-        "cpu",
-        "CPU eager sanity check failed",
-    )
-
-
-def check_eager_cuda():
-    check_dynamo(
-        "eager",
-        "cuda",
-        "CUDA eager sanity check failed",
-    )
-
-
-def check_aot_eager_cpu():
-    check_dynamo(
-        "aot_eager",
-        "cpu",
-        "CPU aot_eager sanity check failed",
-    )
-
-
-def check_aot_eager_cuda():
-    check_dynamo(
-        "aot_eager",
-        "cuda",
-        "CUDA aot_eager sanity check failed",
-    )
-
-
-def check_inductor_cpu():
-    check_dynamo(
-        "inductor",
-        "cpu",
-        "CPU inductor sanity check failed",
-    )
-
-
-def check_inductor_cuda():
-    check_dynamo(
+_SANITY_CHECK_ARGS = (
+    ("eager", "cpu", "CPU eager sanity check failed"),
+    ("eager", "cuda", "CUDA eager sanity check failed"),
+    ("aot_eager", "cpu", "CPU aot_eager sanity check failed"),
+    ("aot_eager", "cuda", "CUDA aot_eager sanity check failed"),
+    ("inductor", "cpu", "CPU inductor sanity check failed"),
+    (
         "inductor",
         "cuda",
         "CUDA inductor sanity check failed\n"
         + "NOTE: Please check that you installed the correct hash/version of `triton`",
-    )
+    ),
+)
 
 
 def main():
@@ -161,12 +153,8 @@ def main():
     check_pip_deps()
     check_torch()
     check_cuda()
-    check_eager_cpu()
-    check_eager_cuda()
-    check_aot_eager_cpu()
-    check_aot_eager_cuda()
-    check_inductor_cpu()
-    check_inductor_cuda()
+    for args in _SANITY_CHECK_ARGS:
+        check_dynamo(*args)
     print("All required checks passed")
 
 
