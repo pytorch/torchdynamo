@@ -147,7 +147,12 @@ class SizeVarAllocator(object):
             base = remove_zero_terms(base, divisor)
             # actual iteration range is to size-1
             iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
-            base_s = sympy_subs(base, iter_ranges)
+            if isinstance(base, ModularIndexing):
+                # for modular indexing, biggest values from the ranges don't necessarily result in
+                # the biggest result, the biggest result is modulus - 1
+                base_s = base.args[2] - 1
+            else:
+                base_s = sympy_subs(base, iter_ranges)
             if self.maybe_guard_lt(base_s, modulus * divisor):
                 return IndexingDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
