@@ -267,12 +267,12 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.amp.autocast_mode.autocast:
             return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
-        elif self.value is torch.autograd.profiler.profile:
-            if len(args) == 0 or len(args) > 0 and args[0]:
-                log.warning("Profiler will be ignored")
-            return AutogradProfilerContextWrapperVariable(**options)
-        elif self.value is torch.autograd.profiler.record_function:
-            assert len(args) == 1
+        elif self.value in (
+            torch.profiler.profile,
+            torch.profiler.record_function,
+            torch.autograd.profiler.profile,
+            torch.autograd.profiler.record_function,
+        ):
             log.warning("Profiler will be ignored")
             return AutogradProfilerContextWrapperVariable(**options)
         elif self.value is torch.jit.annotate:
