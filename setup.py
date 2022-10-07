@@ -31,7 +31,7 @@ if "develop" in sys.argv:
     ]
 
 install_requires = [
-    "torch>=1.12.0",
+    "torch>=1.13.0",
     "numpy",
     "tabulate",
     "pyyaml",
@@ -49,7 +49,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Jason Ansel",
-    author_email="jansel@fb.com",
+    author_email="jansel@meta.com",
     license="BSD-3",
     keywords="pytorch machine learning compilers",
     python_requires=">=3.7, <3.11",
@@ -59,16 +59,4 @@ setup(
         "torchinductor.codegen": ["*.h", "*.j2"],
     },
     zip_safe=False,
-    ext_modules=[
-        Extension(
-            "torchdynamo._eval_frame",
-            ["torchdynamo/_eval_frame.c"],
-            extra_compile_args=["-Wall"],
-        ),
-        CppExtension(
-            name="torchdynamo._guards",
-            sources=["torchdynamo/_guards.cpp"],
-            extra_compile_args=["-std=c++14"],
-        ),
-    ],
 )

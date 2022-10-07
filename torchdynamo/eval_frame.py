@@ -31,15 +31,11 @@ from .utils import same
 log = logging.getLogger(__name__)
 
 try:
-    from . import _eval_frame
-except (ModuleNotFoundError, ImportError) as e:
-    raise RuntimeError("run `python setup.py develop` to compile C extensions") from e
-
-try:
     from torch.fx.experimental import proxy_tensor
 except (ModuleNotFoundError, ImportError):
     proxy_tensor = None
 
+_eval_frame = torch._C.dynamo.eval_frame
 set_eval_frame = _eval_frame.set_eval_frame
 reset_code = _eval_frame.reset_code
 unsupported = _eval_frame.unsupported
