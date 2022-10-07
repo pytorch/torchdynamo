@@ -736,6 +736,15 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype == torch.bool:
+                # triton stores bool as int8, so add this for more accurate checking
+                return torch.allclose(
+                    ref.view(dtype=torch.uint8),
+                    res.view(dtype=torch.uint8),
+                    atol=tol,
+                    rtol=tol,
+                    equal_nan=equal_nan,
+                )
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
