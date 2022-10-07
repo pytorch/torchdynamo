@@ -327,7 +327,7 @@ class TorchVariable(VariableTracker):
                 # (Not the fake example_value) - for the sake of graph correctness.
                 example_value = self.value.__self__.get_state()
             else:
-                example_value = (self.value(args[0].proxy.node.meta["example_value"]),)
+                example_value = args[0].proxy.node.meta["example_value"]
 
             self.value.__module__ = self.__module__
             return TensorVariable.create(
