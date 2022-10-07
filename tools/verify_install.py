@@ -1,3 +1,4 @@
+import glob
 import os
 import re
 import subprocess
@@ -15,6 +16,73 @@ MIN_TORCH_VERSION = packaging.version.parse("1.13.0.dev0")
 class VerifyInstallError(BaseException):
     pass
 
+
+# from torch/utils/cpp_extension.py
+IS_WINDOWS = sys.platform == "win32"
+SUBPROCESS_DECODE_ARGS = ("oem",) if IS_WINDOWS else ()
+
+# from torch/utils/cpp_extension.py
+def find_cuda_home():
+    import torch
+
+    r"""Finds the CUDA install path."""
+    # Guess #1
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
+    if cuda_home is None:
+        # Guess #2
+        try:
+            which = "where" if IS_WINDOWS else "which"
+            with open(os.devnull, "w") as devnull:
+                nvcc = (
+                    subprocess.check_output([which, "nvcc"], stderr=devnull)
+                    .decode(*SUBPROCESS_DECODE_ARGS)
+                    .rstrip("\r\n")
+                )
+                cuda_home = os.path.dirname(os.path.dirname(nvcc))
+        except Exception:
+            # Guess #3
+            if IS_WINDOWS:
+                cuda_homes = glob.glob(
+                    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*"
+                )
+                if len(cuda_homes) == 0:
+                    cuda_home = ""
+                else:
+                    cuda_home = cuda_homes[0]
+            else:
+                cuda_home = "/usr/local/cuda"
+            if not os.path.exists(cuda_home):
+                cuda_home = None
+    if cuda_home and not torch.cuda.is_available():
+        print(
+            f"No CUDA runtime is found, using CUDA_HOME='{cuda_home}'", file=sys.stderr
+        )
+    return cuda_home
+
+
+# from torch/utils/cpp_extension.py
+def get_cuda_version():
+    CUDA_HOME = find_cuda_home()
+    if not CUDA_HOME:
+        raise VerifyInstallError(
+            "CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH"
+            "environment variable or add NVCC to your system PATH. The extension compilation will fail."
+        )
+
+    nvcc = os.path.join(CUDA_HOME, "bin", "nvcc")
+    cuda_version_str = (
+        subprocess.check_output([nvcc, "--version"])
+        .strip()
+        .decode(*SUBPROCESS_DECODE_ARGS)
+    )
+    cuda_version = re.search(r"release (\d+[.]\d+)", cuda_version_str)
+    if cuda_version is None:
+        raise VerifyInstallError("CUDA version not found in `nvcc --version` output")
+
+    cuda_str_version = cuda_version.group(1)
+    return packaging.version.parse(cuda_str_version)
+
+
 def check_python():
     if sys.version_info < MIN_PYTHON_VERSION:
         raise VerifyInstallError(
@@ -25,7 +93,9 @@ def check_python():
 
 
 def check_torchdynamo():
-    proc = subprocess.run(["python", "-m", "pip", "show", "torchdynamo"], capture_output=True)
+    proc = subprocess.run(
+        ["python", "-m", "pip", "show", "torchdynamo"], capture_output=True
+    )
     if proc.returncode != 0:
         raise VerifyInstallError("`torchdynamo` is not installed")
 
@@ -81,19 +151,7 @@ def check_cuda():
         )
 
     # check if torch cuda version matches system cuda version
-    cuda_home = os.getenv("CUDA_HOME")
-    if not cuda_home:
-        raise VerifyInstallError("$CUDA_HOME not found")
-
-    nvcc = os.path.join(cuda_home, "bin", "nvcc")
-    nvcc_version_str = (
-        subprocess.check_output([nvcc, "--version"]).strip().decode("utf-8")
-    )
-    cuda_version = re.search(r"release (\d+[.]\d+)", nvcc_version_str)
-    if cuda_version is None:
-        raise VerifyInstallError("CUDA version not found in `nvcc --version` output")
-
-    cuda_ver = packaging.version.parse(cuda_version.group(1))
+    cuda_ver = get_cuda_version()
     if cuda_ver != torch_cuda_ver:
         raise VerifyInstallError(
             f"CUDA version mismatch, torch version: {torch_cuda_ver}, env version: {cuda_ver}"
