@@ -10,8 +10,12 @@ import torch
 import torchdynamo.testing
 from torchdynamo.testing import same
 
-from . import test_modules
-from . import test_repros
+try:
+    from . import test_modules
+    from . import test_repros
+except ImportError:
+    import test_modules
+    import test_repros
 
 
 def make_unspec_fn(fn):

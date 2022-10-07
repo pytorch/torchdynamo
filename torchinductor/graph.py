@@ -24,6 +24,7 @@ from .lowering import lowerings
 from .lowering import make_fallback
 from .lowering import needs_realized_inputs
 from .sizevars import SizeVarAllocator
+from .utils import dynamo_logging
 from .utils import dynamo_utils
 from .virtualized import V
 
@@ -341,7 +342,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.info("Output code: %s", mod.__file__)
+        log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod

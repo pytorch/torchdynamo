@@ -18,6 +18,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from . import config
 from . import convert_frame
+from . import logging as torchdynamo_logging
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
@@ -83,6 +84,11 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -90,6 +96,7 @@ class _TorchDynamoContext:
         on_enter=nothing,
         backend_ctx_ctor=null_context,
         patch_fn=nothing,
+        first_ctx=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -97,6 +104,7 @@ class _TorchDynamoContext:
         self.prior = unset
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
+        self.first_ctx = first_ctx
         patch_fn()
 
     def __enter__(self):
@@ -152,6 +160,9 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            if self.first_ctx:
+                _step_logger()(logging.INFO, "torchdynamo begin tracing")
+
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
@@ -161,6 +172,8 @@ class _TorchDynamoContext:
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
+                if self.first_ctx:
+                    _step_logger()(logging.INFO, "torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -181,7 +194,7 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor):
+    def __init__(self, callback, backend_ctx_ctor, first_ctx=False):
         def on_enter():
             global most_recent_backend
             if (
@@ -198,6 +211,7 @@ class OptimizeContext(_TorchDynamoContext):
             on_enter=on_enter,
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
+            first_ctx=first_ctx,
         )
 
 
@@ -250,7 +264,9 @@ def catch_errors_wrapper(callback):
 
 def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
     return OptimizeContext(
-        catch_errors_wrapper(compile_fn), backend_ctx_ctor=backend_ctx_ctor
+        catch_errors_wrapper(compile_fn),
+        backend_ctx_ctor=backend_ctx_ctor,
+        first_ctx=True,
     )
 
 
