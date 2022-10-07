@@ -55,7 +55,7 @@ constant_functions = {
 }
 
 # root folder of the project
-base_dir = dirname(dirname(abspath(__file__)))
+base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"

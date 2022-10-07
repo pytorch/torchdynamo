@@ -849,7 +849,7 @@ def make_fallback(kernel):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.cumsum:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )

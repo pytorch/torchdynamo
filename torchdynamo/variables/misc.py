@@ -332,19 +332,11 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.mode = None
 
     def exit(self, tx, *args):
-        def exit_functional_autocast(mode):
-            mode.__exit__(None, None, None)
-
         tx.output.graph.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
     def enter(self, tx):
-        def enter_functional_autocast(*vals):
-            mode = torch.amp.autocast(*vals)
-            mode.__enter__()
-            return mode
-
         self.mode = tx.output.graph.create_node(
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
@@ -354,6 +346,16 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "torch.amp.autocast_mode.autocast"
+
+
+def enter_functional_autocast(*vals):
+    mode = torch.amp.autocast(*vals)
+    mode.__enter__()
+    return mode
+
+
+def exit_functional_autocast(mode):
+    mode.__exit__(None, None, None)
 
 
 class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
@@ -614,7 +616,7 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torchdynamo.disable() wrapped function {self.value}")
+            unimplemented(f"call torch.dynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)

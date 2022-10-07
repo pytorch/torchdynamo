@@ -35,7 +35,7 @@ try:
 except (ModuleNotFoundError, ImportError):
     proxy_tensor = None
 
-_eval_frame = torch._C.dynamo.eval_frame
+_eval_frame = torch._C._dynamo.eval_frame
 set_eval_frame = _eval_frame.set_eval_frame
 reset_code = _eval_frame.reset_code
 unsupported = _eval_frame.unsupported

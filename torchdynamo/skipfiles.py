@@ -194,4 +194,6 @@ def is_torch_inline_allowed(filename):
 
 
 def is_torch(filename):
+    if filename.startswith(_module_dir(torch.dynamo)):
+        return False
     return filename.startswith(_module_dir(torch))

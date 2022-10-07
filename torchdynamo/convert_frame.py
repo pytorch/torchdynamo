@@ -311,7 +311,7 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
+                f"torch.dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
                 + f"   function: {format_func_info(code)}\n"
                 + f"   reasons:  {format_guard_failures(code)}\n"
                 + f"to diagnose recompilation issues, see {troubleshooting_url}."

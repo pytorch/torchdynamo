@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import argparse
 import collections
 import copy
@@ -1613,6 +1613,8 @@ def main(runner, original_dir=None):
         return sys.exit(-1)
 
     if not args.devices:
+        import torch
+
         if torch.cuda.is_available():
             args.devices = ["cuda"]
         else:

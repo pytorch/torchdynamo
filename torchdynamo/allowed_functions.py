@@ -93,7 +93,7 @@ def _disallowed_function_ids():
         torch.set_rng_state,
         torch.autograd.profiler.profile,
         warnings.warn,
-        torch._C.dynamo.eval_frame.unsupported,
+        torch._C._dynamo.eval_frame.unsupported,
     ]
     # extract all dtypes from torch
     dtypes = [

@@ -10,8 +10,6 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
-from torchdynamo.utils import count_calls
-
 from . import config
 from . import overrides
 from .debug import DebugContext
@@ -28,6 +26,7 @@ ALIGNMENT = 16
 aot_autograd = dynamo_optimizations.backends.aot_autograd
 normalize_ir = dynamo_optimizations.normalize.normalize_ir
 is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
+count_calls = dynamo_utils.count_calls
 
 
 @dataclasses.dataclass

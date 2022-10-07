@@ -11,7 +11,8 @@ if __name__ == "__main__":
         os.environ["PYTORCH_TEST_RANGE_START"] = f"{start}"
         os.environ["PYTORCH_TEST_RANGE_END"] = f"{end}"
         popen = subprocess.Popen(
-            ["pytest", "test/test_torchinductor_opinfo.py"], stdout=subprocess.PIPE
+            ["pytest", "test/inductor/test_torchinductor_opinfo.py"],
+            stdout=subprocess.PIPE,
         )
         for line in popen.stdout:
             print(line.decode(), end="")
@@ -19,6 +20,6 @@ if __name__ == "__main__":
         return_code = popen.wait()
         if return_code:
             raise subprocess.CalledProcessError(
-                return_code, ["pytest", "test/test_torchinductor_opinfo.py"]
+                return_code, ["pytest", "test/inductor/test_torchinductor_opinfo.py"]
             )
         i = end + 1

@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 import sys
 
-from setuptools import Extension
 from setuptools import find_packages
 from setuptools import setup
-from torch.utils.cpp_extension import CppExtension
 
 long_description = """
 TorchDynamo is a Python-level JIT compiler designed to make unmodified
