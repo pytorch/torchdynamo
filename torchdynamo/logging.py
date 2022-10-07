@@ -2,7 +2,7 @@ import logging
 import os
 
 # logging level for dynamo generated graphs/bytecode/guards
-VERBOSE = 15
+CODE = 15
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for

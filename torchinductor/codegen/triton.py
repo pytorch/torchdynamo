@@ -1202,7 +1202,7 @@ class TritonScheduling:
             if node not in (EnableReduction, DisableReduction):
                 node.mark_run()
 
-        log.log(dynamo_logging.VERBOSE, "schedule: %s", node_schedule)
+        log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
