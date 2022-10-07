@@ -28,6 +28,8 @@ dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
 @functools.lru_cache(None)
 def has_triton():
+    if not torch.cuda.is_available():
+        return False
     try:
         import triton
 
