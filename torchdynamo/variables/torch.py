@@ -25,7 +25,7 @@ from .base import VariableTracker
 from .lists import ListVariable
 from .lists import TupleVariable
 from .misc import AutocastModeVariable
-from .misc import AutogradProfilerContextWrapperVariable
+from .misc import ProfilerContextWrapperVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -274,7 +274,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.record_function,
         ):
             log.warning("Profiler will be ignored")
-            return AutogradProfilerContextWrapperVariable(**options)
+            return ProfilerContextWrapperVariable(**options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
