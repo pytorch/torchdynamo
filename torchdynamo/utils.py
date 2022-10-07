@@ -715,6 +715,12 @@ try:
 
     def wrap_fake_exception(fn):
         try:
+            import os
+
+            print(
+                "FN is",
+                os.environ.get("PYTEST_CURRENT_TEST").split(":")[-1].split(" ")[0],
+            )
             return fn()
         except UnsupportedFakeTensorException as e:
             from .exc import FakeTensorError

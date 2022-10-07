@@ -277,7 +277,9 @@ class TensorVariable(VariableTracker):
         elif proxy.node.target.__name__ == "set_state" and isinstance(
             proxy.node.target.__self__, torch._C.Generator
         ):
-            return ConstantVariable(None)
+            from . import TorchVariable
+
+            return TorchVariable(proxy.node.target)
         else:
             assert (
                 False

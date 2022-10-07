@@ -1,6 +1,7 @@
 import logging
 import re
 import types
+from inspect import signature
 from typing import Dict
 from typing import List
 
@@ -290,6 +291,47 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        if (
+            self.value.__name__ == "get_state"
+            and hasattr(self.value, "__self__")
+            and isinstance(self.value.__self__, torch._C.Generator)
+        ):
+
+            def get_state_from_generator():
+                return self.value()
+
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    get_state_from_generator,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                example_value=self.value(),
+                **options,
+            )
+        if (
+            self.value.__name__ == "set_state"
+            and hasattr(self.value, "__self__")
+            and isinstance(self.value.__self__, torch._C.Generator)
+        ):
+
+            assert len(args) == 1
+            assert isinstance(args[0], TensorVariable)
+
+            self.value.__module__ = self.__module__
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                example_value=self.value(args[0].proxy.node.meta["example_value"]),
+                **options,
+            )
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
