@@ -22,7 +22,7 @@ def check_python():
             f"Python version not supported: {sys.version_info} "
             f"- minimum requirement: {MIN_PYTHON_VERSION}"
         )
-    print(f"Python version: {sys.version_info}")
+    return sys.version_info
 
 
 # Checks for correct pip dependencies, according to `install_requires` in setup.py.
@@ -55,15 +55,14 @@ def check_torch():
             f"- minimum requirement: {MIN_TORCH_VERSION}"
         )
 
-    print(f"PyTorch version: {torch.__version__}")
+    return torch.__version__
 
 
 def check_cuda():
     import torch
 
     if not torch.cuda.is_available():
-        print("CUDA not available for torch\n")
-        return
+        return None
 
     torch_cuda_ver = Version(torch.version.cuda)
     if torch_cuda_ver < MIN_CUDA_VERSION:
@@ -91,7 +90,7 @@ def check_cuda():
             f"CUDA version mismatch, torch version: {torch_cuda_ver}, env version: {cuda_ver}"
         )
 
-    print(f"CUDA available, version: {cuda_ver}")
+    return cuda_ver
 
 
 def check_dynamo(backend, device, err_msg):
@@ -149,10 +148,15 @@ _SANITY_CHECK_ARGS = (
 
 
 def main():
-    check_python()
+    python_ver = check_python()
     check_pip_deps()
-    check_torch()
-    check_cuda()
+    torch_ver = check_torch()
+    cuda_ver = check_cuda()
+    print(
+        f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
+        f"PyTorch version: {torch_ver}\n"
+        f"CUDA version: {cuda_ver}"
+    )
     for args in _SANITY_CHECK_ARGS:
         check_dynamo(*args)
     print("All required checks passed")
