@@ -14,4 +14,4 @@ do
   find $DIR -name '*.py' | xargs -n1 -- sed -i 's@pytorch/torch[.]dynamo@pytorch/torchdynamo@g'
 done
 
-lintrunner -a
+(cd ~/pytorch && (lintrunner -a || lintrunner -a))
