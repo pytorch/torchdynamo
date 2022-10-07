@@ -172,13 +172,12 @@ class _TorchDynamoContext:
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             try:
-                result = fn(*args, **kwargs)
-                if self.first_ctx:
-                    _step_logger()(logging.INFO, "torchdynamo done tracing")
-                return result
+                return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
+                if self.first_ctx:
+                    _step_logger()(logging.INFO, "torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
