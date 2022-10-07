@@ -922,7 +922,20 @@ class BenchmarkRunner:
     def setup_amp(self):
         if self.args.amp and self.args.training:
             assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
-            self.grad_scaler = torch.cuda.amp.GradScaler()
+            # AMP training can lead to small loss values which can undeflow
+            # gradient values returning in zero gradients. To solve this
+            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+            # structure, that scales the loss values to prevent underflow. Loss
+            # values are big at the beginning of training (therefore not
+            # requiring scaling), while loss value tends to be small as network
+            # starts getting better (requiring scaling). GradScaler manages all
+            # of this fine tuning, checking the gradients are turning to inf,
+            # discarding such batches.
+
+            # Since we are not running a long iteration, default value of
+            # init_scale 65536 is going to turn all gradients to inf. Therefore,
+            # we just use a init_scale of 2.0 for benchmarking purpose.
+            self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
     @property
