@@ -1,7 +1,6 @@
 import builtins
 
 import torch
-import triton
 
 from .. import config
 from .. import triton_ops
@@ -32,14 +31,15 @@ def str2func(str):
 
 class Autotuner:
     def __init__(self):
-
         self.cache = dict()
 
     def _bench(self, kernel, *args, **kwargs):
         def kernel_call():
             kernel(*args, **kwargs)
 
-        return triton.testing.do_bench(kernel_call)
+        from triton.testing import do_bench
+
+        return do_bench(kernel_call)
 
 
 autotune = Autotuner()

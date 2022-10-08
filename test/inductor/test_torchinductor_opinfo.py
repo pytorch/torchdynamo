@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_utils import suppress_warnings
 
 import torchdynamo
+from torchinductor.utils import has_triton
 
 try:
     from .test_torchinductor import check_model
@@ -571,4 +572,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torchdynamo.config.raise_on_assertion_error = True
-    run_tests()
+    if has_triton():
+        run_tests()
