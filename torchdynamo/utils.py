@@ -74,7 +74,9 @@ def dynamo_timed(func):
             compilation_metrics[key] = []
         t0 = time.time()
         r = func(*args, **kwargs)
-        compilation_metrics[key].append(time.time() - t0)
+        ltncy = time.time() - t0
+        compilation_metrics[key].append(ltncy)
+        print("-->", key, f"{ltncy:.2f} seconds")
         return r
 
     return time_wrapper

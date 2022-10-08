@@ -21,6 +21,7 @@ from torch.utils import cpp_extension
 
 from . import config
 from . import exc
+from .utils import dynamo_utils
 
 log = logging.getLogger(__name__)
 
@@ -161,8 +162,11 @@ class PyCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
+    @dynamo_utils.dynamo_timed
     def load(cls, source_code):
         key, path = write(source_code, "py")
+        print(key, path)
+        print(source_code)
         if key not in cls.cache:
             with open(path) as f:
                 code = compile(f.read(), path, "exec")

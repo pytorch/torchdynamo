@@ -27,6 +27,7 @@ from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product
 from .conv_perf_model import early_config_prune as conv_early_config_prune
 from .conv_perf_model import estimate_conv_time
+from ..utils import dynamo_utils
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ class CachingAutotuner(KernelInterface):
             self.launchers = AsyncCompile.map(self._precompile_config, self.configs)
             self.configs = None
 
+    @dynamo_utils.dynamo_timed
     def _precompile_config(self, cfg: triton.runtime.autotuner.Config):
         """Ahead of time compile a given autotuner config."""
         torch.cuda.set_device(torch.cuda.current_device())

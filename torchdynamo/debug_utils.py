@@ -153,6 +153,7 @@ def generate_compiler_repro_string(gm, args):
         from {config.dynamo_import}.testing import rand_strided
         from math import inf
         from torch.fx.experimental.proxy_tensor import make_fx
+        from torchinductor.compile_fx import compile_fx_inner
 
         """
     )

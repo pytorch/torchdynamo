@@ -322,6 +322,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.mark_reuse(len(n.users))
         return result
 
+    @dynamo_utils.dynamo_timed
     def codegen(self):
         from .scheduler import Scheduler
 

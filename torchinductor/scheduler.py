@@ -890,7 +890,8 @@ class Scheduler:
         if device != node2.get_device():
             return False  # wrong device
 
-        no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        # no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        no_shared_data = self.score_fusion_memory(node1, node2) > 1
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
