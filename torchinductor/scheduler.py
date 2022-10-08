@@ -325,6 +325,7 @@ class SchedulerNode(BaseSchedulerNode):
             return super().allocate()
 
         if config.inplace_buffers:
+            kernel_local_buffers = self.scheduler.get_kernel_local_buffers()
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
@@ -344,7 +345,7 @@ class SchedulerNode(BaseSchedulerNode):
                             input_node.node.get_layout(),
                             (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout),
                         )
-                        and not should_use_template(input_node.node)
+                        and input_node.get_name() not in kernel_local_buffers
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
@@ -354,7 +355,6 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
-                        V.kernel.must_keep_buffers.add(input_node.get_name())
                         return
         super().allocate()
 
@@ -1001,11 +1001,8 @@ class Scheduler:
                     V.graph.wrapper_code.codegen_free(node.node)
         self.buffer_names_to_free.clear()
 
-    def remove_kernel_local_buffers(self):
-        """
-        Any buffers that are both created and have a last use in the
-        same kernel can be removed.
-        """
+    def get_kernel_local_buffers(self):
+        kernel_local_buffers = set()
         for name in V.kernel.store_buffer_names & self.buffer_names_no_longer_needed:
             if (
                 name not in V.kernel.must_keep_buffers
@@ -1013,7 +1010,17 @@ class Scheduler:
                 and name not in self.mutation_renames
                 and name not in self.mutation_real_name
             ):
-                self.remove_buffer(name)
+                kernel_local_buffers.add(name)
+        return kernel_local_buffers
+
+    def remove_kernel_local_buffers(self):
+        """
+        Any buffers that are both created and have a last use in the
+        same kernel can be removed.
+        """
+        kernel_local_buffers = self.get_kernel_local_buffers()
+        for name in kernel_local_buffers:
+            self.remove_buffer(name)
 
     def remove_buffer(self, name):
         # Assign a special value instead of deleting the entry
