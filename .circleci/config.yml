@@ -61,10 +61,10 @@ jobs:
     steps:
       - checkout
       - run:
-        name: Tests
-        command: |
-          echo $CUDA_HOME
-          nvcc --version
+          name: Tests
+          command: |
+            echo $CUDA_HOME
+            nvcc --version
       - store_test_results:
           path: test-results
   
