@@ -213,6 +213,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
+    "index_add": {f16, f32, f64},
+    "index_copy": {f16, f32, f64},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -338,6 +340,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
+    "index_add": {f16, f32, f64},
+    "index_copy": {f16, f32, f64},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -435,6 +439,7 @@ inductor_all_samples = {
     "index_put",
     "index_copy",
 }
+
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
