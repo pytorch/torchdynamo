@@ -12,7 +12,7 @@ PIP ?= python -m pip
 
 # versions used in CI
 # Also update the "Install nightly binaries" section of the README when updating these
-PYTORCH_VERSION ?= dev20221006
+PYTORCH_VERSION ?= dev20221010
 TRITON_VERSION ?= d3c925db8a81ca74f14680876b9311e7d079c5a1
 
 
@@ -54,15 +54,15 @@ setup:
 
 setup_nightly:
 	$(PIP) install ninja
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	$(PIP) install -r requirements.txt
 
 setup_nightly_gpu:
-	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
+	conda install -y -c pytorch magma-cuda117 cudatoolkit=11.7 -c conda-forge
+	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) \
                       torchvision==0.15.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
-                      --extra-index-url https://download.pytorch.org/whl/nightly/cu116
+                      --extra-index-url https://download.pytorch.org/whl/nightly/cu117
 	$(PIP) install ninja
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
