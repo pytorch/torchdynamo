@@ -76,10 +76,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "BartForConditionalGeneration",
     "BigBird",
     "M2M100ForConditionalGeneration",  # OOM
-    "MBartForConditionalGeneration",  # OOM
-    "MT5ForConditionalGeneration",  # OOM
-    "MegatronBertForCausalLM",  # OOM
-    "MegatronBertForQuestionAnswering",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "XLNetLMHeadModel",  # OOM
@@ -151,9 +147,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "DebertaV2ForMaskedLM",
     "GPTNeoForCausalLM",
     "M2M100ForConditionalGeneration",
-    "MT5ForConditionalGeneration",
-    "MegatronBertForCausalLM",
-    "MegatronBertForQuestionAnswering",
     "MobileBertForMaskedLM",
     "PegasusForConditionalGeneration",
     "T5ForConditionalGeneration",
@@ -168,27 +161,13 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "AlbertForQuestionAnswering",
     # TIMM
     "cait_m36_384",  # fp64_OOM
-    "convit_base",
-    "coat_lite_mini",
-    "convnext_base",
-    "deit_base_distilled_patch16_224",
-    "dla102",
-    "dpn107",
-    "levit_128",
-    "mobilevit_s",
-    "rexnet_100",
+    "coat_lite_mini",  # time out
+    "convit_base",  # fp64_OOM
+    "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
-    "twins_pcpvt_base",
-    # OOM with batch_size = 2
-    "swsl_resnext101_32x16d",
-    # https://github.com/pytorch/torchdynamo/issues/1135
-    "gmixer_24_224",
-    "gmlp_s16_224",
-    "jx_nest_base",
-    "mixer_b16_224",
-    "tnt_s_patch16_224",
-    "volo_d1_224",
-    "xcit_large_24_p8_224",
+    "twins_pcpvt_base",  # time out
+    "volo_d1_224",  # accuracy
+    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 

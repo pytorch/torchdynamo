@@ -356,9 +356,9 @@ class AutocastModeVariable(ContextWrappingVariable):
         return "torch.amp.autocast_mode.autocast"
 
 
-class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
+class ProfilerContextWrapperVariable(ContextWrappingVariable):
     def __init__(self, target_values=None, **kwargs):
-        super(AutogradProfilerContextWrapperVariable, self).__init__(
+        super(ProfilerContextWrapperVariable, self).__init__(
             target_values=target_values, **kwargs
         )
 

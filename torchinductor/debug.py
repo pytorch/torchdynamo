@@ -19,12 +19,6 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
-import torchdynamo.config
-import torchinductor
-from torchdynamo.debug_utils import save_graph_repro
-from torchdynamo.debug_utils import wrap_compiler_debug
-from torchdynamo.utils import init_logging
-
 from . import config
 from . import ir
 from .codecache import cache_dir
@@ -35,6 +29,9 @@ from .scheduler import NopKernelSchedulerNode
 from .scheduler import OutputNode
 from .scheduler import SchedulerNode
 from .scheduler import TemplateSchedulerNode
+from .utils import dynamo_config
+from .utils import dynamo_debug_utils
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -182,7 +179,7 @@ class DebugContext:
             with DebugContext():
                 return fn(*args, **kwargs)
 
-        return wrap_compiler_debug(inner, compiler_name="inductor")
+        return dynamo_debug_utils.wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
     def create_debug_dir():
@@ -230,14 +227,12 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        log = logging.getLogger("torchinductor")
+        log = logging.getLogger(config.inductor_import)
         if not log.handlers:
-            init_logging()
+            dynamo_utils.init_logging()
 
-        for handler in itertools.chain([log], log.handlers):
-            handler.setLevel(
-                logging.DEBUG if config.debug else torchdynamo.config.log_level
-            )
+        if config.debug:
+            dynamo_config.log_level = logging.DEBUG
 
         self._stack.enter_context(V.set_debug_handler(self))
 
@@ -255,7 +250,7 @@ class DebugContext:
             self._prof.enable()
 
     def _setup_log_capture(self, filename, level):
-        log = logging.getLogger("torchinductor")
+        log = logging.getLogger(config.inductor_import)
         fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
         ch.setLevel(level)
@@ -300,7 +295,7 @@ class DebugContext:
             return ignored
 
 
-SchedulerNodeList = List["torchinductor.scheduler.BaseSchedulerNode"]
+SchedulerNodeList = List[Any]
 
 
 class DebugFormatter:
@@ -311,7 +306,7 @@ class DebugFormatter:
 
     def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
         with self.fopen("fx_graph.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            dynamo_debug_utils.save_graph_repro(fd, gm, inputs, "inductor")
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList):
         self._write_ir("ir_pre_fusion.txt", nodes)

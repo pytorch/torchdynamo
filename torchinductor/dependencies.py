@@ -224,7 +224,7 @@ def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
 
 
 def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
-    from torchinductor.ir import SqueezeView
+    from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
     args: List[List[sympy.Expr]] = []

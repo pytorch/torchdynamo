@@ -3,6 +3,7 @@ import logging
 import operator
 from collections import defaultdict
 from functools import partial
+from importlib import import_module
 from typing import Set
 
 import torch
@@ -32,8 +33,7 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     Issues
     1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
     2) LSTM - https://github.com/pytorch/functorch/issues/586
-    3) New op - https://github.com/pytorch/torchdynamo/issues/1448
-    4) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
+    3) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
     """
 
     def raise_or_warn(reason):
@@ -50,11 +50,6 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     for submod in gm.modules():
         if submod.__class__.__name__ == "LSTM":
             return raise_or_warn("LSTM")
-
-    # 2) new does not work with fake tensor and aot autograd
-    for node in gm.graph.nodes:
-        if node.op == "call_method" and node.target == "new":
-            return raise_or_warn("new operator")
 
     # 2) Mutation in the graph
     mutated = False
@@ -93,7 +88,7 @@ class AotAutogradStrategy(object):
     @classmethod
     def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
         if count_calls(gm.graph) < 2:
-            return gm.forward  # no point for tiny graphs
+            return gm  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
@@ -230,13 +225,15 @@ class AotInductorDebug(AotAutogradStrategy):
         from functorch.compile import min_cut_rematerialization_partition
         from functorch.compile import nop
 
-        from torchinductor.compile_fx import select_decomp_table
+        decompositions = import_module(
+            f"{config.inductor_import}.compile_fx"
+        ).select_decomp_table()
 
         kwargs = {
             # these are taken from memory_efficient_fusion()
             "fw_compiler": nop,
             "bw_compiler": nop,
-            "decompositions": select_decomp_table(),
+            "decompositions": decompositions,
             "partition_fn": functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
