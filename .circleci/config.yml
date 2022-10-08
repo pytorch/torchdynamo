@@ -54,6 +54,18 @@ commands:
             - torchbenchmark
 
 jobs:
+  cuda_check:
+    machine:
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - run:
+        name: Tests
+        command: |
+          echo $CUDA_HOME
+          nvcc --version
+  
   unit_test:
     machine:
       # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
@@ -631,6 +643,7 @@ jobs:
 workflows:
   gpu:
     jobs:
+      - cuda_check
       - unit_test
       - coverage
       - aot_eager_hf_inference
