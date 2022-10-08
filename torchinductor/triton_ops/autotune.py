@@ -15,19 +15,20 @@ from ..codecache import AsyncCompile
 from ..ir import ReductionHint
 from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product
+from ..utils import has_triton
 from .conv_perf_model import early_config_prune as conv_early_config_prune
 from .conv_perf_model import estimate_conv_time
 
 log = logging.getLogger(__name__)
 
-try:
+if has_triton():
     import triton
     from triton import Config
     from triton import cdiv
     from triton import next_power_of_2
     from triton.runtime.jit import KernelInterface
     from triton.runtime.jit import get_cuda_stream
-except ImportError:
+else:
     cdiv = None
     Config = object
     get_cuda_stream = None
