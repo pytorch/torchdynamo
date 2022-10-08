@@ -54,12 +54,12 @@ setup:
 
 setup_nightly:
 	$(PIP) install ninja
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	$(PIP) install -r requirements.txt
 
 setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda117 cudatoolkit=11.7 -c conda-forge
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
+	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) \
                       torchvision==0.15.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu116
