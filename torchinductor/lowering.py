@@ -1105,6 +1105,9 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
+fallback_arange = fallback_handler(aten.arange)
+
+
 @register_lowering([torch.arange, aten.arange])
 def arange(
     start,
@@ -1129,9 +1132,17 @@ def arange(
     if isinstance(step, float) and int(step) == step:
         step = int(step)
 
-    assert isinstance(start, int)
-    assert isinstance(end, int)
-    assert isinstance(step, int)
+    # Triton kernel doesn't support float arange yet, fallback to aten.arange
+    if not (isinstance(start, int) and isinstance(end, int) and isinstance(step, int)):
+        return fallback_arange(
+            start,
+            end,
+            step,
+            dtype=dtype,
+            device=device,
+            layout=layout,
+            pin_memory=pin_memory,
+        )
 
     dtype = dtype or torch.int64
     length = ceildiv((end - start), step)
