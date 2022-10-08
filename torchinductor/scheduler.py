@@ -345,6 +345,7 @@ class SchedulerNode(BaseSchedulerNode):
                             input_node.node.get_layout(),
                             (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout),
                         )
+                        and not should_use_template(input_node.node)
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
