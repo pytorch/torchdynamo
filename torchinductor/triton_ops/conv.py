@@ -2,9 +2,8 @@ import torch
 import triton
 import triton.language as tl
 
-from torchinductor.triton_ops.utils import _unpack
-
 from .autotune import conv_heuristics
+from .utils import _unpack
 
 
 @conv_heuristics()

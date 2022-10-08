@@ -16,6 +16,7 @@ from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
+from torchdynamo.debug_utils import same_two_models
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 from torchinductor.utils import timed
@@ -53,8 +54,8 @@ try:
 
     CppCodeCache.load("")
     HAS_CPU = True
-except (CalledProcessError, OSError):
-    raise unittest.SkipTest("Did not find a working c++ compiler")
+except (CalledProcessError, OSError, torchinductor.exc.InvalidCxxCompiler):
+    pass
 
 aten = torch.ops.aten
 
@@ -147,32 +148,39 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
+    assert_equal=True,
 ):
     torchdynamo.reset()
 
-    # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+    ref_inputs = example_inputs
+    ref_kwargs = kwargs
     has_lowp_args = False
 
-    def upcast_fn(x):
-        nonlocal has_lowp_args
-        if isinstance(x, torch.Tensor) and (
-            x.dtype == torch.float16 or x.dtype == torch.bfloat16
-        ):
-            has_lowp_args = True
-            return x.float()
-        else:
-            return x
+    if reference_in_float:
+        # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+        def upcast_fn(x):
+            nonlocal has_lowp_args
+            if isinstance(x, torch.Tensor) and (
+                x.dtype == torch.float16 or x.dtype == torch.bfloat16
+            ):
+                has_lowp_args = True
+                return x.float()
+            else:
+                return x
 
-    upcasted_inputs = list(map(upcast_fn, example_inputs))
-    upcasted_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
-    if has_lowp_args:
-        if hasattr(model, "to"):
-            model = model.to(torch.float)
+        ref_inputs = list(map(upcast_fn, example_inputs))
+        ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
+        if has_lowp_args:
+            if hasattr(model, "to"):
+                model = model.to(torch.float)
+
     torch.manual_seed(0)
 
-    correct = model(*upcasted_inputs, **upcasted_kwargs)
+    correct = model(*ref_inputs, **ref_kwargs)
     # downcast the model back if needed
-    if has_lowp_args:
+    if reference_in_float and has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.half)
 
@@ -200,24 +208,40 @@ def check_model(
     assert called, "Ran graph without calling compile_fx"
 
     assert type(actual) == type(correct)
-    correct_flat, correct_spec = tree_flatten(correct)
-    actual_flat, _ = tree_flatten(actual)
-    correct_flat = tuple(
-        y.to(x.dtype)
-        if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
-        else y
-        for x, y in zip(actual_flat, correct_flat)
-    )
-    correct = tree_unflatten(correct_flat, correct_spec)
 
-    self.assertEqual(
-        actual,
-        correct,
-        atol=atol,
-        rtol=rtol,
-        equal_nan=True,
-        exact_dtype=exact_dtype,
-    )
+    if reference_in_float:
+        correct_flat, correct_spec = tree_flatten(correct)
+        actual_flat, _ = tree_flatten(actual)
+        correct_flat = tuple(
+            y.to(x.dtype)
+            if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
+            else y
+            for x, y in zip(actual_flat, correct_flat)
+        )
+        correct = tree_unflatten(correct_flat, correct_spec)
+
+    if assert_equal:
+        self.assertEqual(
+            actual,
+            correct,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            exact_dtype=exact_dtype,
+        )
+    else:
+        correct_flat, _ = tree_flatten(correct)
+        actual_flat, _ = tree_flatten(actual)
+
+        for correct_val, actual_val in zip(correct_flat, actual_flat):
+            if isinstance(correct_val, torch.Tensor):
+                assert correct_val.device == actual_val.device
+                assert correct_val.size() == actual_val.size()
+                assert correct_val.stride() == actual_val.stride()
+                assert correct_val.layout == actual_val.layout
+                if exact_dtype:
+                    assert correct_val.dtype == actual_val.dtype
+
     torchdynamo.reset()
 
 
@@ -233,6 +257,9 @@ def check_model_cuda(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
+    assert_equal=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -245,7 +272,9 @@ def check_model_cuda(
             x.size(), x.stride(), device="cuda", dtype=x.dtype
         ).copy_(x)
 
-    example_inputs = tuple(copy_fn(x) for x in example_inputs)
+    if copy_to_cuda:
+        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+
     check_model(
         self,
         model,
@@ -255,6 +284,8 @@ def check_model_cuda(
         rtol=rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
+        reference_in_float=reference_in_float,
+        assert_equal=assert_equal,
     )
 
     if check_lowp:
@@ -278,6 +309,8 @@ def check_model_cuda(
             rtol=rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
+            reference_in_float=reference_in_float,
+            assert_equal=assert_equal,
         )
 
 
@@ -2915,6 +2948,15 @@ class CommonTemplate:
             rtol=1e-3,
         )
 
+    def test_scatter4(self):
+        def fn(x, ind, src):
+            return torch.scatter(x, 0, ind, src)
+
+        self.common(
+            fn,
+            (torch.randn(196, 992), torch.randint(196, (1, 992)), torch.randn(1, 992)),
+        )
+
     @unittest.skip("Flaky test, needs debugging")
     def test_scatter_add1(self):
         def fn(a, dim, index, b):
@@ -3724,3 +3766,38 @@ if HAS_CUDA:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        def test_accuracy_issue1(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(
+                        in_features=768, out_features=2, bias=True
+                    )
+
+                def forward(self, start_positions: torch.Tensor, x: torch.Tensor):
+                    linear = self.linear(x)
+                    split = linear.split(1, dim=-1)
+                    getitem = split[0]
+                    squeeze = getitem.squeeze(-1)
+                    clamp = start_positions.clamp(0, 128)
+                    cross_entropy = torch.nn.functional.cross_entropy(
+                        squeeze, clamp, None, None, 128, None, "mean", 0.0
+                    )
+                    return cross_entropy
+
+            mod = Repro().cuda()
+            opt_mod = torchdynamo.optimize("inductor")(mod)
+            mod.eval()
+            opt_mod.eval()
+
+            args = [
+                ((1,), (1,), torch.int64, "cuda", False),
+                ((1, 128, 768), (98304, 768, 1), torch.float32, "cuda", True),
+            ]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+            with torch.cuda.amp.autocast(enabled=False):
+                assert same_two_models(mod, opt_mod, args), "Dynamo failed"

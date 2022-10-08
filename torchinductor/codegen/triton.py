@@ -12,13 +12,12 @@ from typing import List
 import sympy
 import torch
 
-import torchinductor
-
 from .. import config
 from .. import ir
+from .. import scheduler
 from ..ir import ReductionHint
+from ..utils import dynamo_logging
 from ..utils import free_symbol_startswith
-from ..utils import has_triton_libdevice
 from ..utils import instance_descriptor
 from ..utils import sympy_product
 from ..utils import sympy_subs
@@ -114,15 +113,15 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"tl.abs({x})"
+        return f"tl.libdevice.abs({x}) if ({x}).dtype is tl.float64 else tl.abs({x})"
 
     @staticmethod
     def exp(x):
-        return f"tl.exp({x})"
+        return f"tl.libdevice.exp({x}) if ({x}).dtype is tl.float64 else tl.exp({x})"
 
     @staticmethod
     def sqrt(x):
-        return f"tl.sqrt({x})"
+        return f"tl.libdevice.sqrt({x}) if ({x}).dtype is tl.float64 else tl.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -154,11 +153,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def cos(x):
-        return f"tl.cos({x})"
+        return f"tl.libdevice.cos({x}) if ({x}).dtype is tl.float64 else tl.cos({x})"
 
     @staticmethod
     def sin(x):
-        return f"tl.sin({x})"
+        return f"tl.libdevice.sin({x}) if ({x}).dtype is tl.float64 else tl.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -199,7 +198,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbitf({x}) if {x}.dtype is tl.float32 else {x} < 0"
+        return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
@@ -211,40 +210,23 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.log({x}) if {x}.dtype is tl.float64 else tl.log({x})"
-        else:
-            # workaround https://github.com/openai/triton/issues/543
-            return f"tl.log({x}.to(tl.float32))"
+        return f"tl.libdevice.log({x}) if ({x}).dtype is tl.float64 else tl.log({x})"
 
     @staticmethod
     def isinf(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.isinfd({x}) if {x}.dtype is tl.float64 else tl.libdevice.isinff({x})"
-        else:
-            return f"{x}+1 == {x}"
+        return f"tl.libdevice.isinfd({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isinff({x})"
 
     @staticmethod
     def isnan(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.isnand({x}) if {x}.dtype is tl.float64 else tl.libdevice.isnanf({x})"
-        else:
-            return f"{x} != {x}"
+        return f"tl.libdevice.isnand({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isnanf({x})"
 
     @staticmethod
     def round(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.nearbyint({x})"
-        else:
-            return f"tl.where({x}<0, {x}-0.5, {x}+0.5).to(tl.int32).to(tl.float32)"
+        return f"tl.libdevice.nearbyint({x})"
 
     @staticmethod
     def floor(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.floor({x})"
-        else:
-            tmp = ops.trunc(x)
-            return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
+        return f"tl.libdevice.floor({x})"
 
     @staticmethod
     def floordiv(a, b):
@@ -257,10 +239,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def trunc(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.trunc({x})"
-        else:
-            return f"{x}.to(tl.int32).to(tl.float32)"
+        return f"tl.libdevice.trunc({x})"
 
     @staticmethod
     def truncdiv(a, b):
@@ -766,9 +745,24 @@ class TritonKernel(Kernel):
             ep = ", eviction_policy='evict_last'"
         else:
             ep = ""
-        line = f"tl.load({var} + {index}, {mask}{ep})"
+        # "other" below is a workaround for https://github.com/openai/triton/issues/737
+        # for bool, even though it's likely subject to the same bug, setting `other` leads
+        # to LLVM errors so we are skipping it for now
+        if "tmp" in mask and V.graph.get_dtype(name) != torch.bool:
+            other = ", other=0"
+        else:
+            other = ""
+        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
+        """
+        elif V.graph.get_dtype(name) == torch.bool:
+            # This is a fix for https://github.com/pytorch/torchdynamo/issues/1450
+            # The root cause of the problem is a one-element bool tensor was stored as
+            # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
+            # which confuses the backward pass when it calls sum on the bool tensor.
+            line = f"({line} != 0)"
+        """
 
         if (
             self.inside_reduction
@@ -790,9 +784,9 @@ class TritonKernel(Kernel):
         var = self.args.output(name)
         index, mask = self.indexing(index, value, dense_indexing=True)
         if mode is None:
-            line = f"tl.store({var} + {index}, {value}, {mask})"
+            line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + {index}, {value}, {mask})"
+            line = f"tl.atomic_add({var} + ({index}), {value}, {mask})"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
@@ -943,9 +937,9 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from torchinductor.ir import ReductionHint
-                    from torchinductor.triton_ops.autotune import {heuristics}
-                    from torchinductor.utils import instance_descriptor
+                    from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.triton_ops.autotune import {heuristics}
+                    from {config.inductor_import}.utils import instance_descriptor
                 """
             )
 
@@ -1183,7 +1177,7 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        log.info("schedule: %s", node_schedule)
+        log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
@@ -1350,7 +1344,7 @@ class TritonScheduling:
             if all(
                 TritonKernel.is_compatible(new_groups, node.get_ranges())
                 for node in node_schedule
-                if isinstance(node, torchinductor.scheduler.SchedulerNode)
+                if isinstance(node, scheduler.SchedulerNode)
             ):
                 return new_groups
 

@@ -53,6 +53,12 @@ comment_origin = False
 
 compile_threads = 1
 
+# How to import torchinductor, either torchinductor or torch.inductor
+inductor_import = __name__.replace(".config", "")
+
+# How to import torchdynamo, either torchdynamo or torch.dynamo
+dynamo_import = inductor_import.replace("inductor", "dynamo")
+
 
 # config specific to codegen/cpp.pp
 class cpp:

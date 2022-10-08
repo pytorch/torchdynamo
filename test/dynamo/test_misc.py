@@ -1316,8 +1316,28 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    def test_torch_profiler(self):
+        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        def fn(x):
+            y = x**2
+            with torch.profiler.profile():
+                y = y + 2
+                with torch.profiler.record_function("my_function"):
+                    z = y**3
+                    z.tolist()  # graph break
+                    z = z + 1
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as AutogradProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
@@ -1535,14 +1555,13 @@ class MiscTests(torchdynamo.testing.TestCase):
     @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
-            return torch.quantize_per_tensor(
-                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
-            )
+            return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
 
         x = torch.randn(2, 2)
-        with self.assertRaises(RuntimeError):
-            opt_f = torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter())(f)
-            opt_f(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_f = torchdynamo.optimize(cnts)(f)
+        opt_f(x)
+        self.assertEqual(cnts.op_count, 0)
 
         torchdynamo.reset()
         with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
@@ -2578,6 +2597,62 @@ class MiscTests(torchdynamo.testing.TestCase):
             return C().fn(torch.ones(2, 3))
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+
+    def test_user_function_variable_supports_enum_argument(self):
+        class Foo(enum.Enum):
+            FOO = 0
+            BAR = 1
+
+        def gn(x, y=Foo.FOO):
+            if y is Foo.FOO:
+                return x
+            else:
+                return x + 1
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(2, 3)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_repro_graph_breaks_in__get_item_by_idx(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Sequential(
+                    torch.nn.Linear(3, 3), torch.nn.Linear(3, 3)
+                )
+
+            def forward(self, x):
+                return self.mod[0](x)
+
+        m = Mod()
+        graph, _ = torchdynamo.export(m, torch.randn(3, 3))
+
+    def test_empty_graph(self):
+        import torch.distributed as dist
+
+        with patch.dict(os.environ, {"MASTER_ADDR": "localhost"}):
+            with patch.dict(os.environ, {"MASTER_PORT": "12355"}):
+                # initialize the process group
+                dist.init_process_group("gloo", rank=0, world_size=1)
+
+                def fn():
+                    get_world_size = torch.distributed.distributed_c10d.get_world_size()
+                    return (get_world_size,)
+
+                opt_fn = torchdynamo.optimize("inductor")(fn)
+                res = None
+                try:
+                    res = opt_fn()[0]
+                except Exception:
+                    pass
+                finally:
+                    dist.destroy_process_group()
+                self.assertEqual(res, 1)
 
 
 class CustomFunc(torch.autograd.Function):

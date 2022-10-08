@@ -493,6 +493,22 @@ def squeeze_(x, dim=None):
     return x
 
 
+@register_lowering(aten.isinf)
+def isinf(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isinf")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
+@register_lowering(aten.isnan)
+def isnan(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isnan")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
 @register_lowering(aten.ceil)
 def ceil(x):
     if is_integer_type(x):
@@ -807,8 +823,8 @@ def mm(a: TensorBox, b: TensorBox):
 
 
 @register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b))
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
 
 
 @register_lowering(aten.bmm)
@@ -1665,6 +1681,19 @@ def index_put_(self, indices, values, accumulate=False):
         if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
             return index_put_fallback(self, indices, values, accumulate)
 
+    x_size = self.get_size()
+    x_ndim = len(x_size)
+
+    # fallback to aten.index_put_, as tl.atomic_add does NOT support int64 or bool
+    if self.get_dtype() in {torch.int64, torch.bool}:
+        # self is an scalar Tensor
+        if x_ndim == 0:
+            self = view(self, [1])
+        self = index_put_fallback(self, indices, values, accumulate)
+        if x_ndim == 0:
+            self = view(self, [])
+        return self
+
     values = to_dtype(values, self.get_dtype())
     indices, start_offset, end_offset = check_and_broadcast_indices(indices)
     indices_sizes = [i.get_size() for i in indices if i is not None]
@@ -1674,7 +1703,10 @@ def index_put_(self, indices, values, accumulate=False):
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    x_size = self.get_size()
+    # self is an scalar Tensor
+    if x_ndim == 0:
+        self = view(self, [1])
+
     output_size = list(indices_sizes[0])
     expected_vals_size = [
         *x_size[:start_offset],
@@ -1708,6 +1740,9 @@ def index_put_(self, indices, values, accumulate=False):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+
+    if x_ndim == 0:
+        self = view(self, [])
     return self
 
 
@@ -2787,7 +2822,7 @@ def _validate_reduction_axis(x, axis):
     for i in range(len(axis)):
         if axis[i] < 0:
             axis[i] += len(size)
-        assert 0 <= axis[i] < len(size)
+        assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
     assert len(set(axis)) == len(axis), "reduction axis not unique"
     return axis
 
@@ -3101,6 +3136,17 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
+
+    # This is a temp fix for https://github.com/pytorch/torchdynamo/issues/1450
+    # The root cause of the problem is a one-element bool tensor was stored as
+    # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
+    # which confuses the backward pass when it calls sum on the bool tensor.
+    # A better place to fix is in triton.py (see the comment there), but it is
+    # blocked by a trition issue on bool comparison, causing opinfo tests like
+    # test_comprehensive_gt_cuda_bool to fail.
+    if is_boolean_dtype(x.get_dtype()):
+        x = to_dtype(to_dtype(x, dtype), torch.bool)
+
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
@@ -3154,7 +3200,9 @@ register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
-register_pointwise(aten.reciprocal)
+register_pointwise(
+    aten.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(
@@ -3163,8 +3211,6 @@ register_pointwise(
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
-register_pointwise(aten.isinf, override_return_dtype=torch.bool)
-register_pointwise(aten.isnan, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)

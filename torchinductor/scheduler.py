@@ -16,8 +16,6 @@ import numpy as np
 import sympy
 import torch
 
-from torchdynamo.utils import dynamo_timed
-
 from . import config
 from . import dependencies
 from . import ir
@@ -30,6 +28,7 @@ from .dependencies import StarDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self
 from .utils import cmp
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -553,7 +552,7 @@ class NodeUser:
 
 
 class Scheduler:
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def __init__(self, nodes):
         super(Scheduler, self).__init__()
         self.backends = {}
@@ -1063,7 +1062,7 @@ class Scheduler:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def codegen(self):
         for node in self.nodes:
             self.buffer_names_no_longer_needed.update(node.last_usage)

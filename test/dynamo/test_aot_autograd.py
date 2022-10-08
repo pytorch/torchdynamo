@@ -60,23 +60,6 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
         aot_fn(x, y)
         self.assertTrue(not is_safe[0])
 
-    def test_new(self):
-        # https://github.com/pytorch/torchdynamo/issues/1448
-        def fn(argsort: torch.Tensor):
-            new = argsort.new(2, 12, 4096)
-            x = torch.add(new, 2)
-            return (
-                new,
-                x,
-            )
-
-        x = torch.randn((2, 12, 4096))
-        is_safe = [True]
-        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torchdynamo.optimize(compiler_fn)(fn)
-        aot_fn(x)
-        self.assertTrue(not is_safe[0])
-
     def test_negative_testing(self):
         def fn(x, y):
             return torch.sin(x).add_(y)

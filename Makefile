@@ -1,8 +1,10 @@
 .PHONY: default develop test torchbench format lint setup clean
 
 PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo/*/*.py) \
-            $(wildcard test/*.py) $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py) \
-            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py) $(wildcard .circleci/*.py)
+            $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py)  \
+            $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py)  \
+            $(wildcard test/*.py) $(wildcard test/*/*.py)  \
+            $(wildcard .circleci/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -10,7 +12,7 @@ PIP ?= python -m pip
 
 # versions used in CI
 # Also update the "Install nightly binaries" section of the README when updating these
-PYTORCH_VERSION ?= dev20221004
+PYTORCH_VERSION ?= dev20221006
 TRITON_VERSION ?= d3c925db8a81ca74f14680876b9311e7d079c5a1
 
 
@@ -74,7 +76,6 @@ clone-deps:
 		&& (test -e pytorch || git clone --recursive https://github.com/pytorch/pytorch pytorch) \
 		&& (test -e torchvision || git clone --recursive https://github.com/pytorch/vision torchvision) \
 		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
-		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/audio torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
 		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
 		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \
@@ -84,7 +85,6 @@ pull-deps:
 	(cd ../pytorch        && git pull && git submodule update --init --recursive)
 	(cd ../torchvision    && git pull && git submodule update --init --recursive)
 	(cd ../torchtext      && git pull && git submodule update --init --recursive)
-	(cd ../torchaudio     && git pull && git submodule update --init --recursive)
 	(cd ../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../torchbenchmark && git pull && git submodule update --init --recursive)
 	(cd ../triton         && git checkout master && git pull && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
@@ -102,7 +102,6 @@ build-deps: clone-deps
 	(cd ../pytorch     && python setup.py clean && python setup.py develop)
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
-	(cd ../torchaudio  && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../torchbenchmark && python install.py --continue_on_fail)
 	(cd ../triton/python && python setup.py clean && python setup.py develop)

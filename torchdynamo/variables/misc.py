@@ -6,11 +6,6 @@ from typing import List
 
 import torch._C
 
-from torchdynamo.variables.functions import UserFunctionVariable
-from torchdynamo.variables.functions import UserMethodVariable
-from torchdynamo.variables.functions import WrappedUserFunctionVariable
-from torchdynamo.variables.functions import WrappedUserMethodVariable
-
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
@@ -21,6 +16,10 @@ from ..source import AttrSource
 from ..utils import identity
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
+from .functions import UserFunctionVariable
+from .functions import UserMethodVariable
+from .functions import WrappedUserFunctionVariable
+from .functions import WrappedUserMethodVariable
 
 
 class SuperVariable(VariableTracker):
@@ -357,9 +356,9 @@ class AutocastModeVariable(ContextWrappingVariable):
         return "torch.amp.autocast_mode.autocast"
 
 
-class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
+class ProfilerContextWrapperVariable(ContextWrappingVariable):
     def __init__(self, target_values=None, **kwargs):
-        super(AutogradProfilerContextWrapperVariable, self).__init__(
+        super(ProfilerContextWrapperVariable, self).__init__(
             target_values=target_values, **kwargs
         )
 

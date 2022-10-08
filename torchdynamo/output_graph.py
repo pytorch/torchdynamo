@@ -1,9 +1,9 @@
 import collections
+import functools
 import itertools
 import logging
 import operator
 import re
-import sys
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -15,9 +15,8 @@ from typing import Optional
 import torch.nn
 from torch import fx
 
-import torchdynamo
-
 from . import config
+from . import logging as torchdynamo_logging
 from . import variables
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
@@ -72,6 +71,11 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
+
+
 class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -83,7 +87,7 @@ class OutputGraph(fx.Tracer):
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: Callable,
-        root_tx: "torchdynamo.symbolic_convert.InstructionTranslator",
+        root_tx,
     ):
         super(OutputGraph, self).__init__()
 
@@ -251,6 +255,8 @@ class OutputGraph(fx.Tracer):
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
         """
+        from .eval_frame import disable
+
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
 
@@ -284,7 +290,7 @@ class OutputGraph(fx.Tracer):
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
             rand_fn_name = unique_id("__gen_rand_values")
-            rand_fn = torchdynamo.disable(_get_gen_rand_values_fn(tx.random_calls))
+            rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
@@ -361,6 +367,8 @@ class OutputGraph(fx.Tracer):
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
+        from .eval_frame import disable
+
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
         for output in rv:
@@ -385,15 +393,16 @@ class OutputGraph(fx.Tracer):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
         compiled_fn = self.call_user_compiler(gm)
-        compiled_fn = torchdynamo.disable(compiled_fn)
+        compiled_fn = disable(compiled_fn)
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
-                log.info(
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n"
+                log.log(
+                    torchdynamo_logging.CODE,
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
             log.warning(
@@ -408,13 +417,15 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
+            _step_logger()(logging.INFO, "calling compiler function")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            _step_logger()(logging.INFO, "done compiler function")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            sys.stderr.write("-" * 40 + "\n")
-            sys.stderr.write("TORCHDYNAMO: backend compiler failed\n")
-            traceback.print_exc()
-            sys.stderr.write("-" * 40 + "\n")
+            log.warning("-" * 40 + "\n")
+            log.warning("TORCHDYNAMO: backend compiler failed\n")
+            log.warning(e, exc_info=True)
+            log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
             if config.raise_on_backend_error:
                 raise BackendCompilerFailed(self.compiler_fn, e) from e

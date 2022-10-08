@@ -13,6 +13,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config
 from . import exc
+from . import logging as torchdynamo_logging
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
@@ -199,7 +200,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
             and record_filename is not None
         ):
             return f"\nLast frame execution written to {record_filename}. To run only this frame while debugging, run\
- torchdynamo.replay('{record_filename}').\n"
+ {config.dynamo_import}.replay('{record_filename}').\n"
         else:
             return ""
 
@@ -238,7 +239,9 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
         msg += replay_record_msg()
 
-        msg += "\nSet torchdynamo.config.verbose=True for more information\n"
+        msg += (
+            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        )
     msg += "=" * 10
     return msg
 
@@ -394,23 +397,25 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        log.info(
+        log.log(
+            torchdynamo_logging.CODE,
             format_bytecode(
                 "ORIGINAL BYTECODE",
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
                 code,
-            )
+            ),
         )
-        log.info(
+        log.log(
+            torchdynamo_logging.CODE,
             format_bytecode(
                 "MODIFIED BYTECODE",
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
                 out_code,
-            )
+            ),
         )
 
         assert output.guards is not None
@@ -421,7 +426,7 @@ def _compile(
         guard_str = "GUARDS:\n"
         guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(output.guards)])
 
-        log.info(guard_str)
+        log.log(torchdynamo_logging.CODE, guard_str)
 
         if guard_export_fn is not None:
             guard_export_fn(output.guards)

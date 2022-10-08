@@ -499,7 +499,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 6 --partition-id 0 --output=inductor_timm_training_0.csv
       - store_artifacts:
           path: inductor_timm_training_0.csv
@@ -522,7 +522,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 6 --partition-id 1 --output=inductor_timm_training_1.csv
       - store_artifacts:
           path: inductor_timm_training_1.csv
@@ -545,7 +545,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 6 --partition-id 2 --output=inductor_timm_training_2.csv
       - store_artifacts:
           path: inductor_timm_training_2.csv
@@ -568,7 +568,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 6 --partition-id 3 --output=inductor_timm_training_3.csv
       - store_artifacts:
           path: inductor_timm_training_3.csv
@@ -592,7 +592,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 6 --partition-id 4 --output=inductor_timm_training_4.csv
       - store_artifacts:
           path: inductor_timm_training_4.csv
@@ -615,7 +615,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/timm_models.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/timm_models.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 6 --partition-id 5 --output=inductor_timm_training_5.csv
       - store_artifacts:
           path: inductor_timm_training_5.csv
