@@ -177,17 +177,15 @@ class PyCodeCache:
     @classmethod
     def load(cls, source_code):
         key, path = write(source_code, "py")
-        lock = FileLock(os.path.join(cache_dir(), key + ".lock"), timeout=600)
-        with lock:
-            if key not in cls.cache:
-                with open(path) as f:
-                    code = compile(f.read(), path, "exec")
-                    mod = types.ModuleType(f"{__name__}.{key}")
-                    mod.__file__ = path
-                    mod.key = key
-                    exec(code, mod.__dict__, mod.__dict__)
-                    # another thread might set this first
-                    cls.cache.setdefault(key, mod)
+        if key not in cls.cache:
+            with open(path) as f:
+                code = compile(f.read(), path, "exec")
+                mod = types.ModuleType(f"{__name__}.{key}")
+                mod.__file__ = path
+                mod.key = key
+                exec(code, mod.__dict__, mod.__dict__)
+                # another thread might set this first
+                cls.cache.setdefault(key, mod)
         return cls.cache[key]
 
 
