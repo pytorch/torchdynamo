@@ -429,6 +429,7 @@ class TestIndexingSimplification(unittest.TestCase):
         var_ranges = {"i2": 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
         expected = IndexingDiv(ModularIndexing(i2, 1, 28), 7)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
         expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
 
