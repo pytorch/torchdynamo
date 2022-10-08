@@ -44,18 +44,16 @@ def code_hash(code):
 
 def write(source_code, ext, extra=""):
     basename = code_hash(source_code + extra)
-    lock = FileLock(os.path.join(cache_dir(), basename + ".lock"), timeout=LOCK_TIMEOUT)
-    with lock:
-        subdir = os.path.join(cache_dir(), basename[1:3])
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-        path = os.path.join(subdir, f"{basename}.{ext}")
-        if not os.path.exists(path):
-            # use a temp file for thread safety
-            fd, tmp_path = tempfile.mkstemp(dir=subdir)
-            with os.fdopen(fd, "w") as f:
-                f.write(source_code)
-            os.rename(tmp_path, path)
+    subdir = os.path.join(cache_dir(), basename[1:3])
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+    path = os.path.join(subdir, f"{basename}.{ext}")
+    if not os.path.exists(path):
+        # use a temp file for thread safety
+        fd, tmp_path = tempfile.mkstemp(dir=subdir)
+        with os.fdopen(fd, "w") as f:
+            f.write(source_code)
+        os.rename(tmp_path, path)
     return basename, path
 
 
@@ -69,7 +67,10 @@ def cpp_compiler():
 
 @functools.lru_cache(1)
 def cpp_compiler_search(search):
-    lock = FileLock(os.path.join(cache_dir(), "g++.lock"), timeout=LOCK_TIMEOUT)
+    lock_dir = os.path.join(cache_dir(), "locks")
+    if not os.path.exists(lock_dir):
+        os.makedirs(lock_dir, exist_ok=True)
+    lock = FileLock(os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT)
     with lock:
         for cxx in search:
             try:
@@ -147,7 +148,10 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
-        lock = FileLock(os.path.join(cache_dir(), key + ".lock"), timeout=LOCK_TIMEOUT)
+        lock_dir = os.path.join(cache_dir(), "locks")
+        if not os.path.exists(lock_dir):
+            os.makedirs(lock_dir, exist_ok=True)
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             if key not in cls.cache:
                 output_path = input_path[:-3] + "so"
