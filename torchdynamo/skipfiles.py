@@ -30,6 +30,7 @@ import weakref
 import _collections_abc
 import _weakrefset
 import torch
+import torch.dynamo
 
 try:
     import torch._prims

@@ -1316,8 +1316,28 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    def test_torch_profiler(self):
+        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        def fn(x):
+            y = x**2
+            with torch.profiler.profile():
+                y = y + 2
+                with torch.profiler.record_function("my_function"):
+                    z = y**3
+                    z.tolist()  # graph break
+                    z = z + 1
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as AutogradProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
