@@ -269,10 +269,6 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
-        elif isinstance(example_value, contextlib._GeneratorContextManager):
-            from .misc import SimpleEnterExitContextWrappingVariable
-
-            return SimpleEnterExitContextWrappingVariable(example_value)
         elif proxy.node.target == torch._C._DisableFuncTorch:
             from . import UserDefinedObjectVariable
 

@@ -249,33 +249,6 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedUserFunctionVariable(args[0], self)
 
 
-class SimpleEnterExitContextWrappingVariable(ContextWrappingVariable):
-    def __init__(self, cm, **kwargs):
-        super(SimpleEnterExitContextWrappingVariable, self).__init__(
-            target_values=True, initial_values=False, **kwargs
-        )
-        self.cm = cm
-
-    def enter(self, tx):
-        def enter_functional():
-            return self.cm.__enter__()
-
-        tx.output.graph.create_node("call_function", enter_functional, (), {})
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
-
-    def exit(self, tx, *args):
-        def exit_functional():
-            return self.cm.__exit__(None, None, None)
-
-        self.mode = tx.output.graph.create_node(
-            "call_function", exit_functional, (), {}
-        )
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
-
-    def _func_name(self):
-        return self.cm.__name__
-
-
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
