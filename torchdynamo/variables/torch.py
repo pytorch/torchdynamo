@@ -1,7 +1,6 @@
 import logging
 import re
 import types
-from inspect import signature
 from typing import Dict
 from typing import List
 
@@ -52,6 +51,7 @@ except ImportError:
     pass
 
 torch_special_class_types = (torch._C.Generator,)
+
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
