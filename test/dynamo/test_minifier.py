@@ -77,3 +77,9 @@ class MinfierTests(torchdynamo.testing.TestCase):
         inner()
 
         self.assertTrue(os.path.exists(repro_file))
+
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()

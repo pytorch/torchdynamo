@@ -1,6 +1,7 @@
 import contextlib
 import dis
 import functools
+import importlib
 import logging
 import os.path
 import types
@@ -8,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch.testing._internal.common_utils
 from torch import fx
 
 from . import config
@@ -27,6 +29,27 @@ unsupported = eval_frame.unsupported
 three = 3
 
 log = logging.getLogger(__name__)
+
+
+def run_tests(argv=None, needs=()):
+    from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
+    from torch.testing._internal.common_utils import run_tests
+
+    if TEST_WITH_TORCHDYNAMO:
+        return  # cant dynamo dynamo
+
+    if isinstance(needs, str):
+        needs = (needs,)
+    for need in needs:
+        if need == "cuda" and not torch.cuda.is_available():
+            return
+        else:
+            try:
+                importlib.import_module(need)
+            except ImportError:
+                return
+
+    run_tests(argv)
 
 
 def clone_me(x):
@@ -198,8 +221,7 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         self.assertEqual(actual.op_count, expected_ops)
 
 
-# class TestCase(torch.testing._internal.common_utils.TestCase):
-class TestCase(unittest.TestCase):
+class TestCase(torch.testing._internal.common_utils.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()

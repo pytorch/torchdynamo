@@ -199,3 +199,9 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
 
         x = torch.empty(20, device="cuda:0")
         fn(x)
+
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()

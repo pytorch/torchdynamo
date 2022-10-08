@@ -5,7 +5,10 @@ from types import ModuleType
 from typing import Any
 from typing import Dict
 
-import dill
+try:
+    import dill
+except ImportError:
+    dill = None
 
 
 @dataclasses.dataclass
@@ -28,10 +31,12 @@ class ExecutionRecord:
     code_options: Dict[str, Any] = field(default_factory=dict)
 
     def dump(self, f):
+        assert dill is not None, "replay_record requires `pip install dill`"
         dill.dump(self, f)
 
     @classmethod
     def load(cls, f):
+        assert dill is not None, "replay_record requires `pip install dill`"
         return dill.load(f)
 
 

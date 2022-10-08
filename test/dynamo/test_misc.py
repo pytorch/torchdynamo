@@ -2709,3 +2709,9 @@ class TestTracer(JitTestCase):
         fn()
         opt_fn = torchdynamo.optimize("eager")(fn)
         opt_fn()
+
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()

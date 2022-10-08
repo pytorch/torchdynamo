@@ -1,10 +1,6 @@
 import heapq
 
 import torch
-import triton
-import triton._C.libtriton.triton as _triton
-from triton.ops.matmul_perf_model import get_dram_gbps as get_dram_gbps
-from triton.ops.matmul_perf_model import get_tflops as get_tflops
 
 
 def estimate_conv_time(
@@ -29,6 +25,11 @@ def estimate_conv_time(
 ):
     """return estimated running time in ms
     = max(compute, loading) + store"""
+    import triton
+    import triton._C.libtriton.triton as _triton
+    from triton.ops.matmul_perf_model import get_dram_gbps as get_dram_gbps
+    from triton.ops.matmul_perf_model import get_tflops as get_tflops
+
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     dtype = x.dtype
@@ -90,6 +91,8 @@ def estimate_conv_time(
 
 
 def early_config_prune(configs, named_args):
+    import triton._C.libtriton.triton as _triton
+
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     cc = _triton.runtime.cc(backend, device)

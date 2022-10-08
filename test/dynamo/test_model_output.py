@@ -157,3 +157,9 @@ class TestModelOutput(torchdynamo.testing.TestCase):
         self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()

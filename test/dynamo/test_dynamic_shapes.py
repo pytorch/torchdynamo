@@ -27,3 +27,8 @@ DynamicShapesMiscTests = make_dynamic_cls(test_misc.MiscTests)
 DynamicShapesReproTests = make_dynamic_cls(test_repros.ReproTests)
 DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
 DynamicShapesUnspecTests = make_dynamic_cls(test_unspec.UnspecTests)
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()

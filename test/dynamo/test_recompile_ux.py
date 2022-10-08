@@ -196,3 +196,9 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         self.assert_single_log_contains(
             logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
         )
+
+
+# TODO(jansel): these pass with pytest, but not with pytorch CI
+# if __name__ == "__main__":
+#     from torchdynamo.testing import run_tests
+#     run_tests()

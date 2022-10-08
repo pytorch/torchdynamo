@@ -145,3 +145,9 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
         self.check_replay(
             test_fn, torch.ones(3, 3), torch.ones(2, 2), exp_exc_name="RuntimeError"
         )
+
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests(needs="dill")

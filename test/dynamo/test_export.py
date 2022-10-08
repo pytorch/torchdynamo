@@ -1255,7 +1255,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result = module(torch.tensor([2]))
 
         # X is positive, so .item() > 0, which means we return y * x
-        self.assertEqual(real_result, torch.tensor([1]))
+        self.assertEqual(real_result, torch.tensor([1.0]))
 
         graph, guards = torchdynamo.export(module, torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
@@ -1311,7 +1311,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result = module(torch.tensor([2]))
 
         # X is positive, so .item() > 0, which means we return y * x
-        self.assertEqual(real_result, torch.tensor([1]))
+        self.assertEqual(real_result, torch.tensor([1.0]))
 
         graph, guards = torchdynamo.export(module, torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
@@ -1339,7 +1339,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result = module(torch.tensor([2]))
 
         # X is positive, so .item() > 0, which means we return y * x
-        self.assertEqual(real_result, torch.tensor([1]))
+        self.assertEqual(real_result, torch.tensor([1.0]))
 
         graph, guards = torchdynamo.export(module, torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
@@ -1420,3 +1420,9 @@ class ExportTests(torchdynamo.testing.TestCase):
             graph, _ = torchdynamo.export(
                 f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
             )
+
+
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()
