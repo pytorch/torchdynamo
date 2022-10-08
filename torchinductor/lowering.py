@@ -1779,17 +1779,33 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 
 fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
 
+
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
     # TODO: Need to support more reduction type
     # For reduction of "sum", tl.atomic_add doesn't support bool or int64
-    if reduce not in {None, "sum"} or (reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}):
-        return fallback_scatter_reduce_(self, dim, index, src, reduce, include_self=include_self)
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    ):
+        return fallback_scatter_reduce_(
+            self, dim, index, src, reduce, include_self=include_self
+        )
 
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
+
+    ndim = len(self.get_size())
+    if ndim == 0:
+        self = view(self, [1])
+
+    if len(src.get_size()) == 0:
+        src = view(src, [1])
+
+    if len(index.get_size()) == 0:
+        index = view(index, [1])
+
     assert -len(self.get_size()) <= dim < len(self.get_size())
 
     self.realize()
@@ -1851,6 +1867,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+
+    if ndim == 0:
+        self = view(self, [])
     return self
 
 
