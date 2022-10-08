@@ -422,7 +422,7 @@ class TestIndexingSimplification(unittest.TestCase):
 
         # Nested modular indexing is correctly simplified
         var_ranges = {"i1": 13, "i2": 121}
-        expr = ModularIndexing(ModularIndexing(121*i1 + i2, 1, 784), 1, 28)
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
         self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
         var_ranges = {"i2": 784}
         expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
