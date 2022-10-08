@@ -65,6 +65,8 @@ jobs:
         command: |
           echo $CUDA_HOME
           nvcc --version
+      - store_test_results:
+          path: test-results
   
   unit_test:
     machine:
