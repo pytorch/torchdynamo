@@ -33,6 +33,13 @@ def cache_dir():
     return f"/tmp/torchinductor_{getpass.getuser()}"
 
 
+def get_lock_dir():
+    lock_dir = os.path.join(cache_dir(), "locks")
+    if not os.path.exists(lock_dir):
+        os.makedirs(lock_dir, exist_ok=True)
+    return lock_dir
+
+
 def code_hash(code):
     return (
         "c"
@@ -67,9 +74,7 @@ def cpp_compiler():
 
 @functools.lru_cache(1)
 def cpp_compiler_search(search):
-    lock_dir = os.path.join(cache_dir(), "locks")
-    if not os.path.exists(lock_dir):
-        os.makedirs(lock_dir, exist_ok=True)
+    lock_dir = get_lock_dir()
     lock = FileLock(os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT)
     with lock:
         for cxx in search:
@@ -148,9 +153,7 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
-        lock_dir = os.path.join(cache_dir(), "locks")
-        if not os.path.exists(lock_dir):
-            os.makedirs(lock_dir, exist_ok=True)
+        lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             if key not in cls.cache:
