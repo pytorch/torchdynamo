@@ -43,13 +43,6 @@ tensor_dunder_fns = [
     torch._C._TensorBase.__rand__,
 ]
 
-try:
-    import torch.testing._internal.common_utils
-
-    tensor_dunder_fns.append(torch.testing._internal.common_utils.disable_functorch)
-except ImportError:
-    pass
-
 torch_special_class_types = (torch._C.Generator,)
 
 
