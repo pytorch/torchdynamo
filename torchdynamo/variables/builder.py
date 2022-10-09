@@ -3,7 +3,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import pathlib
 import re
 import types
 from abc import ABCMeta
