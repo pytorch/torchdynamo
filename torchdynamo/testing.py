@@ -4,7 +4,6 @@ import functools
 import importlib
 import logging
 import os.path
-import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -32,7 +31,7 @@ three = 3
 log = logging.getLogger(__name__)
 
 
-def run_tests(argv=None, needs=()):
+def run_tests(needs=()):
     from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
     from torch.testing._internal.common_utils import run_tests
 
@@ -49,11 +48,7 @@ def run_tests(argv=None, needs=()):
                 importlib.import_module(need)
             except ImportError:
                 return
-
-    if argv is None:
-        argv = sys.argv
-
-    run_tests(argv)
+    run_tests()
 
 
 def clone_me(x):
