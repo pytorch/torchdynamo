@@ -3822,6 +3822,7 @@ if HAS_CUDA:
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
 
 
-# if __name__ == "__main__":
-#    from torchdynamo.testing import run_tests
-#    run_tests()
+if __name__ == "__main__":
+    from torchdynamo.testing import run_tests
+
+    run_tests()

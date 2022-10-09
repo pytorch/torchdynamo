@@ -32,11 +32,15 @@ log = logging.getLogger(__name__)
 
 
 def run_tests(needs=()):
+    from torch.testing._internal.common_utils import TEST_WITH_CROSSREF
     from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO:
         return  # cant dynamo dynamo
+
+    if TEST_WITH_CROSSREF:
+        return  # needs __torch_function__
 
     if isinstance(needs, str):
         needs = (needs,)
