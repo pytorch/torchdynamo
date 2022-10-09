@@ -112,9 +112,6 @@ inductor_skips["cpu"] = {
 inductor_skips["cuda"] = {
     # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_1": {f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "masked.prod": {f16, f32, f64},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
@@ -137,16 +134,7 @@ inductor_skips["cuda"] = {
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
-    "special.log_ndtr": {f64},
     "special.ndtr": {f64},
-    "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.amin": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.sum": {b8, i64},  # segfault
-    "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
-    "nn.functional.kl_div": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -229,9 +217,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "min.reduction_no_dim": {f16},
     "min.reduction_with_dim": {b8, f16},
     "multinomial": {f32, f64},
-    "mvlgamma.mvlgamma_p_1": {f32, f64},
-    "mvlgamma.mvlgamma_p_3": {f32, f64},
-    "mvlgamma.mvlgamma_p_5": {f32, f64},
     "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
@@ -258,11 +243,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
-    "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.amin": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},
-    "scatter_reduce.prod": {b8, f16, f32, f64, i32, i64},
     "scatter_reduce.sum": {f16},
+    "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
@@ -368,6 +350,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
+    "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
@@ -419,13 +402,16 @@ inductor_override_kwargs = {
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
 }
 
 # Always test with all sample for following ops
 inductor_all_samples = {
+    "softmax.with_dtype",
     "index_add",
     "index_put",
     "index_copy",
+    "scatter_reduce.sum",
 }
 
 
