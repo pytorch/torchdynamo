@@ -294,7 +294,10 @@ class WrapperCodeGen(CodeGen):
             return
         self.allocated.add(name)
 
-        if isinstance(buffer, ir.ExternKernelAlloc):
+        if isinstance(
+            buffer,
+            (ir.ExternKernelAlloc, ir.MultiOutput),
+        ):
             return
 
         layout = buffer.get_layout()
