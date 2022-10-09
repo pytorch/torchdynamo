@@ -242,7 +242,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.dropout2d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.dropout3d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.feature_alpha_dropout.with_train": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.fractional_max_pool2d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.fractional_max_pool3d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.gaussian_nll_loss": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator
@@ -287,7 +287,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "unique": {b8, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique
     "unique_consecutive": {b8, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique_consecutive
     "var": {f16}, # Correctness - AssertionError: Scalars Are not close!
-    # "var_mean": {f16}, # Correctness - AssertionError: Scalars Are not close!
+    "var_mean": {f16}, # Correctness - AssertionError: Scalars Are not close!
     "view_as_complex": {f16, f32, f64}, # Complex Type - torch.complex32 / 64 / 128
 }
 
