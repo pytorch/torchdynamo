@@ -163,10 +163,7 @@ class ReuseLine(MemoryPlanningLine):
         reused_as_removed = self.reused_as.get_name() in V.graph.removed_buffers
         node_removed = self.node.get_name() in V.graph.removed_buffers
         if reused_as_removed:
-            if node_removed:
-                return NullLine()
-            else:
-                return FreeLine(self.node).plan(state)
+            return NullLine()
         elif node_removed:
             return AllocateLine(self.reused_as)
         # Neither reused_as nor node is removed
