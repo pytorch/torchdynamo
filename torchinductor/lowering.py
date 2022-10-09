@@ -1789,6 +1789,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if reduce not in {None, "sum"} or (
         reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
     ):
+        self.realize()
         return fallback_scatter_reduce_(
             self, dim, index, src, reduce, include_self=include_self
         )
@@ -1800,10 +1801,10 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if ndim == 0:
         self = view(self, [1])
 
-    if len(src.get_size()) == 0:
+    if isinstance(src, TensorBox) and len(src.get_size()) == 0:
         src = view(src, [1])
 
-    if len(index.get_size()) == 0:
+    if isinstance(index, TensorBox) and len(index.get_size()) == 0:
         index = view(index, [1])
 
     assert -len(self.get_size()) <= dim < len(self.get_size())
