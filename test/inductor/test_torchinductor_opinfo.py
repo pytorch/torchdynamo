@@ -130,7 +130,7 @@ inductor_skips["cuda"] = {
     "nn.functional.poisson_nll_loss": {f64},
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
-    "nn.functional.tanhshrink": {f64},
+    "nn.functional.tanhshrink": {f16, f64},
     "nn.functional.conv_transpose3d": {f16, f64},
     "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
@@ -414,7 +414,6 @@ inductor_override_kwargs = {
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
-    "nn.functional.tanhshrink": {"assert_equal": False},
 }
 
 # Always test with all sample for following ops
@@ -548,10 +547,10 @@ class TestInductorOpInfo(TestCase):
                     known_failure = True
             if not known_failure:
                 raise e
-            else:
-                # with open("test_output.txt", "a") as f:
-                #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-                seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
+
+        # with open("test_output.txt", "a") as f:
+        #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+        seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
         if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
             if FAIL_ON_SUCCESS:

@@ -34,7 +34,6 @@ from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
 from ..source import is_constant_source
-from ..utils import extract_wrapped
 from ..utils import getfile
 from ..utils import global_key_name
 from ..utils import is_namedtuple
