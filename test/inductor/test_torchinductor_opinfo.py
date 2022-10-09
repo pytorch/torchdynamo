@@ -111,9 +111,6 @@ inductor_skips["cpu"] = {
 inductor_skips["cuda"] = {
     # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_1": {f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
     "masked.prod": {f16, f32, f64},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
@@ -226,9 +223,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "min.reduction_no_dim": {f16},
     "min.reduction_with_dim": {b8, f16},
     "multinomial": {f32, f64},
-    "mvlgamma.mvlgamma_p_1": {f32, f64},
-    "mvlgamma.mvlgamma_p_3": {f32, f64},
-    "mvlgamma.mvlgamma_p_5": {f32, f64},
     "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional._scaled_dot_product_attention": {f32, f64},
