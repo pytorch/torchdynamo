@@ -408,6 +408,7 @@ inductor_override_kwargs = {
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
+    ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
 }
 
 # Always test with all sample for following ops
