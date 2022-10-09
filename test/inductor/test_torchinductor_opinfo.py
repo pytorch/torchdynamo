@@ -123,15 +123,9 @@ inductor_skips["cuda"] = {
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
-    "nn.functional.poisson_nll_loss": {f64},
-    "nn.functional.selu": {f64},
-    "nn.functional.silu": {f64},
-    "nn.functional.tanhshrink": {f16, f64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
-    "special.log_ndtr": {f64},
     "special.ndtr": {f64},
     "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
@@ -139,8 +133,6 @@ inductor_skips["cuda"] = {
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.sum": {b8, i64},  # segfault
-    "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
-    "nn.functional.kl_div": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -410,10 +402,12 @@ inductor_override_kwargs = {
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
+    ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
 }
 
 # Always test with all sample for following ops
 inductor_all_samples = {
+    "softmax.with_dtype",
     "index_add",
     "index_put",
     "index_copy",
