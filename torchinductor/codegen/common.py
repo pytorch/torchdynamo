@@ -343,7 +343,14 @@ class KernelArgs:
         call_args = []
         arg_defs = []
         for inplaced in unique(self.inplace_buffers.values()):
-            outer = next((name for name in reversed(inplaced.other_names) if name not in V.graph.removed_buffers), None)
+            outer = next(
+                (
+                    name
+                    for name in reversed(inplaced.other_names)
+                    if name not in V.graph.removed_buffers
+                ),
+                None,
+            )
             if outer is not None:
                 inner = inplaced.inner_name
                 dtype = buffer_types[outer]
@@ -371,7 +378,14 @@ class KernelArgs:
         call_args = []
         precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
-            outer = next((name for name in reversed(inplaced.other_names) if name not in V.graph.removed_buffers), None)
+            outer = next(
+                (
+                    name
+                    for name in reversed(inplaced.other_names)
+                    if name not in V.graph.removed_buffers
+                ),
+                None,
+            )
             if outer is not None:
                 arg_defs.append(inplaced.inner_name)
                 call_args.append(outer)
