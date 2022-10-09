@@ -100,6 +100,8 @@ if COLLECT_EXPECT:
 
 inductor_skips = defaultdict(dict)
 
+# fmt: off
+
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
@@ -162,131 +164,131 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 inductor_expected_failures_single_sample["cpu"] = {
     "H": {b8, f16, f32, f64, i32, i64}, # Dynamo produces no graph - Ran graph without calling compile_fx
     "T": {b8, f16, f32, f64, i32, i64}, # Dynamo produces no graph - Ran graph without calling compile_fx
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "addr": {f16},
-    "allclose": {f16, f32, f64},
-    "angle": {f16, f32, f64},
-    "argwhere": {b8, f16, f32, f64, i32, i64},
-    "bernoulli": {f32, f64},
-    "bincount": {i32, i64},
-    "chalf": {b8, f16, f32, f64, i32, i64},
-    "cholesky": {f32, f64},
-    "combinations": {b8, f16, f32, f64, i32, i64},
-    "complex": {f16, f32, f64},
-    "constant_pad_nd": {f16, f32, f64},
-    "copysign": {f16},
-    "corrcoef": {f32, f64, i32, i64},
-    "cov": {f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64}, # Dynamo produces no graph - Ran graph without calling compile_fx
+    "mT": {b8, f16, f32, f64, i32, i64}, # Dynamo produces no graph - Ran graph without calling compile_fx
+    "__getitem__": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function UserDefinedObjectVariable(wrapper_descriptor)
+    "addr": {f16}, # Correctness - AssertionError: Tensor-likes are not close!
+    "allclose": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.allclose.default
+    "angle": {f16, f32, f64}, # Unclear
+    "argwhere": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.nonzero.default
+    "bernoulli": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "bincount": {i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.bincount.default
+    "chalf": {b8, f16, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "cholesky": {f32, f64}, # Inductor Exception - torchdynamo.exc.TorchRuntimeError
+    "combinations": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.masked_select.default
+    "complex": {f16, f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "constant_pad_nd": {f16, f32, f64}, # Correctness - AssertionError: Tensor-likes are not close!
+    "copysign": {f16}, # Inductor Exception - C++ compile error
+    "corrcoef": {f32, f64, i32, i64}, # torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
+    "cov": {f32, f64, i32, i64}, # torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
     "equal": {b8, f16, f32, f64, i32, i64}, # torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
-    "erf": {b8, f64},
-    "fft.fft": {f32, f64},
-    "fft.fft2": {b8, f32, f64, i32, i64},
-    "fft.fftn": {b8, f32, f64, i32, i64},
-    "fft.hfft": {b8, f32, f64, i32, i64},
-    "fft.hfft2": {b8, f32, f64, i32, i64},
-    "fft.hfftn": {b8, f32, f64, i32, i64},
-    "fft.ifft": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft2": {b8, f32, f64, i32, i64},
-    "fft.ifftn": {b8, f32, f64, i32, i64},
-    "fft.ihfft": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft2": {f32, f64},
-    "fft.ihfftn": {f32, f64},
-    "fft.irfft": {b8, f32, f64, i32, i64},
-    "fft.irfft2": {b8, f32, f64, i32, i64},
-    "fft.irfftn": {b8, f32, f64, i32, i64},
-    "fft.rfft": {f32, f64},
-    "fft.rfft2": {f32, f64},
-    "fft.rfftn": {f32, f64},
-    "index_add": {f16, f32, f64},
-    "index_copy": {f16, f32, f64},
-    "index_put": {f16, f32, f64},
-    "index_reduce": {f16, f32, f64},
-    "istft": {f32, f64},
-    "linalg.cholesky": {f32, f64},
-    "linalg.cholesky_ex": {f32, f64},
-    "linalg.eig": {f32, f64},
-    "linalg.eigh": {f32, f64},
-    "linalg.eigvals": {f32, f64},
-    "linalg.eigvalsh": {f32, f64},
-    "linalg.ldl_factor": {f32, f64},
-    "linalg.lstsq": {f32, f64},
-    "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.svd": {f32, f64},
-    "logdet": {f32, f64},
-    "masked.norm": {f16},
-    "masked_fill": {f16},
-    "masked_scatter": {f16, f32, f64},
-    "masked_select": {b8, f16, f32, f64, i32, i64},
-    "max.reduction_no_dim": {f16},
-    "max.reduction_with_dim": {b8, f16},
-    "min.reduction_no_dim": {f16},
-    "min.reduction_with_dim": {b8, f16},
-    "multinomial": {f32, f64},
-    "mvlgamma.mvlgamma_p_1": {f32, f64},
-    "mvlgamma.mvlgamma_p_3": {f32, f64},
-    "mvlgamma.mvlgamma_p_5": {f32, f64},
-    "nan_to_num": {f16},
-    "nanquantile": {f32, f64},
-    "nn.functional._scaled_dot_product_attention": {f32, f64},
-    "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64},
-    "nn.functional.adaptive_avg_pool2d": {f16},
-    "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.dropout": {f32, f64},
-    "nn.functional.dropout2d": {f32, f64},
-    "nn.functional.dropout3d": {f32, f64},
-    "nn.functional.feature_alpha_dropout.with_train": {f32, f64},
+    "erf": {b8, f64}, # Capability - RuntimeError: Negation, the `-` operator, on a bool tensor is not supported.
+    "fft.fft": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.fft2": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.fftn": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.hfft": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128 
+    "fft.hfft2": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.hfftn": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.ifft": {b8, f16, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.ifft2": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.ifftn": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.ihfft": {b8, f16, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.ihfft2": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.ihfftn": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.irfft": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.irfft2": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.irfftn": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.rfft": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.rfft2": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "fft.rfftn": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "index_add": {f16, f32, f64}, # Inductor Exception - C++ compile error
+    "index_copy": {f16, f32, f64}, # Unclear
+    "index_put": {f16, f32, f64}, # Fake Tensor Access - torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.index.Tensor
+    "index_reduce": {f16, f32, f64}, # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor
+    "istft": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
+    "linalg.cholesky": {f32, f64}, # Correctness - AssertionError: Tensor-likes are not close!
+    "linalg.cholesky_ex": {f32, f64}, # Correctness - AssertionError: Tensor-likes are not close!
+    "linalg.eig": {f32, f64}, # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor
+    "linalg.eigh": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function args: TensorVariable()
+    "linalg.eigvals": {f32, f64},  # Complex Type - torch.complex32 / 64 / 128
+    "linalg.eigvalsh": {f32, f64},  # Graph Break - torchdynamo.exc.Unsupported: call_function args: TensorVariable()
+    "linalg.ldl_factor": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException:
+    "linalg.lstsq": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.linalg_lstsq.default
+    "linalg.lstsq.grad_oriented": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.linalg_lstsq.default
+    "linalg.matrix_rank": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException:
+    "linalg.matrix_rank.hermitian": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException:
+    "linalg.svd": {f32, f64}, # Inductor Exception - ASsertionError
+    "logdet": {f32, f64}, # Inductor Exception - C++ compile error
+    "masked.norm": {f16}, # Inductor Exception - C++ compile error
+    "masked_fill": {f16}, # Inductor Exception - C++ compile error
+    "masked_scatter": {f16, f32, f64}, # Fake Tensor Access - torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.index.Tensor
+    "masked_select": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.masked_select.default
+    "max.reduction_no_dim": {f16}, # Inductor Exception - fp16 user-defined reduction
+    "max.reduction_with_dim": {b8, f16}, # Inductor Exception - fp16 user-defined reduction
+    "min.reduction_no_dim": {f16}, # Inductor Exception - fp16 user-defined reduction
+    "min.reduction_with_dim": {b8, f16}, 
+    "multinomial": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "mvlgamma.mvlgamma_p_1": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "mvlgamma.mvlgamma_p_3": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "mvlgamma.mvlgamma_p_5": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "nan_to_num": {f16}, # Inductor Exception - C++ compile error
+    "nanquantile": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
+    "nn.functional._scaled_dot_product_attention": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.avg_pool1d": {i64}, # Correctness -  AssertionError: Tensor-likes are not equal!
+    "nn.functional.avg_pool2d": {i64},  # Correctness -  AssertionError: Tensor-likes are not equal!
+    "nn.functional.adaptive_avg_pool2d": {f16}, # Unclear
+    "nn.functional.ctc_loss": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten._ctc_loss.Tensor
+    "nn.functional.dropout": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.dropout2d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.dropout3d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.feature_alpha_dropout.with_train": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.fractional_max_pool2d": {f32, f64},
-    "nn.functional.fractional_max_pool3d": {f32, f64},
-    "nn.functional.gaussian_nll_loss": {f32, f64},
-    "nn.functional.gelu": {f64},
-    "nn.functional.huber_loss": {f16, f32, f64},
-    "nn.functional.local_response_norm": {i64},
-    "nn.functional.one_hot": {i64},
-    "nn.functional.pairwise_distance": {f16},
-    "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
-    "nonzero": {b8, f16, f32, f64, i32, i64},
-    "normal": {f16, f32, f64},
-    "normal.number_mean": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
-    "pinverse": {f32, f64},
-    "polar": {f32, f64},
-    "quantile": {f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
-    "randn_like": {f16, f32, f64},
-    "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "scatter_add": {f16},
-    "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.amin": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},
-    "scatter_reduce.prod": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.sum": {f16},
-    "segment_reduce.lengths": {f16, f32, f64},
-    "segment_reduce.offsets": {f16, f32, f64},
-    "sgn": {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
-    "stft": {f32, f64},
-    "svd": {f32, f64},
-    "svd_lowrank": {f32, f64},
-    "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "to": {b8, f16, f32, f64, i32, i64},
-    "to_sparse": {f32, f64},
-    "tril": {f16},
-    "triu": {f16},
-    "uniform": {f16, f32, f64},
-    "unique": {b8, f32, f64, i32, i64},
-    "unique_consecutive": {b8, f32, f64, i32, i64},
-    "var": {f16},
-    "var_mean": {f16},
-    "view_as_complex": {f16, f32, f64},
+    "nn.functional.fractional_max_pool2d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.fractional_max_pool3d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.gaussian_nll_loss": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator
+    "nn.functional.gelu": {f64},  # Correctness -  AssertionError: Tensor-likes are not equal!
+    "nn.functional.huber_loss": {f16, f32, f64}, # Unclear
+    "nn.functional.local_response_norm": {i64},  # Correctness -  AssertionError: Tensor-likes are not equal!
+    "nn.functional.one_hot": {i64}, # Unclear
+    "nn.functional.pairwise_distance": {f16},  # Inductor Exception - C++ compile error
+    "nn.functional.rrelu": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nonzero": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: nonzero
+    "normal": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "normal.number_mean": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "pca_lowrank": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "pinverse": {f32, f64},  # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "polar": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "quantile": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
+    "rand_like": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "randint_like": {f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "randn": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "randn_like": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "repeat_interleave": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.repeat_interleave.Tensor
+    "scatter_add": {f16}, # Inductor Exception - C++ compile error
+    "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "scatter_reduce.amin": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "scatter_reduce.mean": {f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "scatter_reduce.prod": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError AND # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor wit
+    "scatter_reduce.sum": {f16},  # Inductor Exception - C++ compile error
+    "segment_reduce.lengths": {f16, f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "segment_reduce.offsets": {f16, f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "sgn": {f16, f32, f64}, # Inductor Exception - NotImplementedError (Potentially due to complex)
+    "sparse.sampled_addmm": {f32, f64}, # Unclear
+    "stft": {f32, f64}, # Inductor Exception - NotImplementedError (Potentially due to complex)
+    "svd": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "svd_lowrank": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "tensor_split": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "to": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
+    "to_sparse": {f32, f64}, # Fake Tensor Access - Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode 
+    "tril": {f16},  # Inductor Exception - C++ compile error
+    "triu": {f16},  # Inductor Exception - C++ compile error
+    "uniform": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "unique": {b8, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique
+    "unique_consecutive": {b8, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique_consecutive
+    "var": {f16}, # Correctness - AssertionError: Scalars Are not close!
+    # "var_mean": {f16}, # Correctness - AssertionError: Scalars Are not close!
+    "view_as_complex": {f16, f32, f64}, # Complex Type - torch.complex32 / 64 / 128
 }
 
 
@@ -294,7 +296,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "H": {b8, f16, f32, f64, i32, i64}, # Dynamo produces no graph - Ran graph without calling compile_fx
     "T": {b8, f16, f32, f64, i32, i64}, # Dynamo produces no graph - Ran graph without calling compile_fx
     "__getitem__": {b8, f16, f32, f64, i32, i64}, #  Graph Break - torchdynamo.exc.Unsupported: call_function UserDefinedObjectVariable(wrapper_descriptor)
-    "allclose": {f16, f32, f64}, #  Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.allclose.default
+    "allclose": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.allclose.default
     "angle": {f32, f64}, # Unclear
     "argwhere": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.nonzero.default
     "baddbmm": {f16}, # Correctness - AssertionError: Tensor-likes are not close!
@@ -423,6 +425,8 @@ inductor_all_samples = {
     "index_put",
     "index_copy",
 }
+
+# fmt: on
 
 
 class TestInductorOpInfo(TestCase):
