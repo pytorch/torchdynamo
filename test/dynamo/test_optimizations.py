@@ -177,7 +177,7 @@ class TestOptimizations(torchdynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torchdynamo.optimize(backends.ipex_bf16)
+        opt_model = torchdynamo.optimize(backends.ipex_bf16)(model)
         with torch.no_grad(), torch.cpu.amp.autocast():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
