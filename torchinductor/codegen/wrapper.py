@@ -160,9 +160,16 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        if self.reused_as.get_name() in V.graph.removed_buffers:
-            # we hit this case only for inplace buffers
-            return FreeLine(self.node).plan(state)
+        reused_as_removed = self.reused_as.get_name() in V.graph.removed_buffers
+        node_removed = self.node.get_name() in V.graph.removed_buffers
+        if reused_as_removed:
+            if node_removed:
+                return NullLine()
+            else:
+                return FreeLine(self.node).plan(state)
+        elif node_removed:
+            return AllocateLine(self.reused_as)
+        # Neither reused_as nor node is removed
         reuse_line = self
         old_reused_as = state.reused_as(self.node.get_name())
         if old_reused_as is not None:

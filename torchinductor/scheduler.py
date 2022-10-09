@@ -354,7 +354,6 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
-                        V.kernel.must_keep_buffers.add(input_node.get_name())
                         return
         super().allocate()
 

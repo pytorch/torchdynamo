@@ -343,12 +343,12 @@ class KernelArgs:
         call_args = []
         arg_defs = []
         for inplaced in unique(self.inplace_buffers.values()):
-            outer = inplaced.other_names[0]
-            inner = inplaced.inner_name
-            dtype = buffer_types[outer]
-            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            name = inplaced.other_names[-1]
-            call_args.append(f"c_void_p({name}.data_ptr())")
+            outer = next((name for name in reversed(inplaced.other_names) if name not in V.graph.removed_buffers), None)
+            if outer is not None:
+                inner = inplaced.inner_name
+                dtype = buffer_types[outer]
+                arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+                call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.input_buffers.items():
             if outer in self.inplace_buffers:
                 continue
@@ -371,15 +371,17 @@ class KernelArgs:
         call_args = []
         precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
-            arg_defs.append(inplaced.inner_name)
-            call_args.append(inplaced.other_names[-1])
-            precompile_args.append(
-                TensorArg(
-                    inplaced.inner_name,
-                    inplaced.other_names[-1],
-                    V.graph.get_dtype(inplaced.other_names[-1]),
+            outer = next((name for name in reversed(inplaced.other_names) if name not in V.graph.removed_buffers), None)
+            if outer is not None:
+                arg_defs.append(inplaced.inner_name)
+                call_args.append(outer)
+                precompile_args.append(
+                    TensorArg(
+                        inplaced.inner_name,
+                        outer,
+                        V.graph.get_dtype(outer),
+                    )
                 )
-            )
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
@@ -397,6 +399,8 @@ class KernelArgs:
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
             for other in inplaced.other_names:
+                if other in V.graph.removed_buffers:
+                    continue
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
