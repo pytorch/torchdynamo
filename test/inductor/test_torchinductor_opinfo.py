@@ -131,12 +131,6 @@ inductor_skips["cuda"] = {
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
     "special.ndtr": {f64},
-    "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.amin": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.sum": {b8, i64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -388,6 +382,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique
     "unique_consecutive": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique_consecutive
     "view_as_complex": {f16, f32, f64}, # Inductor Exception - NotImplementedError (Potentially due to complex)
+
 }
 
 inductor_should_fail_with_exception = defaultdict(dict)
@@ -417,6 +412,7 @@ inductor_all_samples = {
     "index_add",
     "index_put",
     "index_copy",
+    "scatter_reduce.sum",
 }
 
 # fmt: on
