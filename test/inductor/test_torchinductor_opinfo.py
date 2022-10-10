@@ -138,6 +138,51 @@ inductor_skips["cuda"] = {
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
 }
 
+# This needs to be revisited after we move CI to using GHA
+CUDA_CI_SKIP_LIST = {
+    "cholesky_inverse": {f32, f64},
+    "cholesky_solve": {f32, f64},
+    "geqrf": {f32, f64},
+    "linalg.cond": {f32, f64},
+    "linalg.det.singular": {f32, f64},
+    "linalg.eig": {f32, f64},
+    "linalg.eigh": {f32, f64},
+    "linalg.eigvals": {f32, f64},
+    "linalg.eigvalsh": {f32, f64},
+    "linalg.householder_product": {f32, f64},
+    "linalg.inv": {f32, f64},
+    "linalg.inv_ex": {f32, f64},
+    "linalg.ldl_factor_ex": {f32, f64},
+    "linalg.ldl_solve": {f32, f64},
+    "linalg.lstsq": {f32, f64},
+    "linalg.lstsq.grad_oriented": {f32, f64},
+    "linalg.lu": {f32, f64},
+    "linalg.lu_factor": {f32, f64},
+    "linalg.lu_factor_ex": {f32, f64},
+    "linalg.lu_solve": {f32, f64},
+    "linalg.matrix_rank": {f32, f64},
+    "linalg.matrix_rank.hermitian": {f32, f64},
+    "linalg.pinv": {f32, f64},
+    "linalg.pinv.hermitian": {f32, f64},
+    "linalg.qr": {f32, f64},
+    "linalg.solve": {f32, f64},
+    "linalg.solve_ex": {f32, f64},
+    "linalg.solve_triangular": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "linalg.tensorinv": {f32, f64},
+    "linalg.tensorsolve": {f32, f64},
+    "lu": {f32, f64},
+    "lu_solve": {f32, f64},
+    "nn.functional.huber_loss": {f16, f32, f64},
+    "norm.nuc": {f32, f64},
+    "ormqr": {f32, f64},
+    "pinverse": {f32, f64},
+    "qr": {f32, f64},
+    "symeig": {f32, f64},
+    "triangular_solve": {f32, f64},
+}
+inductor_skips["cuda"].update(CUDA_CI_SKIP_LIST)
+
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
