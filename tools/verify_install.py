@@ -3,6 +3,7 @@ import re
 import subprocess
 import sys
 import traceback
+import warnings
 
 from pkg_resources import packaging
 
@@ -100,7 +101,8 @@ def check_cuda():
 
     torch_cuda_ver = packaging.version.parse(torch.version.cuda)
     if torch_cuda_ver < MIN_CUDA_VERSION:
-        raise VerifyInstallError(
+        # raise VerifyInstallError(
+        warnings.warn(
             f"CUDA version not supported: {torch_cuda_ver} "
             f"- minimum requirement: {MIN_CUDA_VERSION}"
         )
@@ -108,7 +110,8 @@ def check_cuda():
     # check if torch cuda version matches system cuda version
     cuda_ver = get_cuda_version()
     if cuda_ver != torch_cuda_ver:
-        raise VerifyInstallError(
+        # raise VerifyInstallError(
+        warnings.warn(
             f"CUDA version mismatch, torch version: {torch_cuda_ver}, env version: {cuda_ver}"
         )
 

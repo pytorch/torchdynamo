@@ -63,8 +63,9 @@ jobs:
       - run:
           name: Tests
           command: |
-            echo $CUDA_HOME
-            nvcc --version
+            source .circleci/setup_env.sh
+            make setup_nightly_gpu
+            python tools/verify_install.py
       - store_test_results:
           path: test-results
   
