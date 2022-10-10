@@ -58,11 +58,11 @@ setup_nightly:
 	$(PIP) install -r requirements.txt
 
 setup_nightly_gpu:
-	conda install -y -c pytorch magma-cuda117 cudatoolkit=11.7 -c conda-forge
+	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
 	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) \
                       torchvision==0.15.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
-                      --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+                      --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja
 	$(PIP) install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
 	$(PIP) install -r requirements.txt
