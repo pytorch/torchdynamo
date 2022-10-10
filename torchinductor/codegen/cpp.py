@@ -619,23 +619,9 @@ class CppKernel(Kernel):
 
             loops_nest_non_reduc.codegen(code, stack)
 
-            if (
-                isinstance(loops_nest_non_reduc.loops[-1], LoopLevelWithTail)
-                and fast_vec_kernel
-                and fast_vec_kernel.fast_vec
-            ):
-                main_loop, tail_loop = (
-                    loops_nest_non_reduc.loops[-1].main_loop,
-                    loops_nest_non_reduc.loops[-1].tail_loop,
-                )
-                for loop, kernel in ((main_loop, fast_vec_kernel), (tail_loop, self)):
-                    with contextlib.ExitStack() as stack:
-                        code.writelines(loop.lines())
-                        stack.enter_context(code.indent())
-                        with contextlib.ExitStack() as stack:
-                            code.splice(kernel.loads)
-                            code.splice(kernel.compute)
-                            code.splice(kernel.stores)
+            if isinstance(loops_nest_non_reduc.loops[-1], LoopLevelWithTail):
+                loop_with_tail = loops_nest_non_reduc.loops[-1]
+                loop_with_tail.code_gen(code, fast_vec_kernel, self)
             else:
                 with contextlib.ExitStack() as stack_outer:
                     if self.reduction_prefix:
@@ -933,9 +919,20 @@ class LoopLevelWithTail(LoopLevel):
     def lines(self):
         assert False
 
-    def code_gen(self, main_loop_body, tail_loop_body):
+    def code_gen(self, code, main_loop_body, tail_loop_body):
         assert isinstance(main_loop_body, Kernel)
         assert isinstance(tail_loop_body, Kernel)
+        for loop, kernel in (
+            (self.main_loop, main_loop_body),
+            (self.tail_loop, tail_loop_body),
+        ):
+            with contextlib.ExitStack() as stack:
+                code.writelines(loop.lines())
+                stack.enter_context(code.indent())
+                with contextlib.ExitStack() as stack:
+                    code.splice(kernel.loads)
+                    code.splice(kernel.compute)
+                    code.splice(kernel.stores)
 
 
 @dataclasses.dataclass
