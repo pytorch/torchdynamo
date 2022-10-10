@@ -2183,14 +2183,14 @@ class CommonTemplate:
                 torch.index_select(a, 1, b),
                 torch.index_select(torch.index_select(a, 2, b), 1, b),
             )
-
-        self.common(
-            fn,
-            (
-                torch.randn(8, 8, 8),
-                torch.tensor([0, 0, 2, 1], dtype=torch.int64),
-            ),
-        )
+        for ind_dtype in (torch.int32, torch.int64):
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8, 8),
+                    torch.tensor([0, 0, 2, 1], dtype=ind_dtype),
+                ),
+            )
 
     # https://github.com/pytorch/torchdynamo/issues/467
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)
