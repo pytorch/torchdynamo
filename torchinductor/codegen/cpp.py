@@ -11,6 +11,7 @@ from torch._prims_common import is_float_dtype
 
 from .. import codecache
 from .. import config
+from .. import ir
 from ..utils import sympy_product
 from ..virtualized import V
 from ..virtualized import ops
@@ -149,6 +150,138 @@ class CppPrinter(ExprPrinter):
 
 
 cexpr = CppPrinter().doprint
+
+
+class CppFastVecOverrides(OpOverrides):
+    """Map element-wise ops to aten vectorization C++"""
+
+    @staticmethod
+    def abs(x):
+        return f"{x}.abs()"
+
+    @staticmethod
+    def sin(x):
+        return f"{x}.sin()"
+
+    @staticmethod
+    def cos(x):
+        return f"{x}.cos()"
+
+    @staticmethod
+    def exp(x):
+        return f"{x}.exp()"
+
+    @staticmethod
+    def sqrt(x):
+        return f"{x}.sqrt()"
+
+    @staticmethod
+    def rsqrt(x):
+        return f"{x}.rsqrt()"
+
+    @staticmethod
+    def pow(a, b):
+        return f"{a}.pow({b})"
+
+    @staticmethod
+    def log(x):
+        return f"{x}.log()"
+
+    @staticmethod
+    def round(x):
+        return f"{x}.round()"
+
+    @staticmethod
+    def floor(x):
+        return f"{x}.floor()"
+
+    @staticmethod
+    def ceil(x):
+        return f"{x}.ceil()"
+
+    @staticmethod
+    def trunc(x):
+        return f"{x}.trunc()"
+
+    @staticmethod
+    def add(x, y):
+        return f"{x} + {y}"
+
+    @staticmethod
+    def fmod(a, b):
+        return f"{a}.fmod({b})"
+
+    @staticmethod
+    def lgamma(x):
+        return f"{x}.lgamma()"
+
+    @staticmethod
+    def relu(x):
+        dtype_str = DTYPE_TO_CPP[V.kernel.cse.get_dtype(x)]
+        quot = f"at::vec::Vectorized<{dtype_str}>(0)"
+        return f"at::vec::Vectorized<{dtype_str}>::clamp_min({x}, {quot})"
+
+    @staticmethod
+    def minimum(a, b):
+        dtype_str = DTYPE_TO_CPP[V.kernel.cse.get_dtype(a)]
+        assert dtype_str == DTYPE_TO_CPP[V.graph.get_dtype(b)]
+        return f"at::vec::Vectorized<{dtype_str}>::minimum({a}, {b})"
+
+    @staticmethod
+    def maximum(a, b):
+        dtype_str = DTYPE_TO_CPP[V.kernel.cse.get_dtype(a)]
+        assert dtype_str == DTYPE_TO_CPP[V.kernel.cse.get_dtype(b)]
+        return f"at::vec::Vectorized<{dtype_str}>::maximum({a}, {b})"
+
+    @staticmethod
+    def constant(val, dtype):
+        dtype_str = DTYPE_TO_CPP[dtype]
+        if val == float("inf"):
+            quot = f"std::numeric_limits<{dtype_str}>::infinity()"
+            return f"at::vec::Vectorized<{dtype_str}>({quot})"
+        elif val == float("-inf"):
+            quot = f"-std::numeric_limits<{dtype_str}>::infinity()"
+            return f"at::vec::Vectorized<{dtype_str}>({quot})"
+        elif val is True or val is False:
+            # TODO: It will trigger not-implemented error
+            return ops.to_dtype(str(val).lower(), dtype)
+        return ops.to_dtype(repr(val), dtype)
+
+    @staticmethod
+    def logical_and(a, b):
+        return f"{a} && {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} || {b}"
+
+
+class FastVecChecker:
+    def __init__(self):
+        super().__init__()
+        self.passed = True
+        self.fast_vec_list = ["load", "store"]
+        for dict_obj in CppFastVecOverrides.__dict__:
+            if isinstance(CppFastVecOverrides.__dict__[dict_obj], staticmethod):
+                self.fast_vec_list.append(dict_obj)
+
+        self.exit_stack = contextlib.ExitStack()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def __enter__(self):
+        class FastVecCheckerProxy:
+            @staticmethod
+            def __getattr__(name):
+                def inner(*args, **kwargs):
+                    if not (name in self.fast_vec_list):
+                        self.passed = False
+                    return self.passed
+
+                return inner
+
+        self.exit_stack.enter_context(V.set_ops_handler(FastVecCheckerProxy()))
 
 
 class CppOverrides(OpOverrides):
@@ -308,8 +441,21 @@ class CppOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
 
+class CppOverridesProxy(OpOverrides):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.cpp_overrides = CppOverrides(parent)
+        self.cpp_fast_vec_overrides = CppFastVecOverrides(parent)
+
+    def __getattr__(self, __name: str):
+        assert isinstance(V.kernel, CppKernel)
+        if V.kernel.fast_vec:
+            return getattr(self.cpp_fast_vec_overrides, __name)
+        else:
+            return getattr(self.cpp_overrides, __name)
+
 class CppKernel(Kernel):
-    overrides = CppOverrides
+    overrides = CppOverridesProxy
     sexpr = cexpr
     newvar_prefix = "auto "
     suffix = ";"
@@ -324,11 +470,18 @@ class CppKernel(Kernel):
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
         self.num_threads = num_threads  # num_threads the kernel specialized for
+        self.simd_len = config.cpp.simdlen
+        self.fast_vec = False
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-        line = f"{var}[{cexpr(index)}]"
+
+        if self.simd_len and self.fast_vec and V.graph.get_dtype(name) is torch.float:
+            line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(index * self.simd_len)})"
+        else:
+            line = f"{var}[{cexpr(index)}]"
+
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line = f"static_cast<float>({line})"
         return self.cse.generate(self.loads, line)
@@ -338,7 +491,10 @@ class CppKernel(Kernel):
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
-            line = f"{var}[{cexpr(index)}] = {value};"
+            if self.simd_len and self.fast_vec:
+                line = f"{value}.store({var} + {cexpr(index * self.simd_len)});"
+            else:
+                line = f"{var}[{cexpr(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
@@ -407,13 +563,13 @@ class CppKernel(Kernel):
     def size_hint(self):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
-    def codegen_loops(self, code, worksharing):
+    def codegen_loops(self, code, fast_vec_kernel, worksharing):
         threads = config.cpp.threads
         if threads < 1:
             threads = torch.get_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
-        loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
+        loops_nest_non_reduc, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
             loops[self.reduction_depth :]
         )
         reductions.mark_reduction(self.reduction_vars)
@@ -422,12 +578,24 @@ class CppKernel(Kernel):
             # TODO(jansel): detect stride-1 dimension and vectorize that
             if reductions:
                 reductions.loops[-1].simd = True
+            elif fast_vec_kernel is not None and fast_vec_kernel.fast_vec:
+                assert fast_vec_kernel is not None
+                loops_nest_non_reduc.split_most_inner_loop(config.cpp.simdlen)
+                most_inner_loop = loops_nest_non_reduc.loops[-1]
+                assert isinstance(most_inner_loop, LoopLevelWithTail)
+                most_inner_loop.main_loop.simd = True
+                most_inner_loop.main_loop.fast_vec = True
+
+                most_inner_loop.tail_loop.simd = True
+                most_inner_loop.tail_loop.simd_len = int(config.cpp.simdlen / 2)
+                most_inner_loop.tail_loop.fast_vec = False
+                most_inner_loop.tail_loop.var = fast_vec_kernel.itervars[-1]
             else:
-                loops.loops[-1].simd = True
+                loops_nest_non_reduc.loops[-1].simd = True
 
         par_depth = 0
         reduction_par_depth = 0
-        if loops:
+        if loops_nest_non_reduc:
             par_depth = self.decide_parallel_depth(
                 self.call_ranges[: self.reduction_depth], threads
             )
@@ -439,7 +607,7 @@ class CppKernel(Kernel):
         with contextlib.ExitStack() as stack:
             if par_depth:
                 worksharing.parallel(threads)
-                loops.mark_parallel(par_depth)
+                loops_nest_non_reduc.mark_parallel(par_depth)
             elif reduction_par_depth:
                 # need to close the worksharing scope to define reduction vars outside it
                 worksharing.close()
@@ -448,26 +616,44 @@ class CppKernel(Kernel):
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            loops.codegen(code, stack)
+            loops_nest_non_reduc.codegen(code, stack)
 
-            with contextlib.ExitStack() as stack_outer:
-                if self.reduction_prefix:
-                    stack_outer.enter_context(code.indent())
-                code.splice(self.reduction_prefix)
+            if (
+                isinstance(loops_nest_non_reduc.loops[-1], LoopLevelWithTail)
+                and fast_vec_kernel
+                and fast_vec_kernel.fast_vec
+            ):
+                main_loop, tail_loop = (
+                    loops_nest_non_reduc.loops[-1].main_loop,
+                    loops_nest_non_reduc.loops[-1].tail_loop,
+                )
+                for loop, kernel in ((main_loop, fast_vec_kernel), (tail_loop, self)):
+                    with contextlib.ExitStack() as stack:
+                        code.writelines(loop.lines())
+                        stack.enter_context(code.indent())
+                        with contextlib.ExitStack() as stack:
+                            code.splice(kernel.loads)
+                            code.splice(kernel.compute)
+                            code.splice(kernel.stores)
+            else:
+                with contextlib.ExitStack() as stack_outer:
+                    if self.reduction_prefix:
+                        stack_outer.enter_context(code.indent())
+                    code.splice(self.reduction_prefix)
 
-                if reduction_par_depth:
-                    worksharing.parallel(threads)
+                    if reduction_par_depth:
+                        worksharing.parallel(threads)
 
-                with contextlib.ExitStack() as stack:
-                    reductions.codegen(code, stack)
-                    code.splice(self.loads)
-                    code.splice(self.compute)
-                    code.splice(self.stores)
+                    with contextlib.ExitStack() as stack:
+                        reductions.codegen(code, stack)
+                        code.splice(self.loads)
+                        code.splice(self.compute)
+                        code.splice(self.stores)
 
-                if reduction_par_depth:
-                    worksharing.close()
+                    if reduction_par_depth:
+                        worksharing.close()
 
-                code.splice(self.reduction_suffix)
+                    code.splice(self.reduction_suffix)
 
     def decide_parallel_depth(self, ranges, threads):
         seq = self.size_hint()
@@ -527,12 +713,36 @@ class CppScheduling:
     def can_fuse_vertical(cls, node1, node2):
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
-    def codegen_nodes(self, nodes):
+    def check_fast_vec(self, nodes):
+        res = False
+        with FastVecChecker():
+            def get_index(*args, **kwargs):
+                return sympy.Symbol("dummy")
+            _submodules = {"get_index": get_index}
+
+            class PatchSubmodule:
+                def __init__(self, node) -> None:
+                    self.org_sub_moduel = node._body.submodules
+
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    node._body.submodules = self.org_sub_moduel
+
+                def __enter__(self):
+                    node._body.submodules = _submodules
+
+
+            for node in nodes:
+                with PatchSubmodule(node=node):
+                    res = node._body.root_block()
+                    if not res:
+                        return res
+        return res
+
+    def _codegen_nodes_impl(self, nodes, is_fast_vec=False):
         """
         Turn an set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
-        scheduler = self.scheduler
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
         ).group
@@ -540,6 +750,7 @@ class CppScheduling:
 
         with kernel_group.new_kernel() as kernel:
             vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+            kernel.fast_vec = is_fast_vec
 
             for node in nodes:
                 if node.group[1] in [
@@ -558,7 +769,23 @@ class CppScheduling:
                     with kernel.write_to_suffix():
                         node.run(vars, ())
 
-        kernel_group.finalize_kernel(kernel, scheduler)
+        return kernel
+
+    def codegen_nodes(self, nodes):
+        """
+        Turn an set of pre-fused nodes into a C++ kernel.
+        """
+        kernel_group = self.kernel_group
+
+        can_be_fast_vec = self.check_fast_vec(nodes)
+        fast_vec_kernel = (
+            self._codegen_nodes_impl(nodes, can_be_fast_vec)
+            if can_be_fast_vec
+            else None
+        )
+        scalar_kernel = self._codegen_nodes_impl(nodes)
+
+        kernel_group.finalize_kernel(scalar_kernel, fast_vec_kernel, None)
 
     def flush(self):
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
@@ -578,11 +805,11 @@ class KernelGroup:
     def new_kernel(self):
         return CppKernel(self.args, self.ws.num_threads)
 
-    def finalize_kernel(self, new_kernel, scheduler):
+    def finalize_kernel(self, scalar_kernel, fast_vec_kernel, scheduler):
         self.count += 1
         code = self.loops_code
         ws = self.ws
-        new_kernel.codegen_loops(code, ws)
+        scalar_kernel.codegen_loops(code, fast_vec_kernel, ws)
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
@@ -655,10 +882,13 @@ class WorkSharing:
 
 @dataclasses.dataclass
 class LoopLevel:
-    var: sympy.Expr
-    size: sympy.Expr
+    var: sympy.Expr = None
+    size: sympy.Expr = None
+    offset: sympy.Expr = sympy.Integer(0)
     parallel: int = 0
     simd: bool = False
+    simd_len: int = config.cpp.simdlen
+    fast_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None
 
@@ -670,7 +900,7 @@ class LoopLevel:
             )
         else:
             reduction = ""
-        simd = f"simd simdlen({config.cpp.simdlen})"
+        simd = f"simd simdlen({self.simd_len})" if self.simd else ""
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = f"#pragma omp for{reduction} "
@@ -678,17 +908,32 @@ class LoopLevel:
                 line1 += f" collapse({self.parallel})"
             if self.simd:
                 line1 = line1.replace(" for ", f" for {simd}")
+        elif self.fast_vec:
+            line1 = f""
         elif self.simd:
             line1 = f"#pragma omp {simd}{reduction}"
         elif not self.reduction_vars and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        line2 = f"for({INDEX_TYPE} {self.var}=0; {self.var}<{cexpr(self.size)}; ++{self.var})"
+        line2 = f"for({INDEX_TYPE} {self.var}={cexpr(self.offset)}; {self.var}<{cexpr(self.size)}; ++{self.var})"
         if self.collapsed or not line1:
             return [line2]
         return [line1, line2]
 
+
+class LoopLevelWithTail(LoopLevel):
+    def __init__(self, main_loop: LoopLevel, tail_loop: LoopLevel):
+        super().__init__()
+        self.main_loop = main_loop
+        self.tail_loop = tail_loop
+
+    def lines(self):
+        assert False
+
+    def code_gen(self, main_loop_body, tail_loop_body):
+        assert isinstance(main_loop_body, Kernel)
+        assert isinstance(tail_loop_body, Kernel)
 
 @dataclasses.dataclass
 class LoopNest:
@@ -708,9 +953,28 @@ class LoopNest:
             loops[i].collapsed = True
         loops[0].simd = loops[par_depth - 1].simd
 
+    def split_most_inner_loop(self, factor):
+        sympy_factor = sympy.Integer(factor)
+
+        most_inner_loop = self.loops[-1]
+        main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
+        main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
+
+        offset = main_loop_range * sympy_factor
+        tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
+        tail_loop.offset = offset
+
+        loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
+
+        self.loops[-1] = loop_with_tail
+
     def codegen(self, code, stack):
         for loop in self.loops:
-            code.writelines(loop.lines())
-            stack.enter_context(code.indent())
+            if isinstance(loop, LoopLevelWithTail):
+                assert self.loops[-1] == loop
+                continue
+            else:
+                code.writelines(loop.lines())
+                stack.enter_context(code.indent())
         else:
             stack.enter_context(code.indent())
