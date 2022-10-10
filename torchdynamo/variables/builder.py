@@ -74,6 +74,7 @@ from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
 from .torch import tensor_dunder_fns
+from .torch import torch_special_class_types
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -357,6 +358,11 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
+        elif value in tensor_dunder_fns:
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif (
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
@@ -427,6 +433,13 @@ class VariableBuilder:
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
+            )
+        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
+            value.__self__, torch_special_class_types
+        ):
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

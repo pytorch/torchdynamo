@@ -1029,8 +1029,9 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         before, after = opt_fn()
         self.assertTrue(same(before, after))
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)  # rand, rand
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 4)  # rand, rand
+        graph, _ = torchdynamo.export(fn)
 
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
