@@ -17,28 +17,6 @@ class VerifyInstallError(BaseException):
     pass
 
 
-# based on torch/utils/cpp_extension.py
-def get_cuda_version():
-    from torch.utils import cpp_extension
-
-    CUDA_HOME = cpp_extension._find_cuda_home()
-    if not CUDA_HOME:
-        raise VerifyInstallError(cpp_extension.CUDA_NOT_FOUND_MESSAGE)
-
-    nvcc = os.path.join(CUDA_HOME, "bin", "nvcc")
-    cuda_version_str = (
-        subprocess.check_output([nvcc, "--version"])
-        .strip()
-        .decode(*cpp_extension.SUBPROCESS_DECODE_ARGS)
-    )
-    cuda_version = re.search(r"release (\d+[.]\d+)", cuda_version_str)
-    if cuda_version is None:
-        raise VerifyInstallError("CUDA version not found in `nvcc --version` output")
-
-    cuda_str_version = cuda_version.group(1)
-    return packaging.version.parse(cuda_str_version)
-
-
 def check_python():
     if sys.version_info < MIN_PYTHON_VERSION:
         raise VerifyInstallError(
@@ -84,13 +62,37 @@ def check_pip_deps():
 def check_torch():
     import torch
 
-    if packaging.version.parse(torch.__version__) < MIN_TORCH_VERSION:
+    torch_ver = packaging.version.parse(torch.__version__)
+
+    if torch_ver < MIN_TORCH_VERSION:
         raise VerifyInstallError(
-            f"`torch` version not supported: {torch.__version__} "
+            f"`torch` version not supported: {torch_ver} "
             f"- minimum requirement: {MIN_TORCH_VERSION}"
         )
 
-    return torch.__version__
+    return torch_ver
+
+
+# based on torch/utils/cpp_extension.py
+def get_cuda_version():
+    from torch.utils import cpp_extension
+
+    CUDA_HOME = cpp_extension._find_cuda_home()
+    if not CUDA_HOME:
+        raise VerifyInstallError(cpp_extension.CUDA_NOT_FOUND_MESSAGE)
+
+    nvcc = os.path.join(CUDA_HOME, "bin", "nvcc")
+    cuda_version_str = (
+        subprocess.check_output([nvcc, "--version"])
+        .strip()
+        .decode(*cpp_extension.SUBPROCESS_DECODE_ARGS)
+    )
+    cuda_version = re.search(r"release (\d+[.]\d+)", cuda_version_str)
+    if cuda_version is None:
+        raise VerifyInstallError("CUDA version not found in `nvcc --version` output")
+
+    cuda_str_version = cuda_version.group(1)
+    return packaging.version.parse(cuda_str_version)
 
 
 def check_cuda():
@@ -100,19 +102,26 @@ def check_cuda():
         return None
 
     torch_cuda_ver = packaging.version.parse(torch.version.cuda)
-    if torch_cuda_ver < MIN_CUDA_VERSION:
-        # raise VerifyInstallError(
-        warnings.warn(
-            f"CUDA version not supported: {torch_cuda_ver} "
-            f"- minimum requirement: {MIN_CUDA_VERSION}"
-        )
 
     # check if torch cuda version matches system cuda version
     cuda_ver = get_cuda_version()
     if cuda_ver != torch_cuda_ver:
         # raise VerifyInstallError(
         warnings.warn(
-            f"CUDA version mismatch, torch version: {torch_cuda_ver}, env version: {cuda_ver}"
+            f"CUDA version mismatch, `torch` version: {torch_cuda_ver}, env version: {cuda_ver}"
+        )
+
+    if torch_cuda_ver < MIN_CUDA_VERSION:
+        # raise VerifyInstallError(
+        warnings.warn(
+            f"(`torch`) CUDA version not supported: {torch_cuda_ver} "
+            f"- minimum requirement: {MIN_CUDA_VERSION}"
+        )
+    if cuda_ver < MIN_CUDA_VERSION:
+        # raise VerifyInstallError(
+        warnings.warn(
+            f"(env) CUDA version not supported: {cuda_ver} "
+            f"- minimum requirement: {MIN_CUDA_VERSION}"
         )
 
     return cuda_ver
