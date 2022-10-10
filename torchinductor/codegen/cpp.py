@@ -1,7 +1,6 @@
 import contextlib
 import dataclasses
 import functools
-import multiprocessing
 from pathlib import Path
 from typing import Dict
 from typing import List
@@ -36,6 +35,15 @@ DTYPE_TO_CPP = {
     torch.bfloat16: "bfloat16",
 }
 INDEX_TYPE = "long"
+
+RTYPE_TO_CPP = {
+    "sum": "+",
+    "min": "min",
+    "max": "max",
+    "argmin": "argmin",
+    "argmax": "argmax",
+    "any": "||",
+}
 
 
 def reduction_init(reduction_type, dtype):
@@ -95,6 +103,20 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
             ]
         )
+    return prefix
+
+
+def float16_reduction_prefix(rtype):
+    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
+    # errors, float32 accumulation should be used instead.
+    assert rtype in (
+        "sum",
+        "any",
+    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
+    prefix = [
+        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
+        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
+    ]
     return prefix
 
 
@@ -292,7 +314,7 @@ class CppKernel(Kernel):
     newvar_prefix = "auto "
     suffix = ";"
 
-    def __init__(self, args):
+    def __init__(self, args, num_threads):
         super(CppKernel, self).__init__(args)
         self.call_ranges = None
         self.ranges = None
@@ -301,6 +323,7 @@ class CppKernel(Kernel):
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = DeferredIndentedBuffer()
         self.reduction_vars = {}
+        self.num_threads = num_threads  # num_threads the kernel specialized for
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -317,7 +340,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr(index)}] = {value};"
         elif mode == "atomic_add":
-            if config.cpp.threads == 1:
+            if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
                 line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
@@ -346,6 +369,10 @@ class CppKernel(Kernel):
                 ],
             )
         else:
+            if dtype == torch.float16:
+                self.reduction_prefix.writelines(
+                    float16_reduction_prefix(reduction_type)
+                )
             self.reduction_prefix.writeline(
                 f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
             )
@@ -383,7 +410,7 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         threads = config.cpp.threads
         if threads < 1:
-            threads = multiprocessing.cpu_count()
+            threads = torch.get_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -443,8 +470,6 @@ class CppKernel(Kernel):
                 code.splice(self.reduction_suffix)
 
     def decide_parallel_depth(self, ranges, threads):
-        if threads == 1:
-            return 0
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -458,6 +483,11 @@ class CppKernel(Kernel):
             depth += 1
             par *= hint
             seq /= hint
+        # if we assume thread number is dynamic, make sure we
+        # have at least one parallel scope and let OMP runtime
+        # to manage the serial vs. parallel.
+        if config.cpp.dynamic_threads and depth == 0 and len(ranges) > 0:
+            depth = 1
         return depth
 
     @contextlib.contextmanager
@@ -546,7 +576,7 @@ class KernelGroup:
         self.count = 0
 
     def new_kernel(self):
-        return CppKernel(self.args)
+        return CppKernel(self.args, self.ws.num_threads)
 
     def finalize_kernel(self, new_kernel, scheduler):
         self.count += 1
@@ -600,7 +630,7 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
-            if threads == multiprocessing.cpu_count():
+            if config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
@@ -634,16 +664,8 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
-            lookup = {
-                "sum": "+",
-                "min": "min",
-                "max": "max",
-                "argmin": "argmin",
-                "argmax": "argmax",
-                "any": "||",
-            }
             reduction = " " + " ".join(
-                f"reduction({lookup[rtype]}:{var})"
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
                 for var, rtype in self.reduction_vars.items()
             )
         else:
@@ -651,7 +673,7 @@ class LoopLevel:
         simd = f"simd simdlen({config.cpp.simdlen})"
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
-            line1 = f"#pragma omp for{reduction}"
+            line1 = f"#pragma omp for{reduction} "
             if self.parallel > 1:
                 line1 += f" collapse({self.parallel})"
             if self.simd:

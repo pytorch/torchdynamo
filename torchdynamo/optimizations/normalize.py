@@ -11,11 +11,10 @@ from torch.fx import Transformer
 from torch.fx.experimental.normalize import NormalizeOperators
 from torch.fx.operator_schemas import get_signature_for_torch_op
 
-from torchdynamo import config
-from torchdynamo.allowed_functions import torch_get_name
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import counters
-
+from .. import config
+from ..allowed_functions import torch_get_name
+from ..utils import clone_inputs
+from ..utils import counters
 from .analysis import ShapeAliasingAndMutationProp
 
 log = logging.getLogger(__name__)

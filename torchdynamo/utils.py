@@ -30,8 +30,8 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-import torchdynamo
-import torchdynamo.config as config
+from . import config
+from . import logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -117,6 +117,20 @@ def compile_times(repr="str", aggregate=False):
         return headers, values
 
 
+tensortype_to_dtype = {
+    torch.FloatTensor: (torch.float32, torch.float),
+    torch.DoubleTensor: (torch.float64, torch.double),
+    torch.HalfTensor: (torch.float16, torch.half),
+    torch.BFloat16Tensor: (torch.bfloat16,),
+    torch.ByteTensor: (torch.uint8,),
+    torch.CharTensor: (torch.int8,),
+    torch.LongTensor: (torch.int64, torch.long),
+    torch.IntTensor: (torch.int32, torch.int),
+    torch.ShortTensor: (torch.int16, torch.short),
+    torch.BoolTensor: (torch.bool,),
+}
+
+
 class DuplicateWarningChecker(object):
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
@@ -140,74 +154,10 @@ class DuplicateWarningChecker(object):
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-# Return all loggers that torchdynamo is responsible for
-def get_loggers():
-    return [
-        logging.getLogger("torchdynamo"),
-        logging.getLogger("torchinductor"),
-    ]
-
-
-# Set the level of all loggers that torchdynamo is responsible for
-def set_loggers_level(level):
-    for logger in get_loggers():
-        logger.setLevel(level)
-
-
-LOGGING_CONFIG = {
-    "version": 1,
-    "formatters": {
-        "torchdynamo_format": {"format": "%(name)s: [%(levelname)s] %(message)s"},
-    },
-    "handlers": {
-        "torchdynamo_console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stdout",
-        },
-    },
-    "loggers": {
-        "torchdynamo": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torchinductor": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-    },
-    "disable_existing_loggers": False,
-}
-
-
-tensortype_to_dtype = {
-    torch.FloatTensor: (torch.float32, torch.float),
-    torch.DoubleTensor: (torch.float64, torch.double),
-    torch.HalfTensor: (torch.float16, torch.half),
-    torch.BFloat16Tensor: (torch.bfloat16,),
-    torch.ByteTensor: (torch.uint8,),
-    torch.CharTensor: (torch.int8,),
-    torch.LongTensor: (torch.int64, torch.long),
-    torch.IntTensor: (torch.int32, torch.int),
-    torch.ShortTensor: (torch.int16, torch.short),
-    torch.BoolTensor: (torch.bool,),
-}
-
-
-# initialize torchdynamo loggers
 def init_logging():
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        logging.config.dictConfig(LOGGING_CONFIG)
-        if config.log_file_name is not None:
-            log_file = logging.FileHandler(config.log_file_name)
-            log_file.setLevel(config.log_level)
-            for logger in get_loggers():
-                logger.addHandler(log_file)
-
-    set_loggers_level(config.log_level)
+    torchdynamo_logging.init_logging(
+        config.log_level, log_file_name=config.log_file_name
+    )
     graph_break_dup_warning_checker.reset()
 
 
@@ -217,7 +167,10 @@ def filter_stack(stack):
     for frame in stack:
         if "convert_frame" in frame.filename:
             break
-        if "eval_frame" in frame.filename or "torchdynamo.optimize(" in frame.line:
+        if (
+            "eval_frame" in frame.filename
+            or f"{config.dynamo_import}.optimize(" in frame.line
+        ):
             continue
         user_stack.append(frame)
 
@@ -710,10 +663,11 @@ try:
         try:
             return fn()
         except UnsupportedFakeTensorException as e:
-            raise torchdynamo.exc.FakeTensorError(
-                f"Unsupported: {e.reason} with fake tensor propagation. "
-                "Run with config.fake_tensor_propagation=False"
-            ) from e
+            from .exc import unimplemented
+
+            msg = f"Unsupported: {e.reason} with fake tensor propagation. Run with config.fake_tensor_propagation=False"
+            log.warning(msg)
+            raise unimplemented(msg)
 
     def wrap_to_fake_tensor(e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
@@ -782,6 +736,15 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype == torch.bool:
+                # triton stores bool as int8, so add this for more accurate checking
+                return torch.allclose(
+                    ref.view(dtype=torch.uint8),
+                    res.view(dtype=torch.uint8),
+                    atol=tol,
+                    rtol=tol,
+                    equal_nan=equal_nan,
+                )
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -924,7 +887,7 @@ class CompileProfiler:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
             rpt += (
-                "You may gain additional insight by passing `nopython=True` to torchdynamo.optimize, "
+                f"You may gain additional insight by passing `nopython=True` to {config.dynamo_import}.optimize, "
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
@@ -948,7 +911,10 @@ class CompileProfiler:
                 headers=["Function", "Num Recompiles", "Recompile Reasons"],
             )
             rpt += "\n"
-            rpt += f"Set torchdynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.\n"
+            rpt += (
+                f"Set {config.dynamo_import}.config.cache_size_limit to "
+                f"{max_recompiles} to avoid being cache limited.\n"
+            )
         else:
             rpt += "No cache-limited recompilations detected.\n"
 

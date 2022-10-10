@@ -3,6 +3,7 @@ import logging
 import operator
 from collections import defaultdict
 from functools import partial
+from importlib import import_module
 from typing import Set
 
 import torch
@@ -12,18 +13,73 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-import torchdynamo
-from torchdynamo import config
-from torchdynamo.debug_utils import wrap_compiler_debug
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import count_calls
-from torchdynamo.utils import counters
-
+from .. import config
+from ..debug_utils import wrap_compiler_debug
+from ..utils import clone_inputs
+from ..utils import count_calls
+from ..utils import counters
 from .analysis import has_mutation
 from .backends import BACKENDS
 from .normalize import normalize_ir
 
 log = logging.getLogger(__name__)
+
+
+def is_aot_autograd_safe_to_run(gm, example_inputs):
+    """
+    There are some known issues with Aot Autograd. This is a workaround to catch
+    such cases, and fallback to eager. We should fix these quickly.
+
+    Issues
+    1) LSTM - https://github.com/pytorch/torchdynamo/issues/1147
+    2) LSTM - https://github.com/pytorch/functorch/issues/586
+    3) Input mutation - https://github.com/pytorch/torchdynamo/issues/1301
+    """
+
+    def raise_or_warn(reason):
+        msg = f"Unable to use Aot Autograd because of presence of {reason}"
+        if config.raise_on_unsafe_aot_autograd:
+            raise NotImplementedError(msg)
+        else:
+            log.warning(msg)
+        return False
+
+    import functorch.compile
+
+    # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
+    for submod in gm.modules():
+        if submod.__class__.__name__ == "LSTM":
+            return raise_or_warn("LSTM")
+
+    # 2) Mutation in the graph
+    mutated = False
+    try:
+        if functorch.compile.config.use_functionalize:
+            # There are two problematic classes we still exclude for now with
+            # functionalization:
+            #   - data mutation of inputs (fixed when we stop recording the
+            #   copy_ directly into the graph)
+            #   - metadata mutation of inputs (fixed if we do an extra partition
+            #   to avoid AotAutograd on the mutated inputs, or if we some how
+            #   get custom autograd function to reflect metadata changes to the
+            #   original tensor)
+            mutated = has_mutation(gm, example_inputs, inputs_only=True)
+        else:
+            mutated = has_mutation(gm, example_inputs)
+    except NotImplementedError as e:
+        if "SparseTensorImpl" not in str(e):
+            # TODO - TorchDynamo mutation analysis cannot handle sparse tensors.
+            # So, there is a chance that we could call Aot Autograd when it is
+            # unsafe.
+            # The exception is fairly guarded with string check, so any other
+            # mutation analysis bugs will raise exceptions and will be caught.
+            raise e
+        pass
+
+    if mutated:
+        return raise_or_warn("mutation")
+
+    return True
 
 
 class AotAutogradStrategy(object):
@@ -32,7 +88,7 @@ class AotAutogradStrategy(object):
     @classmethod
     def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
         if count_calls(gm.graph) < 2:
-            return gm.forward  # no point for tiny graphs
+            return gm  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
@@ -55,33 +111,7 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        gm_inputs = list(filter(lambda x: x.op == "placeholder", gm.graph.nodes))
-
-        # 1) LSTM module (tts_angular) - https://github.com/pytorch/functorch/issues/586
-        for submod in self.gm.modules():
-            if submod.__class__.__name__ == "LSTM":
-                self.use_fallback = True
-
-        # 2) set_grad_enabled
-        has_set_grad_enabled = False
-        for node in self.gm.graph.nodes:
-            if node.target == torch._C._set_grad_enabled:
-                has_set_grad_enabled = True
-
-        if functorch.compile.config.use_functionalize:
-            # There are two problematic classes we still exclude for now with
-            # functionalization:
-            #   - data mutation of inputs (fixed when we stop recording the
-            #   copy_ directly into the graph)
-            #   - metadata mutation of inputs (fixed if we do an extra partition
-            #   to avoid AotAutograd on the mutated inputs, or if we some how
-            #   get custom autograd function to reflect metadata changes to the
-            #   original tensor)
-            mutated = has_mutation(self.gm, self.example_inputs, inputs_only=True)
-        else:
-            mutated = has_mutation(self.gm, self.example_inputs)
-
-        if mutated or len(gm_inputs) == 0 or has_set_grad_enabled:
+        if not is_aot_autograd_safe_to_run(gm, example_inputs):
             self.use_fallback = True
 
     @property
@@ -195,13 +225,15 @@ class AotInductorDebug(AotAutogradStrategy):
         from functorch.compile import min_cut_rematerialization_partition
         from functorch.compile import nop
 
-        from torchinductor.compile_fx import select_decomp_table
+        decompositions = import_module(
+            f"{config.inductor_import}.compile_fx"
+        ).select_decomp_table()
 
         kwargs = {
             # these are taken from memory_efficient_fusion()
             "fw_compiler": nop,
             "bw_compiler": nop,
-            "decompositions": select_decomp_table(),
+            "decompositions": decompositions,
             "partition_fn": functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
@@ -457,12 +489,14 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return torchdynamo.disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
+        return disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
 
     from functorch.compile import aot_module_simplified  # type: ignore[import]
+
+    from .. import disable
 
     return aot_module_simplified(model, **kwargs)
 

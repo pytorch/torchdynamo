@@ -7,7 +7,6 @@ import subprocess
 import sys
 import time
 import warnings
-from urllib.error import HTTPError
 
 import torch
 from common import BenchmarkRunner
@@ -216,7 +215,7 @@ class TimmRunnner(BenchmarkRunner):
                     # drop_block_rate=kwargs.pop('drop_block', None),
                 )
                 success = True
-            except HTTPError:
+            except Exception:
                 wait = retries * 30
                 time.sleep(wait)
                 retries += 1
@@ -263,6 +262,12 @@ class TimmRunnner(BenchmarkRunner):
             model.train()
         else:
             model.eval()
+
+        if device == "cuda":
+            # capturable is only supported on cuda at the moment
+            self.optimizer = torch.optim.Adam(model.parameters(), capturable=True)
+        else:
+            self.optimizer = None
 
         self.validate_model(model, example_inputs)
 
@@ -323,6 +328,8 @@ class TimmRunnner(BenchmarkRunner):
                 pred = pred[0]
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
+        if self.optimizer is not None:
+            self.optimizer.step()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None

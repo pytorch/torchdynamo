@@ -102,7 +102,7 @@ class OpOverrides:
 
     @staticmethod
     def sign(x):
-        return ops.where(f"{x} < 0", "-1", "1")
+        return ops.where(f"{x} == 0", "0", ops.where(f"{x} < 0", "-1", "1"))
 
     @staticmethod
     def bitwise_not(x):

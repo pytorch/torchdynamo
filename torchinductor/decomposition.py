@@ -2,16 +2,16 @@ import functools
 import logging
 import math
 import numbers
-from typing import Optional
-from typing import Tuple
 
 import torch
 import torch._decomp as decomp
 from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch import Tensor
 from torch._decomp import get_decompositions
+from torch._prims_common import is_boolean_dtype
+from torch._prims_common import is_integer_dtype
 
-from torchinductor import config
+from . import config
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -25,7 +25,7 @@ decompositions = get_decompositions(
         aten.binary_cross_entropy_with_logits,
         aten.clamp_max,
         aten.clamp_min,
-        aten.col2im_backward,
+        aten.col2im,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
         aten.detach,
@@ -49,7 +49,6 @@ decompositions = get_decompositions(
         aten.hardtanh,
         aten.hardtanh_backward,
         aten.im2col,
-        aten.im2col_backward,
         aten.index_add,
         aten.index_add_,
         aten.index_select,
@@ -67,7 +66,7 @@ decompositions = get_decompositions(
         aten.mse_loss_backward,
         aten.mv,
         aten.narrow,
-        # aten.native_batch_norm, TODO - fix cpu error and enable
+        aten.native_batch_norm,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,
@@ -87,6 +86,8 @@ decompositions = get_decompositions(
         aten.sigmoid_backward,
         aten.silu_backward,
         aten.slice_backward,
+        aten.sgn,
+        aten.std_mean.correction,
         aten._softmax,
         aten._softmax_backward_data,
         aten.stack,
@@ -118,26 +119,6 @@ def clamp(x, min=None, max=None):
     return x
 
 
-# temporary workaround until https://github.com/pytorch/torchdynamo/issues/1215
-# is fixed - fails on cpu
-@register_decomposition([aten.native_batch_norm])
-def native_batch_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    training: bool,
-    momentum: float,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    if input.device.type == "cpu":
-        return NotImplemented
-    return torch._decomp.decompositions.native_batch_norm(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
-    )
-
-
 @register_decomposition([aten.tanh])
 def tanh(x):
     return 2.0 / (1.0 + torch.exp(-2.0 * x)) - 1.0
@@ -151,9 +132,14 @@ def floordiv(a, b):
 
 
 @register_decomposition([aten.addmm])
-def addmm(input, mat1, mat2):
+def addmm(input, mat1, mat2, *, beta=1, alpha=1):
     if config.triton.mm != "aten":
-        return torch.mm(mat1, mat2) + input
+        out = torch.mm(mat1, mat2)
+        if not isinstance(alpha, numbers.Number) or alpha != 1:
+            out = out * alpha
+        if not isinstance(beta, numbers.Number) or beta != 1:
+            input = input * beta
+        return input + out
     else:
         return NotImplemented  # go directly to lowering
 
@@ -217,6 +203,9 @@ def masked_fill(value, mask, other):
 
 @register_decomposition([aten.nan_to_num])
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
+    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
+        return x
+
     if nan is None:
         nan = 0.0
     if posinf is None:
@@ -291,11 +280,6 @@ def conj_physical(self):
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self):
     return self
-
-
-@register_decomposition([aten.sgn])
-def sgn(self):
-    return torch.where(self == 0, torch.zeros_like(self), self / torch.abs(self))
 
 
 @register_decomposition([aten.fill.Scalar])

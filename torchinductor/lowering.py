@@ -125,7 +125,7 @@ def decode_device(device):
     return device
 
 
-def get_promoted_dtype(*args):
+def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
         if isinstance(inp, Number):
             return inp
@@ -136,13 +136,13 @@ def get_promoted_dtype(*args):
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
     inps = [construct_input(arg) for arg in args]
-    _, dtype = elementwise_dtypes(
-        *inps, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
+    _, dtype = elementwise_dtypes(*inps, type_promotion_kind=type_promotion_kind)
     return dtype
 
 
-def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
+def _register_lowering(
+    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+):
     """
     Add a lowering to lowerings dict
 
@@ -150,7 +150,8 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         aten_fn: torch.ops.aten.* fn we are lowering
         decomp_fn: alternate implementation on our IR
         broadcast: True to apply broadcasting to tensor inputs
-        type_promote: True to apply type promotion to tensor inputs
+        type_promotion_kind: kind of type promotion applied to tensor inputs, `None` means no type promotion
+        convert_input_to_bool: some logical ops require inputs are converted to bool
     """
 
     @functools.wraps(decomp_fn)
@@ -161,12 +162,17 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
         # kwargs tensors not supported yet
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
-        if type_promote and indices:
-            # FIXME that's a crude approximation for promoting args
-            promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
-            ]
-            dtype = get_promoted_dtype(*promoting_args)
+        if (type_promotion_kind or convert_input_to_bool) and indices:
+            if convert_input_to_bool:
+                dtype = torch.bool
+            else:
+                # FIXME that's a crude approximation for promoting args
+                promoting_args = [
+                    a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                ]
+                dtype = get_promoted_dtype(
+                    *promoting_args, type_promotion_kind=type_promotion_kind
+                )
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
@@ -202,12 +208,21 @@ def _register_lowering(aten_fn, decomp_fn, broadcast, type_promote):
     return wrapped
 
 
-def register_lowering(aten_fn, broadcast=False, type_promote=True):
+def register_lowering(
+    aten_fn,
+    broadcast=False,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    convert_input_to_bool=False,
+):
     """
     Shim to support decorator syntax.
     """
     return functools.partial(
-        _register_lowering, aten_fn, broadcast=broadcast, type_promote=type_promote
+        _register_lowering,
+        aten_fn,
+        broadcast=broadcast,
+        type_promotion_kind=type_promotion_kind,
+        convert_input_to_bool=convert_input_to_bool,
     )
 
 
@@ -252,7 +267,11 @@ def promote_constants(inputs):
 
 
 def make_pointwise(
-    fn, override_dtype=None, override_device=None, override_bool=None, allow_alpha=False
+    fn,
+    override_return_dtype=None,
+    override_device=None,
+    override_fn_when_input_bool=None,
+    allow_alpha=False,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
         inputs = promote_constants(inputs)
@@ -264,7 +283,7 @@ def make_pointwise(
             assert alpha is None
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
-        dtype = override_dtype or inputs[0].get_dtype()
+        dtype = override_return_dtype or inputs[0].get_dtype()
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -273,8 +292,8 @@ def make_pointwise(
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
-            if dtype == torch.bool and override_bool is not None:
-                return override_bool(*[load(index) for load in loaders])
+            if dtype == torch.bool and override_fn_when_input_bool is not None:
+                return override_fn_when_input_bool(*[load(index) for load in loaders])
             else:
                 return fn(*[load(index) for load in loaders])
 
@@ -288,7 +307,7 @@ def make_pointwise(
     return inner
 
 
-@register_lowering(prims.convert_element_type, type_promote=False)
+@register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
         return x
@@ -296,7 +315,7 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
 
-    return make_pointwise(_to_dtype, override_dtype=dtype)(x)
+    return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
 def to_device(x: TensorBox, device: torch.device):
@@ -372,33 +391,41 @@ def register_pointwise(
     aten_fn,
     name=None,
     broadcast=True,
-    type_promote=True,
-    override_dtype=None,
-    override_device=None,
-    override_bool=None,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    convert_input_to_bool=False,
+    override_return_dtype=None,
+    override_fn_when_input_bool=None,
     allow_alpha=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
     fn = ops_wrapper(name)
-    if override_bool is not None:
-        override_bool = ops_wrapper(override_bool)
+    if override_fn_when_input_bool is not None:
+        override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
     fn = make_pointwise(
         fn,
-        override_dtype=override_dtype,
-        override_device=override_device,
-        override_bool=override_bool,
+        override_return_dtype=override_return_dtype,
+        override_fn_when_input_bool=override_fn_when_input_bool,
         allow_alpha=allow_alpha,
     )
-    fn = register_lowering(aten_fn, broadcast=broadcast, type_promote=type_promote)(fn)
+    fn = register_lowering(
+        aten_fn,
+        broadcast=broadcast,
+        type_promotion_kind=type_promotion_kind,
+        convert_input_to_bool=convert_input_to_bool,
+    )(fn)
 
     if hasattr(prims, name):
-        register_lowering(getattr(prims, name), type_promote=False)(fn)
+        register_lowering(
+            getattr(prims, name),
+            type_promotion_kind=None,
+            convert_input_to_bool=convert_input_to_bool,
+        )(fn)
     return fn
 
 
-@register_lowering(aten.where, broadcast=True, type_promote=False)
+@register_lowering(aten.where, broadcast=True, type_promotion_kind=None)
 def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
@@ -409,12 +436,12 @@ def where(cond, a, b):
         b = constant_like(b)(a)
 
     dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
-    return make_pointwise(fn, override_dtype=dtype)(
+    return make_pointwise(fn, override_return_dtype=dtype)(
         cond, to_dtype(a, dtype), to_dtype(b, dtype)
     )
 
 
-@register_lowering(aten.broadcast_tensors, broadcast=False, type_promote=False)
+@register_lowering(aten.broadcast_tensors, broadcast=False, type_promotion_kind=None)
 def broadcast_tensors(*inputs):
     if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
         return broadcast_tensors(*inputs[0])
@@ -441,7 +468,7 @@ if hasattr(aten, "lift_fresh"):
     register_lowering(aten.lift_fresh)(nop)
 
 
-@register_lowering(aten.squeeze, type_promote=False)
+@register_lowering(aten.squeeze, type_promotion_kind=None)
 def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
@@ -466,7 +493,55 @@ def squeeze_(x, dim=None):
     return x
 
 
-@register_lowering(aten.expand, type_promote=False)
+@register_lowering(aten.isinf)
+def isinf(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isinf")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
+@register_lowering(aten.isnan)
+def isnan(x):
+    if is_integer_type(x):
+        return full_like(x, False, dtype=torch.bool)
+    fn = ops_wrapper("isnan")
+    return make_pointwise(fn, override_return_dtype=torch.bool)(x)
+
+
+@register_lowering(aten.ceil)
+def ceil(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("ceil")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.floor)
+def floor(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("floor")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.round)
+def round(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("round")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.trunc)
+def trunc(x):
+    if is_integer_type(x):
+        return x
+    fn = ops_wrapper("trunc")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -488,7 +563,7 @@ def expand(x, sizes):
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
 
-@register_lowering(prims.broadcast_in_dim, type_promote=False)
+@register_lowering(prims.broadcast_in_dim, type_promotion_kind=None)
 def broadcast_in_dim(a, shape, broadcast_dimensions):
     s = list(shape)
     for broadcast_dimension in broadcast_dimensions:
@@ -502,7 +577,7 @@ def broadcast_in_dim(a, shape, broadcast_dimensions):
     return expand(v, shape)
 
 
-@register_lowering(aten.expand_as, type_promote=False)
+@register_lowering(aten.expand_as, type_promotion_kind=None)
 def expand_as(x, y):
     return expand(x, y.get_size())
 
@@ -556,30 +631,30 @@ def repeat(x, repeats):
     )
 
 
-@register_lowering(aten._unsafe_view, type_promote=False)
-@register_lowering(aten.view, type_promote=False)
-@register_lowering(aten.reshape, type_promote=False)
+@register_lowering(aten._unsafe_view, type_promotion_kind=None)
+@register_lowering(aten.view, type_promotion_kind=None)
+@register_lowering(aten.reshape, type_promotion_kind=None)
 def view(x, sizes):
     assert isinstance(x, TensorBox)
     assert isinstance(sizes, (list, tuple))
     return TensorBox(View.create(x.data, sizes))
 
 
-@register_lowering(aten.permute, type_promote=False)
+@register_lowering(aten.permute, type_promotion_kind=None)
 def permute(x, dims):
     assert isinstance(x, TensorBox)
     assert isinstance(dims, (list, tuple))
     return TensorBox(PermuteView.create(x.data, tuple(dims)))
 
 
-@register_lowering(aten.slice, type_promote=False)
-def slice_(x, dim, start, end, step=1):
+@register_lowering(aten.slice, type_promotion_kind=None)
+def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
-@register_lowering(aten.roll, type_promote=False)
+@register_lowering(aten.roll, type_promotion_kind=None)
 def roll(a, shifts, dims=tuple()):
     """
     This is based on torch._refs.roll(), but uses ir.ModularIndexing().
@@ -637,7 +712,7 @@ def roll(a, shifts, dims=tuple()):
     )
 
 
-@register_lowering(aten.as_strided, type_promote=False)
+@register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
         # as_strided ignores views
@@ -671,13 +746,13 @@ def cat(inputs, dim=0):
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
-@register_lowering(aten.select)
+@register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
     idx = View.handle_negative_index(idx, x.get_size()[dim])
     return squeeze(slice_(x, dim, idx, idx + 1), dim)
 
 
-@register_lowering(aten.split)
+@register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
@@ -692,12 +767,12 @@ def split(x, sizes, dim=0):
     return result
 
 
-@register_lowering(aten.split_with_sizes)
+@register_lowering(aten.split_with_sizes, type_promotion_kind=None)
 def split_with_sizes(x, sizes, dim=0):
     return split(x, sizes, dim)
 
 
-@register_lowering(aten.unbind)
+@register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
@@ -707,7 +782,7 @@ def unbind(x, dim=0):
     return result
 
 
-@register_lowering(aten.unsqueeze, type_promote=False)
+@register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
@@ -715,7 +790,7 @@ def unsqueeze(x, dim):
     return view(x, new_shape)
 
 
-@register_lowering(aten.unsqueeze_, type_promote=False)
+@register_lowering(aten.unsqueeze_, type_promotion_kind=None)
 def unsqueeze_(x, dim):
     val = unsqueeze(x, dim)
     assert isinstance(x, TensorBox)
@@ -748,8 +823,8 @@ def mm(a: TensorBox, b: TensorBox):
 
 
 @register_lowering(aten.addmm)
-def addmm(inp: TensorBox, a: TensorBox, b: TensorBox):
-    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b))
+def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
+    return TensorBox.create(ir.MatrixMultiplyAdd.create(inp, a, b, beta, alpha))
 
 
 @register_lowering(aten.bmm)
@@ -775,21 +850,20 @@ def fallback_handler(kernel):
     return handler
 
 
-# https://github.com/pytorch/torchdynamo/issues/1215 to remove native_batch_norm
 def make_fallback(kernel):
     assert (
-        kernel not in decompositions or kernel is aten.native_batch_norm.default
+        kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and kernel is not aten.native_batch_norm.default:
+    if get_decompositions([kernel]):
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
 
     add_needs_realized_inputs(kernel)
-    return register_lowering(kernel, type_promote=False)(fallback_handler(kernel))
+    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
-@register_lowering(aten.native_dropout, type_promote=False)
+@register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
     assert (
         config.fallback_random
@@ -804,7 +878,7 @@ def native_dropout(x, p, train):
     return x, ones_like(x, dtype=torch.bool)
 
 
-@register_lowering(aten.bernoulli_, type_promote=False)
+@register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
     assert (
         config.fallback_random
@@ -910,7 +984,7 @@ def philox_seed_like(x):
     return V.graph.random_seed_buffer(x.get_device())
 
 
-@register_lowering(overrides.philox_rand_like._overloadpacket, type_promote=False)
+@register_lowering(overrides.philox_rand_like._overloadpacket, type_promotion_kind=None)
 def philox_rand_like(x, seed, offset):
     device = x.get_device()
     dtype = x.get_dtype()
@@ -946,7 +1020,6 @@ if has_torchvision_roi_align():
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.as_strided_scatter)
-make_fallback(aten.col2im)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -1037,6 +1110,9 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
+fallback_arange = fallback_handler(aten.arange)
+
+
 @register_lowering([torch.arange, aten.arange])
 def arange(
     start,
@@ -1061,9 +1137,17 @@ def arange(
     if isinstance(step, float) and int(step) == step:
         step = int(step)
 
-    assert isinstance(start, int)
-    assert isinstance(end, int)
-    assert isinstance(step, int)
+    # Triton kernel doesn't support float arange yet, fallback to aten.arange
+    if not (isinstance(start, int) and isinstance(end, int) and isinstance(step, int)):
+        return fallback_arange(
+            start,
+            end,
+            step,
+            dtype=dtype,
+            device=device,
+            layout=layout,
+            pin_memory=pin_memory,
+        )
 
     dtype = dtype or torch.int64
     length = ceildiv((end - start), step)
@@ -1123,8 +1207,9 @@ def triu(x, diagonal=0):
     )
 
 
-@register_lowering(aten.select_scatter)
+@register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
+    assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     src = expand(unsqueeze(src, dim), x.get_size())
@@ -1148,8 +1233,9 @@ def select_scatter(x, src, dim: int, index: int):
     )
 
 
-@register_lowering(aten.slice_scatter)
+@register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
+    assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -1323,7 +1409,7 @@ def _full(fill_value, device, dtype, size):
     )
 
 
-@register_lowering(aten.full_like)
+@register_lowering(aten.full_like, type_promotion_kind=None)
 def full_like(x, fill_value, **kwargs):
     return create_tensor_like(tensor_constructor(fill_value))(x, **kwargs)
 
@@ -1458,7 +1544,7 @@ def full(size, fill_value, **kwargs):
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
-@register_lowering(aten.gather, type_promote=False)
+@register_lowering(aten.gather, type_promotion_kind=None)
 def gather(x, dim, index):
     assert isinstance(x, TensorBox)
     assert index.get_dtype() == torch.int64
@@ -1482,7 +1568,7 @@ def gather(x, dim, index):
     )
 
 
-@register_lowering(aten.embedding, type_promote=False)
+@register_lowering(aten.embedding, type_promotion_kind=None)
 def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False):
     assert not sparse
     assert isinstance(weight, TensorBox)
@@ -1537,7 +1623,7 @@ def check_and_broadcast_indices(indices):
     return new_indices, start_offset, end_offset
 
 
-@register_lowering(aten.index, type_promote=False)
+@register_lowering(aten.index, type_promotion_kind=None)
 def index(x, indices):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
@@ -1583,8 +1669,47 @@ def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
 
 
-@register_lowering(aten.index_put_, type_promote=False)
+def index_put_as_masked_fill(self, indices, value, accumulate):
+    if value.get_device() != self.get_device():
+        value = to_device(value, self.get_device())
+    if accumulate:
+        value = add(self, value)
+    return mutate_to(self, where(indices[0], value, self))
+
+
+def index_put_fallback(self, indices, values, accumulate):
+    ir.IndexPutFallback(self, indices, values, accumulate)
+    return self
+
+
+@register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
+    # Dispatch to masked fill for single boolean index with single value
+    if (
+        values.get_numel() == 1
+        and len(indices) == 1
+        and indices[0].get_dtype() in {torch.bool, torch.uint8}
+    ):
+        return index_put_as_masked_fill(self, indices, values, accumulate)
+
+    # Fallback if there is a boolean index
+    for index in indices:
+        if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
+            return index_put_fallback(self, indices, values, accumulate)
+
+    x_size = self.get_size()
+    x_ndim = len(x_size)
+
+    # fallback to aten.index_put_, as tl.atomic_add does NOT support int64 or bool
+    if self.get_dtype() in {torch.int64, torch.bool}:
+        # self is an scalar Tensor
+        if x_ndim == 0:
+            self = view(self, [1])
+        self = index_put_fallback(self, indices, values, accumulate)
+        if x_ndim == 0:
+            self = view(self, [])
+        return self
+
     values = to_dtype(values, self.get_dtype())
     indices, start_offset, end_offset = check_and_broadcast_indices(indices)
     indices_sizes = [i.get_size() for i in indices if i is not None]
@@ -1594,7 +1719,10 @@ def index_put_(self, indices, values, accumulate=False):
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    x_size = self.get_size()
+    # self is an scalar Tensor
+    if x_ndim == 0:
+        self = view(self, [1])
+
     output_size = list(indices_sizes[0])
     expected_vals_size = [
         *x_size[:start_offset],
@@ -1628,47 +1756,73 @@ def index_put_(self, indices, values, accumulate=False):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+
+    if x_ndim == 0:
+        self = view(self, [])
     return self
 
 
-@register_lowering(aten.scatter, type_promote=False)
+@register_lowering(aten.scatter, type_promotion_kind=None)
 def scatter(x, dim: int, index, src, **kwargs):
     return scatter_(clone(x), dim, index, src, **kwargs)
 
 
-@register_lowering(aten.scatter_, type_promote=False)
+@register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
-        assert False, "TODO: multiply not supported"
         reduce = "prod"
     else:
         assert reduce is None
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
-@register_lowering(aten.scatter_add, type_promote=False)
+@register_lowering(aten.scatter_add, type_promotion_kind=None)
 def scatter_add(x, dim: int, index, src):
     return scatter_add_(clone(x), dim, index, src)
 
 
-@register_lowering(aten.scatter_add_, type_promote=False)
+@register_lowering(aten.scatter_add_, type_promotion_kind=None)
 def scatter_add_(x, dim: int, index, src):
     return scatter_reduce_(clone(x), dim, index, src, "sum")
 
 
-@register_lowering(aten.scatter_reduce, type_promote=False)
+@register_lowering(aten.scatter_reduce, type_promotion_kind=None)
 def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
-@register_lowering(aten.scatter_reduce_, type_promote=False)
+fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
+
+
+@register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
+    assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
+
     # TODO: Need to support more reduction type
-    assert reduce is None or reduce in {"sum"}
+    # For reduction of "sum", tl.atomic_add doesn't support bool or int64
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    ):
+        self.realize()
+        return fallback_scatter_reduce_(
+            self, dim, index, src, reduce, include_self=include_self
+        )
+
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
+
+    ndim = len(self.get_size())
+    if ndim == 0:
+        self = view(self, [1])
+
+    if isinstance(src, TensorBox) and len(src.get_size()) == 0:
+        src = view(src, [1])
+
+    if isinstance(index, TensorBox) and len(index.get_size()) == 0:
+        index = view(index, [1])
+
     assert -len(self.get_size()) <= dim < len(self.get_size())
 
     self.realize()
@@ -1730,6 +1884,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+
+    if ndim == 0:
+        self = view(self, [])
     return self
 
 
@@ -2034,7 +2191,7 @@ def rev(x, dims):
     )
 
 
-@register_lowering(aten.constant_pad_nd, type_promote=False)
+@register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
@@ -2136,7 +2293,7 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-@register_lowering(aten.max_pool2d_with_indices, type_promote=False)
+@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
 def max_pool2d_with_indices(
     x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
 ):
@@ -2201,7 +2358,7 @@ def max_pool2d_with_indices(
     return r1, r2
 
 
-@register_lowering(aten.max_pool2d_with_indices_backward, type_promote=False)
+@register_lowering(aten.max_pool2d_with_indices_backward, type_promotion_kind=None)
 def max_pool2d_with_indices_backward(
     grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
 ):
@@ -2472,7 +2629,7 @@ def upsample_nearest2d_backward(
     return rv
 
 
-@register_lowering(aten.avg_pool2d, type_promote=False)
+@register_lowering(aten.avg_pool2d, type_promotion_kind=None)
 def avg_pool2d(
     x,
     kernel_size,
@@ -2548,7 +2705,7 @@ def avg_pool2d(
     return rv
 
 
-@register_lowering(aten.avg_pool2d_backward, type_promote=False)
+@register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
 def avg_pool2d_backward(
     grad_output,
     x,
@@ -2707,12 +2864,12 @@ def _validate_reduction_axis(x, axis):
     for i in range(len(axis)):
         if axis[i] < 0:
             axis[i] += len(size)
-        assert 0 <= axis[i] < len(size)
+        assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
     assert len(set(axis)) == len(axis), "reduction axis not unique"
     return axis
 
 
-def make_reduction(reduction_type: str, override_dtype=None):
+def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if reduction_type == "min" and axis is not None:
             return (
@@ -2767,7 +2924,7 @@ def make_reduction(reduction_type: str, override_dtype=None):
         inner_loader = x.make_loader()
         result = Reduction.create(
             device=x.get_device(),
-            dst_dtype=override_dtype or x.get_dtype(),
+            dst_dtype=override_return_dtype or x.get_dtype(),
             src_dtype=x.get_dtype(),
             inner_fn=loader,
             ranges=new_size,
@@ -2852,8 +3009,21 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
+def _is_ir_node_and_cuda(x):
+    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
+        return True
+
+    return False
+
+
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
+    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
+        assert a.get_dtype() in (
+            torch.float16,
+            torch.float32,
+            torch.float64,
+        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, int) and b == 1:
@@ -2913,7 +3083,7 @@ def zero_(x):
     return mutate_to(x, full_like(x, 0))
 
 
-@register_lowering(aten.copy_, type_promote=False)
+@register_lowering(aten.copy_, type_promotion_kind=None)
 def copy_(dst, src, non_blocking=False):
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
@@ -2952,11 +3122,13 @@ def div(a, b):
     def fn(*args):
         return ops.div(*args)
 
-    dtype = get_promoted_dtype(a, b)
+    dtype = get_promoted_dtype(
+        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
     # truediv produces a float tensor even if both operands are integer types
     if is_integer_type(a) and is_integer_type(b):
         dtype = torch.get_default_dtype()
-    return make_pointwise(fn, override_dtype=dtype)(
+    return make_pointwise(fn, override_return_dtype=dtype)(
         a if isinstance(a, Number) else to_dtype(a, dtype),
         b if isinstance(b, Number) else to_dtype(b, dtype),
     )
@@ -3006,7 +3178,18 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
-    fn = make_reduction("sum", override_dtype=dtype)
+
+    # This is a temp fix for https://github.com/pytorch/torchdynamo/issues/1450
+    # The root cause of the problem is a one-element bool tensor was stored as
+    # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
+    # which confuses the backward pass when it calls sum on the bool tensor.
+    # A better place to fix is in triton.py (see the comment there), but it is
+    # blocked by a trition issue on bool comparison, causing opinfo tests like
+    # test_comprehensive_gt_cuda_bool to fail.
+    if is_boolean_dtype(x.get_dtype()):
+        x = to_dtype(to_dtype(x, dtype), torch.bool)
+
+    fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
 
@@ -3014,65 +3197,88 @@ register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
 reduce_amin = register_lowering(aten.amin)(make_reduction("amin"))
-register_lowering(aten.any)(make_reduction("any", override_dtype=torch.bool))
+register_lowering(aten.any)(make_reduction("any", override_return_dtype=torch.bool))
 reduce_argmax = register_lowering(aten.argmax)(
-    make_reduction("argmax", override_dtype=torch.int64)
+    make_reduction("argmax", override_return_dtype=torch.int64)
 )
 reduce_argmin = register_lowering(aten.argmin)(
-    make_reduction("argmin", override_dtype=torch.int64)
+    make_reduction("argmin", override_return_dtype=torch.int64)
 )
 
-add = register_pointwise(aten.add, allow_alpha=True)
-exp = register_pointwise(aten.exp)
-floor = register_pointwise(aten.floor)
+add = register_pointwise(
+    aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
+)
+exp = register_pointwise(
+    aten.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 relu = register_pointwise(aten.relu)
-sigmoid = register_pointwise(aten.sigmoid)
-sqrt = register_pointwise(aten.sqrt)
+sigmoid = register_pointwise(
+    aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+sqrt = register_pointwise(
+    aten.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
-trunc = register_pointwise(aten.trunc)
 
-register_pointwise(aten.cos)
-register_pointwise(aten.sin)
+register_pointwise(
+    aten.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_pointwise(
+    aten.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
-register_pointwise(aten.bitwise_not, override_bool="logical_not")
+register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
-register_pointwise(aten.lgamma)
-register_pointwise(aten.log)
-register_pointwise(aten.logical_not)
+register_pointwise(
+    aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_pointwise(
+    aten.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
 register_pointwise(aten.minimum)
 register_pointwise(aten.neg)
-register_pointwise(aten.reciprocal)
+register_pointwise(
+    aten.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.remainder)
-register_pointwise(aten.round)
-register_pointwise(aten.sign)
-register_pointwise(aten.silu)
+register_pointwise(aten.sign, override_fn_when_input_bool="identity")
+register_pointwise(
+    aten.silu, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
-register_pointwise(aten.signbit, override_dtype=torch.bool)
-register_pointwise(aten.isinf, override_dtype=torch.bool)
-register_pointwise(aten.isnan, override_dtype=torch.bool)
+register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
-register_pointwise(aten.le, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.lt, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.ge, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.gt, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.eq, type_promote=False, override_dtype=torch.bool)
-register_pointwise(aten.ne, type_promote=False, override_dtype=torch.bool)
+register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.ge, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.eq, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.ne, type_promotion_kind=None, override_return_dtype=torch.bool)
 logical_and = register_pointwise(
-    aten.logical_and, type_promote=False, override_dtype=torch.bool
+    aten.logical_and,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
 )
-register_lowering(aten.__and__, type_promote=False)(logical_and)
-register_lowering(aten.__or__, type_promote=False)(
-    register_pointwise(aten.logical_or, type_promote=False, override_dtype=torch.bool)
+register_lowering(aten.__and__, type_promotion_kind=None)(logical_and)
+register_lowering(aten.__or__, type_promotion_kind=None)(
+    register_pointwise(
+        aten.logical_or,
+        type_promotion_kind=None,
+        convert_input_to_bool=True,
+        override_return_dtype=torch.bool,
+    )
 )
 
 
 def register_inplace(aten_op, outplace_op):
-    @register_lowering(aten_op, type_promote=False)
+    @register_lowering(aten_op, type_promotion_kind=None)
     def fn(*args, **kwargs):
         result = outplace_op(*args, **kwargs)
         result = to_dtype(result, args[0].get_dtype())
@@ -3097,3 +3303,8 @@ def sym_size(a, dim):
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
+
+
+@register_lowering(aten._foobar)
+def foobar(self, *args, **kwargs):
+    raise NotImplementedError("Helpful for debugging")

@@ -10,19 +10,20 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-import torchdynamo
-
 from . import config
+from . import eval_frame
+from . import optimize_assert
+from . import reset
+from . import utils
 from .bytecode_transformation import create_instruction
 from .bytecode_transformation import debug_checks
 from .bytecode_transformation import is_generator
 from .bytecode_transformation import transform_code_object
 from .guards import CheckFunctionManager
 from .guards import GuardedCode
-from .optimizations import BACKENDS
 from .utils import same
 
-unsupported = torchdynamo.eval_frame.unsupported
+unsupported = eval_frame.unsupported
 three = 3
 
 log = logging.getLogger(__name__)
@@ -44,21 +45,25 @@ def collect_results(model, prediction, loss, example_inputs):
         )
 
     grads = dict()
+    params = dict()
     for name, param in model.named_parameters():
-        grad = clone_me(param.grad)
+        param_copy = param
+        grad = param.grad
         # Treat None and zero grad as same
         if param.grad is None:
             grad = torch.zeros_like(param)
         grads[name + ".grad"] = grad
+        params[name] = param_copy
     results.append(grads)
+    results.append(params)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
             for inp in example:
                 if isinstance(inp, torch.Tensor):
-                    results.append(clone_me(inp.grad))
+                    results.append(inp.grad)
         else:
             if isinstance(example, torch.Tensor):
-                results.append(clone_me(example.grad))
+                results.append(example.grad)
     return results
 
 
@@ -67,6 +72,8 @@ def requires_bwd_pass(out):
         return out.requires_grad
     elif isinstance(out, (list, tuple)):
         return any([requires_bwd_pass(x) for x in out])
+    elif out is None:
+        return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
@@ -146,19 +153,17 @@ class CompileCounterWithBackend:
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        from torchdynamo.eval_frame import lookup_backend
+
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
                 self.op_count += 1
-        if self.backend == "inductor":
-            from torchinductor.compile_fx import compile_fx
-
-            return compile_fx(gm, example_inputs)
-        return BACKENDS[self.backend](gm, example_inputs)
+        return lookup_backend(self.backend)(gm, example_inputs)
 
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
-    if torchdynamo.config.dynamic_shapes and expected_ops_dynamic is not None:
+    if config.dynamic_shapes and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
@@ -177,13 +182,13 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
     correct1 = fn(*args1)
     correct2 = fn(*args2)
-    torchdynamo.reset()
-    opt_fn = torchdynamo.optimize_assert(actual)(fn)
+    reset()
+    opt_fn = optimize_assert(actual)(fn)
     val1a = opt_fn(*args1)
     val2a = opt_fn(*args2)
     val1b = opt_fn(*args1)
     val2b = opt_fn(*args2)
-    torchdynamo.reset()
+    reset()
     self.assertTrue(same(val1a, correct1))
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
@@ -209,14 +214,14 @@ class TestCase(unittest.TestCase):
         )
 
     def setUp(self):
-        torchdynamo.reset()
-        torchdynamo.utils.counters.clear()
+        reset()
+        utils.counters.clear()
 
     def tearDown(self):
-        for k, v in torchdynamo.utils.counters.items():
+        for k, v in utils.counters.items():
             print(k, v.most_common())
-        torchdynamo.reset()
-        torchdynamo.utils.counters.clear()
+        reset()
+        utils.counters.clear()
 
 
 def dummy_fx_compile(gm: fx.GraphModule, example_inputs):
@@ -234,7 +239,7 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
 def requires_static_shapes(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        if torchdynamo.config.dynamic_shapes:
+        if config.dynamic_shapes:
             raise unittest.SkipTest("requires static shapes")
         return fn(*args, **kwargs)
 
@@ -255,7 +260,7 @@ def _make_fn_with_patches(fn, *patches):
     def _fn(*args, **kwargs):
         with contextlib.ExitStack() as stack:
             for attr, val in patches:
-                stack.enter_context(patch.object(torchdynamo.config, attr, val))
+                stack.enter_context(patch.object(config, attr, val))
 
             return fn(*args, **kwargs)
 

@@ -24,8 +24,9 @@ In the mean time, you may need to diagnose a particular issue and determine if i
 We're also actively developing debug tools, profilers, and improving our errors/warnings.  Please give us feedback if you have an issue with this infra, or an idea for an improvement. Below is a table of the available tools and their typical usage. For additional help see the next section.
 | Tool                                | Purpose                                                                                                                      | Usage                                                                        |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Info logging                        | View summarized steps of compilation                                                                                         | `torchdynamo.config.log_level = logging.INFO`
 | Debug logging                       | View detailed steps of compilation (print every instruction traced)                                                          | `torchdynamo.config.log_level = logging.DEBUG` and `torchdynamo.config.verbose = True` |
-| Minifier for any backend            | Find smallest subgraph which reproduces errors for any backend                                                               | set environmet variable TORCHDYNAMO_REPRO_AFTER="torchdynamo"                |
+| Minifier for any backend            | Find smallest subgraph which reproduces errors for any backend                                                               | set environment variable TORCHDYNAMO_REPRO_AFTER="torchdynamo"                |
 | Minifier for TorchInductor          | If the error is known to occur after AOTAutograd find smallest subgraph wich reproduces errors during TorchInductor lowering | set environment variable TORCHDYNAMO_REPRO_AFTER="aot"                       |
 | `torchdynamo.explain`               | Find graph breaks and display reasoning for them                                                                             | `torchdynamo.explain(fn, *inputs)`                                           |
 | Record/Replay (in progress)         | Record and replay frames which to reproduce errors during graph capture                                                      | `torchdynamo.config.replay_record_enabled = True`                            |
@@ -37,9 +38,20 @@ Below is the TorchDynamo compiler stack.
 
 <img src="./images/td_stack.png" width=800>
 
-At a high level, the TorchDynamo stack consists of a graph capture from Python code (TorchDynamo) and a backend compiler. In this example the backend compiler consists of backward graph tracing (AOTAutograd) and graph lowering (TorchInductor)*. Errors can occur in any component of the stack and will provide full stack traces, but there are backends which enable users to run each component of the stack without the others enabled to narrow down the exact component which is causing the error.
+At a high level, the TorchDynamo stack consists of a graph capture from Python code (TorchDynamo) and a backend compiler. In this example the backend compiler consists of backward graph tracing (AOTAutograd) and graph lowering (TorchInductor)*. Errors can occur in any component of the stack and will provide full stack traces.
 
-There are some backend options which can enable you to determine which component is causing the error if you're unable to understand the error message that is generated. These are the following:
+You may use info logging (`torchdynamo.config.log_level = logging.INFO`) and look for `Step #: ...` outputs in order to determine in which component the error occurred in. Logs are made at the beginning and end of each step, so the step that an error should correspond to is the most recent logged step whose end has not yet been logged.
+The steps correspond to the following parts of the stack (according to the image above):
+
+| Step | Component        |
+|------|------------------|
+| 1    | TorchDynamo      | 
+| 2    | Compiler Backend |
+| 3    | TorchInductor    |
+
+The beginning and end of AOTAutograd is currently not logged, but we plan to add it soon.
+
+If info logging is insufficient, then there are also some backend options which can enable you to determine which component is causing the error if you're unable to understand the error message that is generated. These are the following:
 
 - `"eager"`: only runs torchdynamo forward graph capture and then runs the captured graph with PyTorch. This provides an indication as to whether TorchDynamo is raising the error.
 

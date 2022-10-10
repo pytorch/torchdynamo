@@ -109,10 +109,10 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
     def test_nonlocal_module_fn_call(self):
         # replay when we use a module
         # not defined in the replay env
-        import test.mock_modules.mock_module2
+        from . import mock_modules
 
         def test_fn():
-            z = test.mock_modules.mock_module2.method1([], 2)
+            z = mock_modules.mock_module2.method1([], 2)
             z = torch.ones(2, 2) + z[0]
             return z + torch.zeros(3, 3)
 

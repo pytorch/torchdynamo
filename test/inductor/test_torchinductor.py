@@ -16,8 +16,10 @@ from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
+from torchdynamo.debug_utils import same_two_models
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
+from torchinductor.utils import timed
 
 try:
     import sympy
@@ -52,8 +54,8 @@ try:
 
     CppCodeCache.load("")
     HAS_CPU = True
-except (CalledProcessError, OSError):
-    raise unittest.SkipTest("Did not find a working c++ compiler")
+except (CalledProcessError, OSError, torchinductor.exc.InvalidCxxCompiler):
+    pass
 
 aten = torch.ops.aten
 
@@ -146,31 +148,39 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
+    assert_equal=True,
 ):
     torchdynamo.reset()
 
-    # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+    ref_inputs = example_inputs
+    ref_kwargs = kwargs
     has_lowp_args = False
 
-    def upcast_fn(x):
-        nonlocal has_lowp_args
-        if isinstance(x, torch.Tensor) and (
-            x.dtype == torch.float16 or x.dtype == torch.bfloat16
-        ):
-            has_lowp_args = True
-            return x.float()
-        else:
-            return x
+    if reference_in_float:
+        # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
+        def upcast_fn(x):
+            nonlocal has_lowp_args
+            if isinstance(x, torch.Tensor) and (
+                x.dtype == torch.float16 or x.dtype == torch.bfloat16
+            ):
+                has_lowp_args = True
+                return x.float()
+            else:
+                return x
 
-    upcasted_inputs = list(map(upcast_fn, example_inputs))
-    if has_lowp_args:
-        if hasattr(model, "to"):
-            model = model.to(torch.float)
+        ref_inputs = list(map(upcast_fn, example_inputs))
+        ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
+        if has_lowp_args:
+            if hasattr(model, "to"):
+                model = model.to(torch.float)
+
     torch.manual_seed(0)
 
-    correct = model(*upcasted_inputs, **kwargs)
+    correct = model(*ref_inputs, **ref_kwargs)
     # downcast the model back if needed
-    if has_lowp_args:
+    if reference_in_float and has_lowp_args:
         if hasattr(model, "to"):
             model = model.to(torch.half)
 
@@ -198,24 +208,40 @@ def check_model(
     assert called, "Ran graph without calling compile_fx"
 
     assert type(actual) == type(correct)
-    correct_flat, correct_spec = tree_flatten(correct)
-    actual_flat, _ = tree_flatten(actual)
-    correct_flat = tuple(
-        y.to(x.dtype)
-        if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
-        else y
-        for x, y in zip(actual_flat, correct_flat)
-    )
-    correct = tree_unflatten(correct_flat, correct_spec)
 
-    self.assertEqual(
-        actual,
-        correct,
-        atol=atol,
-        rtol=rtol,
-        equal_nan=True,
-        exact_dtype=exact_dtype,
-    )
+    if reference_in_float:
+        correct_flat, correct_spec = tree_flatten(correct)
+        actual_flat, _ = tree_flatten(actual)
+        correct_flat = tuple(
+            y.to(x.dtype)
+            if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
+            else y
+            for x, y in zip(actual_flat, correct_flat)
+        )
+        correct = tree_unflatten(correct_flat, correct_spec)
+
+    if assert_equal:
+        self.assertEqual(
+            actual,
+            correct,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            exact_dtype=exact_dtype,
+        )
+    else:
+        correct_flat, _ = tree_flatten(correct)
+        actual_flat, _ = tree_flatten(actual)
+
+        for correct_val, actual_val in zip(correct_flat, actual_flat):
+            if isinstance(correct_val, torch.Tensor):
+                assert correct_val.device == actual_val.device
+                assert correct_val.size() == actual_val.size()
+                assert correct_val.stride() == actual_val.stride()
+                assert correct_val.layout == actual_val.layout
+                if exact_dtype:
+                    assert correct_val.dtype == actual_val.dtype
+
     torchdynamo.reset()
 
 
@@ -231,6 +257,9 @@ def check_model_cuda(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
+    copy_to_cuda=True,
+    reference_in_float=True,
+    assert_equal=True,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -243,7 +272,9 @@ def check_model_cuda(
             x.size(), x.stride(), device="cuda", dtype=x.dtype
         ).copy_(x)
 
-    example_inputs = tuple(copy_fn(x) for x in example_inputs)
+    if copy_to_cuda:
+        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+
     check_model(
         self,
         model,
@@ -253,6 +284,8 @@ def check_model_cuda(
         rtol=rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
+        reference_in_float=reference_in_float,
+        assert_equal=assert_equal,
     )
 
     if check_lowp:
@@ -276,6 +309,8 @@ def check_model_cuda(
             rtol=rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
+            reference_in_float=reference_in_float,
+            assert_equal=assert_equal,
         )
 
 
@@ -385,6 +420,19 @@ class TestIndexingSimplification(unittest.TestCase):
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
         self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
 
+        # Nested modular indexing is correctly simplified
+        var_ranges = {"i1": 13, "i2": 121}
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        var_ranges = {"i2": 784}
+        expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
+        expected = IndexingDiv(ModularIndexing(i2, 1, 28), 7)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0")
@@ -452,6 +500,28 @@ class CommonTemplate:
         for name, value in my_cls.__dict__.items():
             if name.startswith("test_"):
                 setattr(other_cls, f"{name}_{suffix}", value)
+
+    def test_bool(self):
+        def fn(a, b):
+            return (
+                a + b,
+                a * b,
+                a & b,
+                a | b,
+                a ^ b,
+                torch.logical_and(a, b),
+                torch.logical_or(a, b),
+                torch.logical_not(a),
+                torch.sign(b),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor([True, False, True, False]),
+                torch.tensor([False, False, True, True]),
+            ),
+        )
 
     def test_add_const_int(self):
         def fn(a):
@@ -2685,6 +2755,85 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put_as_masked_fill(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([1024, 4, 2]),
+                torch.randn([1024, 4, 2]) > 0,
+                torch.randn([]),
+                True,
+            ),
+        )
+
+    def test_index_put_fallback1(self):
+        def fn(a, b, c, d):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [b], c, d)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                False,
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([3]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([2]),
+                True,
+            ),
+        )
+
+    def test_index_put_fallback2(self):
+        def fn(a, b, c, d, e):
+            a = a.clone()
+            torch.ops.aten.index_put_(a, [None, b, c], d, e)
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                False,
+            ),
+        )
+        self.common(
+            fn,
+            (
+                torch.randn([1, 2, 3]),
+                torch.as_tensor([0, 1]),
+                torch.as_tensor([True, True, False]),
+                torch.randn([]),
+                True,
+            ),
+        )
+
     @patch.object(config, "fallback_random", True)
     def test_bernoulli1(self):
         def fn(a):
@@ -2810,6 +2959,15 @@ class CommonTemplate:
             # Greatest relative difference: 0.0022371364653243847 at index (0, 0, 3) (up to 0.001 allowed)
             atol=2e-4,
             rtol=1e-3,
+        )
+
+    def test_scatter4(self):
+        def fn(x, ind, src):
+            return torch.scatter(x, 0, ind, src)
+
+        self.common(
+            fn,
+            (torch.randn(196, 992), torch.randint(196, (1, 992)), torch.randn(1, 992)),
         )
 
     @unittest.skip("Flaky test, needs debugging")
@@ -3427,6 +3585,30 @@ class CommonTemplate:
         out = compiled(torch.randn(12, 4, device=self.device))
         self.assertEqual(out[0].shape, (24, 2))
 
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_unspec_inputs(self):
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", True)
+    def test_unspec_inputs_cudagraphs(self):
+        def fn(x, y):
+            return x + y
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), device="cuda"),
+            rand_strided((), (), device="cpu"),
+        )
+        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
 
 if HAS_CPU:
 
@@ -3474,6 +3656,29 @@ if HAS_CPU:
 
             x = torch.randn((10, 20))
             assert same(x, forward(x))
+
+        def test_parallel_num_threads(self):
+            @torchdynamo.optimize("inductor")
+            def fn(x1, x2):
+                return x1 + x2
+
+            @contextlib.contextmanager
+            def set_num_threads(num_threads):
+                orig_num_threads = torch.get_num_threads()
+                torch.set_num_threads(num_threads)
+                yield
+                torch.set_num_threads(orig_num_threads)
+
+            x1 = torch.randn((10, 20))
+            x2 = torch.randn((10, 20))
+            with set_num_threads(1):
+                assert same(x1 + x2, fn(x1, x2))
+            with set_num_threads(4):
+                assert same(x1 + x2, fn(x1, x2))
+
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_timed_cpu_only(self):
+            timed(lambda: torch.randn(10), ())
 
 
 if HAS_CUDA:
@@ -3574,3 +3779,38 @@ if HAS_CUDA:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        def test_accuracy_issue1(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(
+                        in_features=768, out_features=2, bias=True
+                    )
+
+                def forward(self, start_positions: torch.Tensor, x: torch.Tensor):
+                    linear = self.linear(x)
+                    split = linear.split(1, dim=-1)
+                    getitem = split[0]
+                    squeeze = getitem.squeeze(-1)
+                    clamp = start_positions.clamp(0, 128)
+                    cross_entropy = torch.nn.functional.cross_entropy(
+                        squeeze, clamp, None, None, 128, None, "mean", 0.0
+                    )
+                    return cross_entropy
+
+            mod = Repro().cuda()
+            opt_mod = torchdynamo.optimize("inductor")(mod)
+            mod.eval()
+            opt_mod.eval()
+
+            args = [
+                ((1,), (1,), torch.int64, "cuda", False),
+                ((1, 128, 768), (98304, 768, 1), torch.float32, "cuda", True),
+            ]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+            with torch.cuda.amp.autocast(enabled=False):
+                assert same_two_models(mod, opt_mod, args), "Dynamo failed"

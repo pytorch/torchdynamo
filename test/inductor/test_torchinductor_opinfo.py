@@ -3,6 +3,7 @@ import os
 from collections import defaultdict
 from enum import Enum
 from functools import partial
+from unittest.mock import patch
 
 import torch
 from torch.testing._internal.common_device_type import OpDTypes
@@ -100,13 +101,9 @@ if COLLECT_EXPECT:
 inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
-    # the return value of empty is undefined
-    "empty": {b8, f16, f32, f64, i32, i64},
-    "empty_like": {b8, f16, f32, f64, i32, i64},
-    "new_empty": {b8, f16, f32, f64, i32, i64},
-    "new_empty_strided": {b8, f16, f32, f64, i32, i64},
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "reciprocal": {b8, i32, i64},  # segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_unpack": {b8, f16, f32, f64, i32, i64},  # segfault
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
@@ -115,72 +112,29 @@ inductor_skips["cpu"] = {
 inductor_skips["cuda"] = {
     # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_1": {f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_3": {f16, f32, f64, i32, i64},
-    "mvlgamma.mvlgamma_p_5": {f16, f32, f64, i32, i64},
-    "cumprod": {f16, f32, f64},
     "masked.prod": {f16, f32, f64},
-    "empty_like": {f16, f32, f64, i32, i64},
-    "reciprocal": {b8},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "nn.functional.conv_transpose1d": {f16},
-    "nn.functional.conv_transpose2d": {f16},
+    "broadcast_tensors": {f16, f32, f64},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
-    "cos": {b8, f64, i32, i64},
-    "erf": {f64, i32, i64},
-    "exp": {b8, f64, i32, i64},
-    "log": {b8, i32, i64},
-    "log1p": {b8, i32, i64},
-    "log2": {b8, i32, i64},
+    "erf": {f64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
-    "nan_to_num": {
-        i32,
-        i64,
-    },  # FIXME bad decomposition, torch.finfo() requires a floating point input type
-    "nn.functional.binary_cross_entropy": {f64},
     "nn.functional.binary_cross_entropy_with_logits": {f64},
-    "nn.functional.cross_entropy": {f64},
-    "nn.functional.elu": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
-    "nn.functional.poisson_nll_loss": {f64, i32, i64},
+    "nn.functional.poisson_nll_loss": {f64},
     "nn.functional.selu": {f64},
     "nn.functional.silu": {f64},
-    "nn.functional.tanhshrink": {f64},
+    "nn.functional.tanhshrink": {f16, f64},
+    "nn.functional.conv_transpose3d": {f16, f64},
+    "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
-    "nn.functional.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "rsqrt": {b8, i32, i64},
-    "sigmoid": {b8, f64, i32, i64},
-    "sin": {b8, f64, i32, i64},
-    "special.log_ndtr": {f64},
+    "nn.functional.triplet_margin_loss": {f16},
     "special.ndtr": {f64},
-    "sqrt": {b8, i32, i64},
-    "tanh": {f64},
-    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault
-    "roll": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.log_softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.logaddexp": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "masked.softmin": {b8, f16, f32, f64, i32, i64},  # segfault
-    "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce": {b8, f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.amin": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
-    "scatter_reduce.sum": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax": {b8, f16, f32, f64, i32, i64},  # segfault
-    "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
-    "nn.functional.kl_div": {b8, f16, f32, f64, i32, i64},  # segfault
-    "fliplr": {b8, f16, f32, f64, i32, i64},  # segfault
-    "flipud": {b8, f16, f32, f64, i32, i64},  # segfault
-    "log_softmax": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -188,44 +142,34 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # failed since moving PyTorch pin https://github.com/pytorch/torchdynamo/pull/1453
+    "dsplit": {f16, f32, f64},
+    "hsplit": {f16, f32, f64},
 }
 
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "__radd__": {b8, f16, f32, f64, i32, i64},
-    "__rand__": {b8, i32, i64},
-    "__rmod__": {f16, f32, f64},
-    "__rmul__": {b8, f16, f32, f64, i32, i64},
-    "__ror__": {b8, i32, i64},
-    "__rpow__": {f16, f32, f64, i32, i64},
-    "__rsub__": {f16, f32, f64, i32, i64},
-    "__rxor__": {b8, i32, i64},
-    "addmm": {f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f16, f32, f64},
-    "argmax": {f16, f32, f64, i32, i64},
-    "argmin": {f16, f32, f64, i32, i64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
-    "chunk": {b8},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
     "constant_pad_nd": {f16, f32, f64},
     "copysign": {f16},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
-    "cumulative_trapezoid": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8, f64},
     "fft.fft": {f32, f64},
@@ -246,11 +190,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
-    "gradient": {f16, f32, f64, i32, i64},
-    "index_add": {b8, f16, f32, f64, i32, i64},
+    "index_add": {f16, f32, f64},
     "index_copy": {f16, f32, f64},
+    "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
-    "inner": {f32, f64, i32, i64},
     "istft": {f32, f64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
@@ -265,10 +208,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
     "logdet": {f32, f64},
-    "logical_not": {f16, f32, f64, i32, i64},
-    "logsumexp": {b8, f32, f64, i32, i64},
-    "masked.argmax": {f16, f32, f64, i32, i64},
-    "masked.argmin": {f16, f32, f64, i32, i64},
     "masked.norm": {f16},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
@@ -278,23 +217,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "min.reduction_no_dim": {f16},
     "min.reduction_with_dim": {b8, f16},
     "multinomial": {f32, f64},
-    "mvlgamma.mvlgamma_p_1": {f32, f64},
-    "mvlgamma.mvlgamma_p_3": {f32, f64},
-    "mvlgamma.mvlgamma_p_5": {f32, f64},
-    "nan_to_num": {b8, f16, i32, i64},
+    "nan_to_num": {f16},
     "nanquantile": {f32, f64},
-    "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.dropout": {f32, f64},
-    "nn.functional.dropout2d": {f32, f64},
-    "nn.functional.dropout3d": {f32, f64},
-    "nn.functional.embedding_bag": {f16},
-    "nn.functional.feature_alpha_dropout.with_train": {f32, f64},
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.fractional_max_pool2d": {f32, f64},
-    "nn.functional.fractional_max_pool3d": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.gelu": {f64},
     "nn.functional.huber_loss": {f16, f32, f64},
@@ -312,85 +240,50 @@ inductor_expected_failures_single_sample["cpu"] = {
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
-    "reciprocal": {b8, i32, i64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
-    "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.amin": {b8, f16, f32, f64, i32, i64},
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},
-    "scatter_reduce.prod": {b8, f16, f32, f64, i32, i64},
     "scatter_reduce.sum": {f16},
+    "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
-    "select": {b8},
-    "select_scatter": {b8},
-    "sgn": {b8, f16, f32, f64, i32, i64},
-    "sign": {b8, i32, i64},
-    "slice": {b8, f16, f32, f64, i32, i64},
-    "slice_scatter": {b8},
+    "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "split": {b8},
-    "split.list_args": {b8},
-    "split_with_sizes": {b8},
-    "std_mean": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "tensordot": {f32, f64, i32, i64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
-    "trapezoid": {f16, f32, f64, i32, i64},
-    "trapz": {f16, f32, f64, i32, i64},
     "tril": {f16},
     "triu": {f16},
-    "unbind": {b8},
     "uniform": {f16, f32, f64},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16, f32, f64},
-    "zero_": {b8},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64},
+    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "__radd__": {b8, f16, f32, f64, i32, i64},
-    "__rand__": {b8, i32, i64},
-    "__rmod__": {f16, f32, f64, i32, i64},
-    "__rmul__": {b8, f16, f32, f64, i32, i64},
-    "__ror__": {b8, i32, i64},
-    "__rpow__": {f16, f32, f64, i32, i64},
-    "__rsub__": {f16, f32, f64, i32, i64},
-    "__rxor__": {b8, i32, i64},
-    "addbmm": {f16},
-    "addmm": {f16, f32, f64},
-    "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
-    "argmax": {f16, f32, f64, i32, i64},
-    "argmin": {f16, f32, f64, i32, i64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
-    "ceil": {i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
-    "chunk": {b8},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
-    "cumsum": {f16},
-    "cumulative_trapezoid": {f16, f32, f64, i32, i64},
-    "empty": {i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "erf": {b8},
     "fft.fft": {f16, f32, f64},
@@ -411,16 +304,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "floor": {i32, i64},
-    "gradient": {f16, f32, f64, i32, i64},
-    "index_add": {b8, f16, f32, f64, i32, i64},
+    "index_add": {f16, f32, f64},
     "index_copy": {f16, f32, f64},
+    "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
-    "inner": {f16, f32, f64},
-    "isinf": {b8, i32, i64},
-    "isnan": {b8, i32, i64},
     "istft": {f32, f64},
-    "lgamma": {b8, i32, i64},
     "linalg.cholesky": {f32, f64},
     "linalg.cholesky_ex": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -434,43 +322,21 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
-    "logical_and": {f16, f32, f64, i32, i64},
-    "logical_not": {f16, f32, f64, i32, i64},
-    "logical_or": {f16, f32, f64, i32, i64},
-    "logsumexp": {b8, f16, f32, i32, i64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
-    "masked.argmax": {f16, f32, f64, i32, i64},
-    "masked.argmin": {f16, f32, f64, i32, i64},
+    "masked.argmax": {f16, f32, f64, i32},
+    "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "matrix_exp": {f16},
-    "max.reduction_no_dim": {b8},
     "max.reduction_with_dim": {b8, i32, i64},
-    "min.reduction_no_dim": {b8},
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
-    "nan_to_num": {b8},
-    "new_empty": {f16, f32, f64, i32, i64},
-    "new_empty_strided": {f16, f32, f64, i32, i64},
-    "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
-    "nn.functional.conv_transpose3d": {f16},
+    "nn.functional.adaptive_avg_pool2d": {f16},
+    "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.dropout": {f16, f32, f64},
-    "nn.functional.dropout2d": {f16, f32, f64},
-    "nn.functional.dropout3d": {f16, f32, f64},
-    "nn.functional.feature_alpha_dropout.with_train": {f16, f32, f64},
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.fractional_max_pool2d": {f16, f32, f64},
-    "nn.functional.fractional_max_pool3d": {f16, f32, f64},
+    "nn.functional.grid_sample": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
-    "nn.functional.group_norm": {f16},
     "nn.functional.huber_loss": {f16, f32, f64},
-    "nn.functional.instance_norm": {f16},
     "nn.functional.one_hot": {i64},
-    "nn.functional.prelu": {f16},
     "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.soft_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
@@ -481,39 +347,71 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "round": {i32, i64},
     "round.decimals_3": {f16},
+    "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
-    "select": {b8},
-    "select_scatter": {b8},
-    "sgn": {b8, f16, f32, f64, i32, i64},
-    "sign": {b8, i32, i64},
-    "slice": {b8, f16, f32, f64, i32, i64},
-    "slice_scatter": {b8},
-    "split": {b8},
-    "split.list_args": {b8},
-    "split_with_sizes": {b8},
-    "std_mean": {f16, f32, f64},
+    "sgn": {f16, f32, f64},
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
-    "tensordot": {f16, f32, f64},
     "to": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
-    "trapezoid": {f16, f32, f64, i32, i64},
-    "trapz": {f16, f32, f64, i32, i64},
-    "trunc": {i32, i64},
-    "unbind": {b8},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
-    "zero_": {b8},
+}
+
+inductor_should_fail_with_exception = defaultdict(dict)
+
+inductor_should_fail_with_exception["cpu"] = {}
+
+
+inductor_should_fail_with_exception["cuda"] = {
+    "__rpow__": {
+        i32: "Pow input must be floating point.",
+        i64: "Pow input must be floating point.",
+    }
+}
+
+
+def wrapper_set_seed(op, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(*args, **kwargs)
+
+
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+
+# This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
+torchdynamo.variables.torch.tensor_dunder_fns.append(
+    torch.testing._internal.common_utils.disable_functorch
+)
+
+# key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
+inductor_override_kwargs = {
+    # the return value of empty is undefined
+    "empty": {"assert_equal": False},
+    "empty_like": {"assert_equal": False},
+    "new_empty": {"assert_equal": False},
+    "new_empty_strided": {"assert_equal": False},
+    "randn": {"assert_equal": False},
+    ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+}
+
+# Always test with all sample for following ops
+inductor_all_samples = {
+    "softmax.with_dtype",
+    "index_add",
+    "index_put",
+    "index_copy",
+    "scatter_reduce.sum",
 }
 
 
@@ -527,6 +425,7 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @_ops(op_db[START:END])
+    @patch("torchdynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
         torchdynamo.reset()
         with torch.no_grad():
@@ -557,6 +456,14 @@ class TestInductorOpInfo(TestCase):
         else:
             test_expect = TestExpect.SUCCESS
 
+        additional_kwargs = {}
+        if op_name in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[op_name]
+        elif (op_name, device_type) in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[(op_name, device_type)]
+        elif (op_name, device_type, dtype) in inductor_override_kwargs:
+            additional_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
+
         func = op.get_op()
 
         def fn(*args, **kwargs):
@@ -573,50 +480,74 @@ class TestInductorOpInfo(TestCase):
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        if not ALL_SAMPLES:
+        if op_name not in inductor_all_samples and not ALL_SAMPLES:
             if isinstance(samples, (list, tuple)):
                 samples = [samples[0]]
             else:
                 samples = [next(samples)]
 
-        for sample_input in samples:
-            args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
-
-            try:
+        try:
+            for sample_input in samples:
+                args = [sample_input.input] + list(sample_input.args)
+                kwargs = sample_input.kwargs
+                # UNCOMMENT TO DEBUG SEGFAULTS
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
+                    # opinfo test case have already place the input on the correct device
+                    # so we don't need do additional copy by setting copy_to_cuda=False
                     self.check_model_cuda(
-                        fn, args, kwargs, check_lowp=False, nopython=True
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        copy_to_cuda=False,
+                        reference_in_float=False,
+                        **additional_kwargs,
                     )
                 elif device_type == "cpu":
-                    self.check_model(fn, args, kwargs, check_lowp=False, nopython=True)
-
-            except Exception as e:
-                # with open("test_output_929.txt", "a") as f:
-                #     print(f"FAILED OP {op_name} on {device_type} with {dtype}, {e}", flush=True, file=f)
-
-                if test_expect is TestExpect.XFAILURE:
-                    return
-
-                seen_failed[device_type].setdefault(op_name, set()).add(dtype)
-
-                if COLLECT_EXPECT:
-                    return
-
-                raise e
-            else:
-                # with open("test_output.txt", "a") as f:
-                #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-                seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
-
-            if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                if FAIL_ON_SUCCESS:
-                    raise RuntimeError(
-                        f"unexpected success {op_name}, {dtype}, {device_type}"
+                    self.check_model(
+                        fn,
+                        args,
+                        kwargs,
+                        check_lowp=False,
+                        nopython=True,
+                        **additional_kwargs,
                     )
+
+        except Exception as e:
+
+            if test_expect is TestExpect.XFAILURE:
+                return
+
+            seen_failed[device_type].setdefault(op_name, set()).add(dtype)
+
+            if COLLECT_EXPECT:
+                return
+
+            known_failure = False
+            if dtype in inductor_should_fail_with_exception[device_type].get(
+                op_name, set()
+            ):
+                failure = inductor_should_fail_with_exception[device_type][op_name][
+                    dtype
+                ]
+                if failure in str(e):
+                    known_failure = True
+            if not known_failure:
+                raise e
+
+        # with open("test_output.txt", "a") as f:
+        #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+        seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
+
+        if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
+            if FAIL_ON_SUCCESS:
+                raise RuntimeError(
+                    f"unexpected success {op_name}, {dtype}, {device_type}"
+                )
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals())

@@ -11,10 +11,12 @@ from functools import partial
 from typing import Any
 from typing import Callable
 from typing import ClassVar
+from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Set
 from typing import Tuple
+from typing import Union
 from unittest.mock import patch
 
 import numpy
@@ -23,6 +25,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from sympy import Expr
 from sympy import Integer
+from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_float_dtype
 
 from . import config
@@ -217,13 +220,20 @@ class CeilDiv(sympy.Function):
             return IndexingDiv(base + (divisor - 1), divisor)
 
 
-def is_triton(x):
-    # TODO(jansel): a config check once we have multi-backend
+def get_device_type(x):
     if getattr(x, "get_device", None):
-        return is_triton(x.get_device())
+        return get_device_type(x.get_device())
     if isinstance(x, torch.device):
-        return x.type == "cuda"
-    return False
+        return x.type
+    return None
+
+
+def is_triton(x):
+    return get_device_type(x) == "cuda"
+
+
+def is_cpu(x):
+    return get_device_type(x) == "cpu"
 
 
 @dataclasses.dataclass
@@ -686,9 +696,17 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            def fn(index):
-                reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
-                return inner_fn(index, reduction_index)
+            if reduction_type in ("argmin", "argmax"):
+
+                def fn(index):
+                    assert len(index) <= 1
+                    return 0
+
+            else:
+
+                def fn(index):
+                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    return inner_fn(index, reduction_index)
 
             return Pointwise.create(device, dst_dtype, fn, ranges)
 
@@ -752,9 +770,20 @@ class Reduction(Loops):
     @staticmethod
     def default_value(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
-            return float("-inf") if is_float_dtype(dtype) else torch.iinfo(dtype).min
+            if is_float_dtype(dtype):
+                return float("-inf")
+            elif is_boolean_dtype(dtype):
+                return 0
+            else:
+                return torch.iinfo(dtype).min
         if reduction_type in {"min", "argmin"}:
-            return float("inf") if is_float_dtype(dtype) else torch.iinfo(dtype).max
+            if is_float_dtype(dtype):
+                return float("inf")
+            elif is_boolean_dtype(dtype):
+                return 1
+            else:
+                return torch.iinfo(dtype).max
+
         return {
             "sum": 0,
             "any": 0,
@@ -1032,7 +1061,7 @@ class PermuteView(BaseView):
 
     @classmethod
     def create(cls, x, dims):
-        assert set(dims) == set(range(len(dims)))
+        assert set(cls._map_neg_dims(dims)) == set(range(len(dims)))
 
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
@@ -1047,8 +1076,12 @@ class PermuteView(BaseView):
 
         return PermuteView(x, dims)
 
+    @classmethod
+    def _map_neg_dims(cls, dims):
+        return [dim if dim >= 0 else len(dims) + dim for dim in dims]
+
     def get_size(self):
-        assert set(self.dims) == set(range(len(self.dims)))
+        assert set(self._map_neg_dims(self.dims)) == set(range(len(self.dims)))
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
@@ -2167,6 +2200,7 @@ class ConcatKernel(NopKernel):
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
+    kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
 
     def decide_layout(self):
@@ -2306,6 +2340,12 @@ class ExternKernel(InputsKernel):
         args.extend(map(repr, self.constant_args))
         return args
 
+    def codegen_kwargs(self):
+        kwargs = []
+        if self.kwargs:
+            kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
+        return kwargs
+
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
@@ -2366,14 +2406,21 @@ class ExternKernelOut(ExternKernel):
 
     def codegen(self, wrapper):
         args = self.codegen_args()
+
+        kwargs = self.codegen_kwargs()
+        if kwargs:
+            args.extend(kwargs)
+
         if self.output_view:
             args.append(f"out={self.output_view.codegen_reference()}")
         else:
             args.append(f"out={self.codegen_reference()}")
         wrapper.writeline(f"{self.kernel}({', '.join(args)})")
 
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super().__init__(None, layout, self.unwrap_storage(inputs), constant_args)
+    def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
+        super().__init__(
+            None, layout, self.unwrap_storage(inputs), constant_args, kwargs
+        )
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
 
@@ -2426,6 +2473,42 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class IndexPutFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation and indices properly
+    """
+
+    kernel = "aten.index_put_"
+
+    def codegen(self, wrapper):
+        (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
+        indices = []
+        iter_valid_indices = iter(valid_indices)
+        for i, _ in enumerate(self.indices):
+            if self.indices[i] is not None:
+                indices.append(next(iter_valid_indices))
+            else:
+                indices.append("None")
+        wrapper.writeline(
+            f"{self.kernel}({x}, [{','.join(indices)}], {values}, {repr(self.constant_args[0])})"
+        )
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, x, indices, values, accumulate):
+        self.indices = indices
+        valid_indices = [i for i in indices if i is not None]
+        tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            [accumulate],
         )
         self.name = V.graph.register_buffer(self)
 
@@ -2544,12 +2627,12 @@ class MatrixMultiply(ExternKernelOut):
 
 
 class MatrixMultiplyAdd(ExternKernelOut):
-    def __init__(self, layout, inputs, constant_args=(), output_view=None):
-        super().__init__(layout, inputs, constant_args, output_view)
+    def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
+        super().__init__(layout, inputs, constant_args, kwargs, output_view)
         self.kernel = "aten.addmm.out"
 
     @classmethod
-    def create(cls, inp, a, b):
+    def create(cls, inp, a, b, beta, alpha):
         m, k1 = a.get_size()
         k2, n = b.get_size()
         V.graph.sizevars.guard_equals(k1, k2)
@@ -2565,6 +2648,7 @@ class MatrixMultiplyAdd(ExternKernelOut):
                 size=[m] + [n],
             ),
             inputs=[inp, a, b],
+            kwargs={"beta": beta, "alpha": alpha},
         )
 
 
@@ -2921,7 +3005,7 @@ class Convolution(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.kernel == "triton_ops.conv":
             wrapper.header.writeline(
-                f"import torchinductor.triton_ops.conv as {self.kernel}"
+                f"import {config.inductor_import}.triton_ops.conv as {self.kernel}"
             )
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
@@ -3285,12 +3369,22 @@ class StorageBox(MutableBox):
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
         """
+
+        def should_realize_on_cpu(loops: Union[Pointwise, Reduction]):
+            """
+            The heuristic for realizing reused result of heavy ops on cpu
+            """
+            heavy_ops = ["exp"]  # a list of heavy ops
+            fn_str = loops.inner_fn_str()
+            return any([fn_str.startswith(op + "(") for op in heavy_ops])
+
         if (
             users > 1
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
+                or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
             self.realize()

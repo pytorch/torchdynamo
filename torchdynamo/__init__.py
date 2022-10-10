@@ -3,6 +3,7 @@ from . import convert_frame
 from . import eval_frame
 from . import resume_execution
 from .convert_frame import replay
+from .eval_frame import assume_constant_result
 from .eval_frame import disable
 from .eval_frame import explain
 from .eval_frame import export
@@ -16,6 +17,7 @@ from .utils import guard_failures
 from .utils import orig_code_map
 
 __all__ = [
+    "assume_constant_result",
     "optimize",
     "optimize_assert",
     "export",

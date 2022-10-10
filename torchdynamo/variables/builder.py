@@ -13,31 +13,33 @@ import numpy as np
 import torch
 from functorch.experimental.ops import PyOperator
 
-import torchdynamo
-from torchdynamo import replay_record
-
 from .. import config
 from .. import mutation_guard
+from .. import replay_record
 from .. import skipfiles
 from ..allowed_functions import is_allowed
 from ..allowed_functions import is_builtin_callable
 from ..allowed_functions import is_numpy
 from ..exc import unimplemented
 from ..guards import GuardBuilder
+from ..guards import GuardSource
 from ..side_effects import SideEffects
 from ..source import AttrSource
+from ..source import ConstantSource
 from ..source import GetItemSource
 from ..source import GlobalSource
 from ..source import GlobalWeakRefSource
 from ..source import RandomValueSource
 from ..source import Source
 from ..source import TupleIteratorGetItemSource
+from ..source import is_constant_source
 from ..utils import getfile
 from ..utils import global_key_name
 from ..utils import is_namedtuple
 from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype
+from ..utils import odict_values
 from ..utils import tuple_iterator
 from ..utils import tuple_iterator_getitem
 from ..utils import tuple_iterator_len
@@ -72,6 +74,7 @@ from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
 from .torch import tensor_dunder_fns
+from .torch import torch_special_class_types
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -81,6 +84,10 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
+
+    def __post_init__(self):
+        if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
+            raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -100,7 +107,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx: "torchdynamo.symbolic_convert.InstructionTranslatorBase",
+        tx,
         source: Source,
     ):
         super(VariableBuilder, self).__init__()
@@ -151,6 +158,7 @@ class VariableBuilder:
         return {
             tuple: TupleVariable,
             list: ListVariable,
+            odict_values: ListVariable,
             torch.nn.ParameterList: ListVariable,
             torch.nn.ModuleList: ListVariable,
         }[type(value)]
@@ -163,13 +171,18 @@ class VariableBuilder:
 
     def make_guards(self, *guards):
         source = self.get_source()
-        return {source.create_guard(guard) for guard in guards}
+        if (
+            isinstance(source, ConstantSource)
+            or source.guard_source() == GuardSource.CONSTANT
+        ):
+            return None
+        return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
-        elif istype(value, (tuple, list)) or is_namedtuple(value):
+        elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to
             # have a stricter match.
             if istype(value, (tuple, list)) and all(
@@ -265,11 +278,11 @@ class VariableBuilder:
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
             else:
-                return self.tx.output.add_submodule(
+                return self.tx.output.register_attr_or_module(
                     value,
                     self.name,
                     source=self.get_source(),
-                    # Guards are added inside add_submodule
+                    # Guards are added inside register_attr_or_module
                 )
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
@@ -345,6 +358,11 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
+        elif value in tensor_dunder_fns:
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif (
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
@@ -359,12 +377,12 @@ class VariableBuilder:
             return UserDefinedClassVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
+        elif value in tensor_dunder_fns:
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif istype(value, types.FunctionType):
-            if value in tensor_dunder_fns:
-                return TorchVariable(
-                    value,
-                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-                )
             return UserFunctionVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
@@ -416,6 +434,13 @@ class VariableBuilder:
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
             )
+        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
+            value.__self__, torch_special_class_types
+        ):
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -430,18 +455,28 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
-            return self.tx.output.add_submodule(
+            return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
                 source=self.get_source(),
-                # Guards are done inside add_submodule
+                # Guards are done inside register_attr_or_module
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), value, False)
+                )
             # Disable __torch_function__ to prevent cloning of `value` to hit
-            # user code.
+            # us
             with torch._C.DisableTorchFunction():
+                if is_constant_source(self.get_source()):
+                    return self.tx.output.register_attr_or_module(
+                        value,
+                        re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                        source=None,
+                        # Guards are added inside register_attr_or_module
+                    )
                 tensor_variable = TensorVariable.create(
                     tx=self.tx,
                     proxy=self.tx.output.create_graph_input(
@@ -466,11 +501,12 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
         else:
             wrapped_value = torch.tensor(value)
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), wrapped_value, True)
-            )
+            if not is_constant_source(self.get_source()):
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), wrapped_value, True)
+                )
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = {self.get_source().create_guard(GuardBuilder.TYPE_MATCH, True)}
+                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
             else:
                 options = {}

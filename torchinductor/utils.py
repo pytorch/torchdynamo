@@ -2,6 +2,7 @@ import collections
 import functools
 import operator
 import time
+from importlib import import_module
 from typing import Any
 from typing import Dict
 from typing import List
@@ -9,15 +10,26 @@ from typing import List
 import numpy as np
 import sympy
 import torch
-from torch.cuda import synchronize
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.immutable_collections import immutable_list
 
+from . import config
+
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+
+# We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
+dynamo_config = import_module(f"{config.dynamo_import}.config")
+dynamo_debug_utils = import_module(f"{config.dynamo_import}.debug_utils")
+dynamo_logging = import_module(f"{config.dynamo_import}.logging")
+dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
+dynamo_testing = import_module(f"{config.dynamo_import}.testing")
+dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
 
 @functools.lru_cache(None)
 def has_triton():
+    if not torch.cuda.is_available():
+        return False
     try:
         import triton
 
@@ -34,16 +46,6 @@ def has_torchvision_roi_align():
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
-    except (ImportError, ModuleNotFoundError):
-        return False
-
-
-@functools.lru_cache(None)
-def has_triton_libdevice():
-    try:
-        from triton.language import libdevice
-
-        return libdevice is not None
     except (ImportError, ModuleNotFoundError):
         return False
 
@@ -91,6 +93,11 @@ def gen_gm_and_inputs(target, args, kwargs):
 
     gm = torch.fx.GraphModule({}, g)
     return gm, a_args
+
+
+def synchronize():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 
 def timed(model, example_inputs, times=1):

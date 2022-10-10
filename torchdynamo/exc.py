@@ -1,8 +1,7 @@
-import dataclasses
 import os
 import textwrap
 
-from torchdynamo.utils import counters
+from .utils import counters
 
 
 class TorchDynamoException(RuntimeError):
@@ -23,11 +22,6 @@ class SkipFrame(TorchDynamoException):
 
 class TorchRuntimeError(TorchDynamoException):
     pass
-
-
-@dataclasses.dataclass
-class FakeTensorError(TorchDynamoException):
-    reason: str
 
 
 class ResetRequired(TorchDynamoException):

@@ -1,6 +1,7 @@
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable
+from .constant import EnumVariable
 from .dicts import ConstDictVariable
 from .dicts import DataClassVariable
 from .dicts import DefaultDictVariable
@@ -50,6 +51,7 @@ __all__ = [
     "ContextWrappingVariable",
     "DataClassVariable",
     "DefaultDictVariable",
+    "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",

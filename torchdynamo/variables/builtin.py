@@ -11,19 +11,16 @@ from typing import List
 import numpy as np
 import torch
 
-from torchdynamo.guards import GuardBuilder
-from torchdynamo.replay_record import DummyModule
-from torchdynamo.variables.dicts import ConstDictVariable
-from torchdynamo.variables.tensor import DynamicShapeVariable
-from torchdynamo.variables.tensor import FakeItemVariable
-
 from .. import config
 from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import Unsupported
 from ..exc import unimplemented
+from ..guards import GuardBuilder
+from ..replay_record import DummyModule
 from ..source import AttrSource
 from ..source import TypeSource
+from ..source import is_constant_source
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
@@ -31,6 +28,9 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from .base import MutableLocal
 from .base import VariableTracker
+from .dicts import ConstDictVariable
+from .tensor import DynamicShapeVariable
+from .tensor import FakeItemVariable
 
 log = logging.getLogger(__name__)
 
@@ -325,7 +325,6 @@ class BuiltinVariable(VariableTracker):
             return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
-
         if handler:
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
@@ -456,8 +455,8 @@ class BuiltinVariable(VariableTracker):
             )
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
-            if obj.source:
-                guards.add(obj.source.create_guard(GuardBuilder.LIST_LENGTH))
+            if obj.source and not is_constant_source(obj.source):
+                guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
@@ -662,8 +661,17 @@ class BuiltinVariable(VariableTracker):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
             if source:
-                example_value = obj.proxy.node.meta["example_value"].grad
-                return VariableBuilder(tx, source)(example_value).add_options(options)
+                # We are going to be raising this tensor as grapharg. So, ensure
+                # that we have real grad value instead of fake tensor value.
+                # Walk through the inputs of the subgraph and find if we already
+                # have the original tensor stored in the graphargs.
+                for grapharg in tx.output.graphargs:
+                    if grapharg.source == source.base:
+                        example_value = grapharg.example.grad
+                        return VariableBuilder(tx, source)(example_value).add_options(
+                            options
+                        )
+                unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
         elif isinstance(

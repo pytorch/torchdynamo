@@ -7,8 +7,6 @@ from typing import List
 
 import torch
 
-from torchdynamo.variables.constant import ConstantVariable
-
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
@@ -18,6 +16,7 @@ from ..source import GlobalWeakRefSource
 from ..utils import global_key_name
 from .base import MutableLocal
 from .base import VariableTracker
+from .constant import ConstantVariable
 from .tensor import TensorVariable
 
 

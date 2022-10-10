@@ -37,20 +37,28 @@ bugs and rough edges.
 
 Python 3.8 is recommended.
 Python 3.7 through 3.10 are supported and tested.
+Make sure to have a development version of python installed locally as well.
 
-TorchDynamo requires the latest development/nightly build of PyTorch or
-building [PyTorch from source]. TorchDynamo also requires [functorch]
-from the PyTorch repository.  The Makefile target `make setup_nightly_gpu`
+### Install nightly binaries
+
+TorchDynamo is evolving very quickly and so we only provide binaries based
+on a nightly version of PyTorch.
+To use GPU back ends (and in particular Triton), please make sure that the cuda
+that you have installed locally matches the PyTorch version you are running. For
+the command below, you will need CUDA 11.7.
+
+```shell
+pip3 install --pre torch==1.13.0.dev20221006+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+pip install -U "git+https://github.com/openai/triton@998fd5f9afe166247f441999c605dfe624ca9331#subdirectory=python"
+pip install -U "git+https://github.com/pytorch/torchdynamo"
+```
+
+### Install from local source
+
+You can also install PyTorch, Triton and or Dynamo from source at the same
+commits as the ones listed above. The Makefile target `make setup_nightly_gpu`
 contain the commands used by our CI to setup dependencies.
-
-The [1.12 branch] contains an older snapshot of TorchDynamo that works
-on PyTorch 1.12.  However, this is missing the latest features and
-not recommended.
-
-[PyTorch from source]: https://github.com/pytorch/pytorch#from-source
-[1.12 branch]: https://github.com/pytorch/torchdynamo/tree/1.12
-[functorch]: https://github.com/pytorch/pytorch/tree/master/functorch
-[hosted on pypi]: https://pypi.org/project/torchdynamo/
+Note that only CUDA 11.6+ is officially supported.
 
 Other development requirements can be installed with:
 ```shell

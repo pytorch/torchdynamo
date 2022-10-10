@@ -9,9 +9,8 @@ import tempfile
 import numpy as np
 import torch
 
-import torchdynamo.convert_frame
-from torchdynamo.optimizations.subgraph import SubGraph
-from torchdynamo.utils import identity
+from ..utils import identity
+from .subgraph import SubGraph
 
 log = logging.getLogger(__name__)
 BACKENDS = dict()
@@ -26,6 +25,15 @@ _NP_DTYPE = {
     torch.int64: np.longlong,
     torch.bool: np.bool_,
 }
+
+
+def register_backend(fn):
+    @functools.wraps(fn)
+    def inner(gm, example_inputs, **kwargs):
+        return fn(gm, example_inputs, **kwargs)
+
+    BACKENDS[fn.__name__] = inner
+    return inner
 
 
 def create_backend(fn):
@@ -544,12 +552,14 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 def aot_autograd(subgraph, **kwargs):
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return torchdynamo.disable(bw_compiler(*args, **kwargs))
+        return disable(bw_compiler(*args, **kwargs))
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
 
     from functorch.compile import aot_module_simplified
+
+    from .. import disable
 
     return aot_module_simplified(subgraph.model, **kwargs)
 

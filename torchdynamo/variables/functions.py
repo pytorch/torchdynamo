@@ -1,14 +1,10 @@
-import copy
+import enum
 import functools
 import inspect
 import itertools
 import types
 from typing import Dict
 from typing import List
-
-import torch
-
-import torchdynamo.side_effects
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
@@ -30,6 +26,8 @@ def wrap_bound_arg(val, options):
         return cls([wrap_bound_arg(x, options) for x in val], **options)
     elif variables.ConstantVariable.is_literal(val):
         return variables.ConstantVariable(val, **options)
+    elif isinstance(val, enum.Enum):
+        return variables.EnumVariable(val, **options)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
@@ -44,7 +42,7 @@ def wrap_args_kwargs(result, options):
 
 def init_cellvars(parent, result, code):
     closure_cells = dict()
-    side_effects: torchdynamo.side_effects.SideEffects = parent.output.side_effects
+    side_effects = parent.output.side_effects
 
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
@@ -78,8 +76,17 @@ class BaseUserFunctionVariable(VariableTracker):
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
-    def __init__(self, fn, **kwargs):
+    def __init__(self, fn, is_constant=False, **kwargs):
         super(UserFunctionVariable, self).__init__(**kwargs)
+        if (
+            hasattr(fn, "_dynamo_marked_constant")
+            and getattr(fn, "_dynamo_marked_constant") is True
+        ):
+            # This method should be treated as a constant for the purposes of compilation
+            self.is_constant = True
+        else:
+            self.is_constant = False
+
         assert isinstance(
             fn, types.FunctionType
         ), f"expected FunctionType found {typestr(fn)} {fn}"
@@ -109,6 +116,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def bind_args(self, parent, args, kwargs):
+        assert not self.is_constant
         options = VariableTracker.propagate([self])
         wrap = functools.partial(wrap_bound_arg, options=options)
 
@@ -180,18 +188,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # handle copy.copy and copy.deepcopy on tensors
-        if self.fn is copy.copy or self.fn is copy.deepcopy:
-            if len(args) != 1:
-                unimplemented("copy.copy/copy.deepcopy does not have 1 argument")
-            if isinstance(args[0], variables.TensorVariable):
-                if self.fn is copy.copy:
-                    return args[0]
-                elif self.fn is copy.deepcopy:
-                    return variables.TorchVariable(torch.clone).call_function(
-                        tx, args, kwargs
-                    )
-            unimplemented("copy.copy/copy.deepcopy called on non-tensor")
+        if self.is_constant:
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return invoke_and_store_as_constant(
+                tx, self.fn, self.get_name(), options, args, kwargs
+            )
 
         return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
 
@@ -215,12 +216,14 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if isinstance(self.obj, variables.NNModuleVariable) and getattr(
-            self.fn, "__module__", ""
-        ).startswith("torch.nn."):
-            return self.obj.call_method(tx, self.fn.__name__, args, kwargs).add_options(
-                self
-            )
+        if (
+            isinstance(self.obj, variables.NNModuleVariable)
+            and getattr(self.fn, "__module__", "").startswith("torch.nn.")
+            or self.is_constant
+        ):
+            return self.obj.call_method(
+                tx, self.fn.__name__, args, kwargs, constant=self.is_constant
+            ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
@@ -261,6 +264,22 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         result = super().call_function(tx, args, kwargs)
         self.context.exit(tx)
         return result
+
+
+def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
+    def convert(x):
+        if isinstance(x, variables.TensorVariable):
+            return x.proxy.node.meta["example_value"]
+        return x.as_python_constant()
+
+    args = [convert(x) for x in args]
+    kwargs = {k: convert(v) for k, v in kwargs.items()}
+    res = fn(*args, **kwargs)
+    return tx.output.register_attr_or_module(
+        res,
+        name,
+        **options,
+    )
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):

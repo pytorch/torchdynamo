@@ -10,21 +10,23 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
-from torchdynamo.optimizations.backends import aot_autograd
-from torchdynamo.optimizations.normalize import normalize_ir
-from torchdynamo.utils import dynamo_timed
-from torchdynamo.utils import preserve_rng_state
-
 from . import config
 from . import overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .utils import dynamo_logging
+from .utils import dynamo_optimizations
+from .utils import dynamo_utils
 from .utils import has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
+
+aot_autograd = dynamo_optimizations.backends.aot_autograd
+normalize_ir = dynamo_optimizations.normalize.normalize_ir
+is_aot_autograd_safe_to_run = dynamo_optimizations.training.is_aot_autograd_safe_to_run
 
 
 @dataclasses.dataclass
@@ -61,6 +63,15 @@ def complex_memory_overlap(t):
     return torch._debug_has_internal_overlap(indexed_tensor) != 0
 
 
+def is_unspec_input(t):
+    return t.device.type == "cpu" and t.dim() == 0
+
+
+@functools.lru_cache(None)
+def _step_logger():
+    return dynamo_logging.get_step_logger(log)
+
+
 @DebugContext.wrap
 @no_dispatch()
 def compile_fx_inner(
@@ -69,8 +80,18 @@ def compile_fx_inner(
     cudagraphs=None,
     num_fixed=0,
     is_backward=False,
+    graph_id=None,
 ):
-    log.info("Compiling %s graph", "BACKWARDS" if is_backward else "FORWARDS")
+    if dynamo_utils.count_calls(gm.graph) == 0:
+        return gm
+
+    _step_logger()(
+        logging.INFO,
+        "torchinductor compiling "
+        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
+        f"graph {graph_id}",
+    )
+
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
@@ -106,7 +127,14 @@ def compile_fx_inner(
             elif complex_memory_overlap_inputs:
                 log.warning("skipping cudagraphs due to complex input striding")
 
-    return align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    _step_logger()(
+        logging.INFO,
+        "torchinductor done compiling "
+        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
+        f"graph {graph_id}",
+    )
+    return result
 
 
 def clone_preserve_strides(x):
@@ -134,12 +162,13 @@ def align_inputs(model, inputs, static_input_idxs=()):
                 if isinstance(new_inputs, tuple):
                     new_inputs = list(new_inputs)
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
+        new_inputs = [x.to("cuda") if is_unspec_input(x) else x for x in new_inputs]
         return model(*new_inputs)
 
     return run
 
 
-@dynamo_timed
+@dynamo_utils.dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
@@ -150,7 +179,7 @@ def cudagraphify(model, inputs, static_input_idxs=()):
     def run(*new_inputs):
         nonlocal compiled_fn
         if compiled_fn is None:
-            with preserve_rng_state():
+            with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
 
         return compiled_fn(*new_inputs)
@@ -190,6 +219,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
         return torch.as_strided(buffer, x.size(), x.stride())
 
     assert isinstance(inputs, (list, tuple))
+    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
+    inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
+
     static_inputs = [
         static_input(x) if idx not in static_input_idxs else x
         for idx, x in enumerate(inputs)
@@ -272,8 +304,16 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+_graph_counter = 0
+
+
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
+
+    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
+        log.warning("Aot Autograd is not safe to run, so falling back to eager")
+        return model_
+
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
@@ -284,14 +324,22 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    @dynamo_timed
+    global _graph_counter
+    graph_id = _graph_counter
+    _graph_counter += 1
+
+    @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
         return compile_fx_inner(
-            model, example_inputs, num_fixed=fixed, cudagraphs=cudagraphs
+            model,
+            example_inputs,
+            num_fixed=fixed,
+            cudagraphs=cudagraphs,
+            graph_id=graph_id,
         )
 
-    @dynamo_timed
+    @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
         return compile_fx_inner(
@@ -300,9 +348,14 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             is_backward=True,
+            graph_id=graph_id,
         )
 
     with overrides.patch_functions():
+
+        # TODO: can add logging before/after the call to create_aot_dispatcher_function
+        # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+        # once torchdynamo is merged into pytorch
         return aot_autograd(
             model_,
             example_inputs_,

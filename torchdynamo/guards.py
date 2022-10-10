@@ -20,9 +20,8 @@ from typing import Set
 import numpy as np
 import torch
 
-from torchdynamo import convert_frame
-
 from . import config
+from . import convert_frame
 from . import mutation_guard
 from ._guards import TensorGuards
 from ._guards import check_obj_id
@@ -63,6 +62,7 @@ class GuardSource(enum.Enum):
     GLOBAL = 1
     LOCAL_NN_MODULE = 2
     GLOBAL_NN_MODULE = 3
+    CONSTANT = 4
 
     def select(self, locals_, globals_):
         if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):

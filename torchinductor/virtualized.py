@@ -6,8 +6,7 @@ import sympy
 from torch.fx.graph import inplace_methods
 from torch.fx.graph import magic_methods
 
-import torchdynamo
-from torchinductor.utils import sympy_str
+from .utils import sympy_str
 
 threadlocal = local()
 
@@ -120,17 +119,17 @@ class _V:
         return ops._get_handler()
 
     @property
-    def graph(self) -> "torchdynamo.graph.Graph":
+    def graph(self):
         """The graph currently being generated"""
         return _graph._get_handler()
 
     @property
-    def kernel(self) -> "torchdynamo.codegen.common.Kernel":
+    def kernel(self):
         """The kernel currently being generated"""
         return _kernel._get_handler()
 
     @property
-    def debug(self) -> "torchdynamo.debug.DebugContext":
+    def debug(self):
         return _debug._get_handler()
 
 

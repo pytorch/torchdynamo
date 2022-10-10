@@ -7,8 +7,6 @@ from typing import List
 
 import torch.nn
 
-import torchdynamo
-
 from .bytecode_transformation import Instruction
 from .bytecode_transformation import create_instruction
 from .exc import unimplemented
@@ -42,7 +40,7 @@ class PyCodegen(object):
 
     def __init__(
         self,
-        tx: "torchdynamo.symbolic_convert.InstructionTranslator" = None,
+        tx=None,
         root: torch.nn.Module = None,
         graph_output_var: str = None,
         tempvars=None,

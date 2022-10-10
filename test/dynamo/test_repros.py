@@ -885,7 +885,7 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(14, 11))
+        self.assertEqual(cnt.op_count, ifdyn(13, 11))
 
     def test_slicing_dynamic_shape(self):
         def fn(y):
@@ -1029,8 +1029,9 @@ class ReproTests(torchdynamo.testing.TestCase):
 
         before, after = opt_fn()
         self.assertTrue(same(before, after))
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)  # rand, rand
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 4)  # rand, rand
+        graph, _ = torchdynamo.export(fn)
 
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
@@ -1607,6 +1608,25 @@ class ReproTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize(cnt, nopython=True)(fn)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
+
+    # This doesn't work without fake tensors but I don't care
+    @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
+    def test_issue1466_size_aot_autograd(self):
+        def fn(x):
+            # do a tensor op and a size compute
+            y = x * 2
+            x_size = x.size()
+            # trigger a graph break
+            print("arf")
+            # use the tensor op and size compute
+            z = y.view(x_size) + 1
+            return z
+
+        x = torch.randn(2, 3, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torchdynamo.optimize("aot_eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
     def test_ellipsis(self):
         class Repro(torch.nn.Module):

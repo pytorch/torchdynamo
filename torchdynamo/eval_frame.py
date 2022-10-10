@@ -8,6 +8,7 @@ import threading
 import traceback
 import types
 import warnings
+from importlib import import_module
 from unittest.mock import patch
 
 import torch
@@ -15,20 +16,18 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-import torchdynamo
-from torchdynamo.debug_utils import wrap_backend_debug
-from torchdynamo.optimizations.distributed import DDPOptimizer
-from torchdynamo.utils import checkpoint_params
-from torchdynamo.utils import clone_inputs
-from torchdynamo.utils import compile_times
-from torchdynamo.utils import same
-
 from . import config
 from . import convert_frame
+from . import logging as torchdynamo_logging
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
+from .optimizations.distributed import DDPOptimizer
+from .utils import checkpoint_params
+from .utils import clone_inputs
+from .utils import compile_times
+from .utils import same
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from torchdynamo import reset
+        from . import reset
 
         reset()
         log.warning("could not determine __code__ for %s", f)
@@ -89,6 +88,11 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -96,6 +100,7 @@ class _TorchDynamoContext:
         on_enter=nothing,
         backend_ctx_ctor=null_context,
         patch_fn=nothing,
+        first_ctx=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -103,6 +108,7 @@ class _TorchDynamoContext:
         self.prior = unset
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
+        self.first_ctx = first_ctx
         patch_fn()
 
     def __enter__(self):
@@ -158,6 +164,9 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            if self.first_ctx:
+                _step_logger()(logging.INFO, "torchdynamo begin tracing")
+
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
@@ -167,6 +176,8 @@ class _TorchDynamoContext:
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
+                if self.first_ctx:
+                    _step_logger()(logging.INFO, "torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -187,7 +198,7 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor):
+    def __init__(self, callback, backend_ctx_ctor, first_ctx=False):
         def on_enter():
             global most_recent_backend
             if (
@@ -204,6 +215,7 @@ class OptimizeContext(_TorchDynamoContext):
             on_enter=on_enter,
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
+            first_ctx=first_ctx,
         )
 
 
@@ -256,7 +268,9 @@ def catch_errors_wrapper(callback):
 
 def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
     return OptimizeContext(
-        catch_errors_wrapper(compile_fn), backend_ctx_ctor=backend_ctx_ctor
+        catch_errors_wrapper(compile_fn),
+        backend_ctx_ctor=backend_ctx_ctor,
+        first_ctx=True,
     )
 
 
@@ -302,18 +316,23 @@ class WrapperBackend:
 
 
 def get_compiler_fn(compiler_fn):
-    """Expand backend strings to functions"""
-    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
-    if compiler_fn == "inductor":
-        from torchinductor.compile_fx import compile_fx
+    from .debug_utils import wrap_backend_debug
 
-        compiler_fn = compile_fx
+    compiler_str = compiler_fn if isinstance(compiler_fn, str) else None
+    compiler_fn = lookup_backend(compiler_fn)
+    return wrap_backend_debug(compiler_fn, compiler_str)
+
+
+@functools.lru_cache(1)
+def lookup_backend(compiler_fn):
+    """Expand backend strings to functions"""
+    if compiler_fn == "inductor":
+        compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
     elif isinstance(compiler_fn, str):
         from .optimizations import BACKENDS
 
         compiler_fn = BACKENDS[compiler_fn]
-
-    return wrap_backend_debug(compiler_fn, compiler_str)
+    return compiler_fn
 
 
 class _NullDecorator(contextlib.nullcontext):
@@ -367,7 +386,9 @@ def optimize(
 @patch("torchdynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    torchdynamo.reset()
+    from . import reset
+
+    reset()
 
     out_guards = []
     graphs = []
@@ -427,11 +448,17 @@ def explain(f, *args, **kwargs):
     explanation += compile_times()
 
     # TODO(voz): Do we want a decorator for this?
-    torchdynamo.reset()
+    reset()
     return explanation, out_guards, graphs, ops_per_graph, break_reasons
 
 
-def export(f, *args, aten_graph=False, **kwargs):
+def export(
+    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+):
+    if decomposition_table is not None or tracing_mode != "real":
+        assert (
+            aten_graph
+        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
     f = innermost_fn(f)
 
     graph = None
@@ -547,13 +574,25 @@ def export(f, *args, aten_graph=False, **kwargs):
             with torch.fx.traceback.override_stack_trace():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(graph_with_interpreter)(*graph_captured_input)
+        graph = make_fx(
+            graph_with_interpreter,
+            decomposition_table=decomposition_table,
+            tracing_mode=tracing_mode,
+        )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
 
     return (new_graph, out_guards)
+
+
+def assume_constant_result(fn):
+    setattr(fn, "_dynamo_marked_constant", True)
+    assert (
+        not config.fake_tensor_propagation
+    ), "Constant result capture is not supported with fake tensors."
+    return fn
 
 
 def optimize_assert(backend, *, guard_export_fn=None, export=False):

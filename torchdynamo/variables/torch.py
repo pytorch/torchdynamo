@@ -8,17 +8,12 @@ import numpy
 import torch._C
 import torch.nn
 
-from torchdynamo.source import GetItemSource
-from torchdynamo.source import NNModuleSource
-from torchdynamo.variables.lists import ListVariable
-from torchdynamo.variables.lists import TupleVariable
-from torchdynamo.variables.misc import AutocastModeVariable
-from torchdynamo.variables.misc import AutogradProfilerContextWrapperVariable
-
 from .. import config
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
+from ..source import GetItemSource
+from ..source import NNModuleSource
 from ..utils import check_constant_args
 from ..utils import check_unspec_python_args
 from ..utils import istype
@@ -27,13 +22,75 @@ from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
 from ..utils import tensortype_to_dtype
 from .base import VariableTracker
+from .lists import ListVariable
+from .lists import TupleVariable
+from .misc import AutocastModeVariable
+from .misc import ProfilerContextWrapperVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 
+# TODO(voz): Maybe rename these later
 tensor_dunder_fns = [
     torch.Tensor.__rmatmul__,
+    torch.Tensor.__rmod__,
+    torch.Tensor.__rpow__,
+    torch.Tensor.__rsub__,
+    torch._C._TensorBase.__radd__,
+    torch._C._TensorBase.__rmul__,
+    torch._C._TensorBase.__ror__,
+    torch._C._TensorBase.__rxor__,
+    torch._C._TensorBase.__rand__,
 ]
+
+torch_special_class_types = (torch._C.Generator,)
+
+
+# TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
+def remap_as_fn___radd__(*args):
+    return torch._C._TensorBase.__radd__(*args)
+
+
+def remap_as_fn___rmul__(*args):
+    return torch._C._TensorBase.__rmul__(*args)
+
+
+def remap_as_fn___ror__(*args):
+    return torch._C._TensorBase.__ror__(*args)
+
+
+def remap_as_fn___rxor__(*args):
+    return torch._C._TensorBase.__rxor__(*args)
+
+
+def remap_as_fn___rand__(*args):
+    return torch._C._TensorBase.__rand__(*args)
+
+
+tensor_dunder_fns_remap = {
+    torch._C._TensorBase.__radd__: remap_as_fn___radd__,
+    torch._C._TensorBase.__rmul__: remap_as_fn___rmul__,
+    torch._C._TensorBase.__ror__: remap_as_fn___ror__,
+    torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
+    torch._C._TensorBase.__rand__: remap_as_fn___rand__,
+}
+
+
+try:
+    # Wed need to monkeypatch transformers here, sadly.
+    # TODO(voz): Upstream to transformers lib
+    import transformers
+
+    def _dynamo_overriden_transformers_eq(self, other):
+        if not hasattr(other, "__dict__"):
+            return False
+        return self.__dict__ == other.__dict__
+
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
+except ImportError:
+    pass
 
 
 class TorchVariable(VariableTracker):
@@ -42,6 +99,8 @@ class TorchVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super(TorchVariable, self).__init__(**kwargs)
 
+        if value in tensor_dunder_fns_remap:
+            value = tensor_dunder_fns_remap[value]
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -63,6 +122,8 @@ class TorchVariable(VariableTracker):
             self_should_be_none, type(torch._C._get_tracing_state.__self__)
         ):
             # some _C functions have __self__ as a null capsule
+            pass
+        elif isinstance(self_should_be_none, torch_special_class_types):
             pass
         else:
             assert False, f"{value} found with __self__ set"
@@ -212,17 +273,67 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.amp.autocast_mode.autocast:
             return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
-        elif self.value is torch.autograd.profiler.profile:
-            if len(args) == 0 or len(args) > 0 and args[0]:
-                log.warning("Profiler will be ignored")
-            return AutogradProfilerContextWrapperVariable(**options)
-        elif self.value is torch.autograd.profiler.record_function:
-            assert len(args) == 1
+        elif self.value in (
+            torch.profiler.profile,
+            torch.profiler.record_function,
+            torch.autograd.profiler.profile,
+            torch.autograd.profiler.record_function,
+        ):
             log.warning("Profiler will be ignored")
-            return AutogradProfilerContextWrapperVariable(**options)
+            return ProfilerContextWrapperVariable(**options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        if (
+            self.value.__name__ == "get_state"
+            and hasattr(self.value, "__self__")
+            and isinstance(self.value.__self__, torch._C.Generator)
+        ):
+
+            def get_state_from_generator():
+                return self.value()
+
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    get_state_from_generator,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                example_value=self.value(),
+                **options,
+            )
+        if (
+            self.value.__name__ == "set_state"
+            and hasattr(self.value, "__self__")
+            and isinstance(self.value.__self__, torch._C.Generator)
+        ):
+            assert len(args) == 1
+            assert isinstance(args[0], TensorVariable)
+
+            if config.fake_tensor_propagation:
+                # In fake tensor case, this state doesn't matter, but
+                # it needs to be valid to not segfault. Pull a real tensor out.
+                # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
+                # However, it is imperative to record the call_function in the graph with the true args
+                # (Not the fake example_value) - for the sake of graph correctness.
+                example_value = self.value.__self__.get_state()
+            else:
+                example_value = args[0].proxy.node.meta["example_value"]
+
+            self.value.__module__ = self.__module__
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                example_value=example_value,
+                **options,
+            )
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
@@ -459,9 +570,9 @@ class TorchPyOperator(VariableTracker):
                 return arg
 
         def register_as_subgraph(fn, name, args):
-            import torchdynamo
+            from .. import export
 
-            gm, guards = torchdynamo.export(fn, *args)
+            gm, guards = export(fn, *args)
 
             next_name = None
             i = 0
@@ -475,7 +586,7 @@ class TorchPyOperator(VariableTracker):
             gm.__name__ = next_name
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
-            tx.output.add_submodule(gm, next_name, source=src)
+            tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name, gm, guards
 
         # Get args as proxies
@@ -483,7 +594,7 @@ class TorchPyOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-            import torchdynamo.config as config
+            from .. import config
 
             if config.fake_tensor_propagation:
                 unimplemented("Fake tensor mode not yet supported for cond")
