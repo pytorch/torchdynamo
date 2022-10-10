@@ -54,20 +54,6 @@ commands:
             - torchbenchmark
 
 jobs:
-  cuda_check:
-    machine:
-      image: ubuntu-2004-cuda-11.4:202110-01
-    resource_class: gpu.nvidia.large
-    steps:
-      - checkout
-      - run:
-        name: Tests
-        command: |
-          echo $CUDA_HOME
-          nvcc --version
-      - store_test_results:
-          path: test-results
-  
   unit_test:
     machine:
       # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
@@ -82,8 +68,6 @@ jobs:
             source .circleci/setup_env.sh
             make develop
             mkdir test-results
-            which nvcc
-            nvcc --version
             python tools/verify_install.py
             pytest -v --junitxml=test-results/junit.xml -k "cuda and not TestInductorOpInfoCPU"
       - store_test_results:
@@ -645,7 +629,6 @@ jobs:
 workflows:
   gpu:
     jobs:
-      - cuda_check
       - unit_test
       - coverage
       - aot_eager_hf_inference
