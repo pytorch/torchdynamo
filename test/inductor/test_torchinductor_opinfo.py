@@ -107,6 +107,7 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "reciprocal": {b8, i32, i64},  # segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_unpack": {b8, f16, f32, f64, i32, i64},  # segfault
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
@@ -118,7 +119,7 @@ inductor_skips["cuda"] = {
     "masked.prod": {f16, f32, f64},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "broadcast_tensors": {f32},
+    "broadcast_tensors": {f16, f32, f64},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
     "erf": {f64},
@@ -127,6 +128,13 @@ inductor_skips["cuda"] = {
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
+    "nn.functional.poisson_nll_loss": {f64},
+    "nn.functional.selu": {f64},
+    "nn.functional.silu": {f64},
+    "nn.functional.tanhshrink": {f16, f64},
+    "nn.functional.conv_transpose3d": {f16, f64},
+    "nn.functional._scaled_dot_product_attention": {f64},
+    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
@@ -185,9 +193,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.irfftn": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
     "fft.rfft": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
     "fft.rfft2": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
+    "index_add": {f16}, # Inductor Exception - C++ compile error
     "fft.rfftn": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
-    "index_add": {f16, f32, f64}, # Inductor Exception - C++ compile error
-    "index_copy": {f16, f32, f64}, # Unclear
     "index_put": {f16, f32, f64}, # Fake Tensor Access - torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.index.Tensor
     "index_reduce": {f16, f32, f64}, # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor
     "istft": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
@@ -213,23 +220,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "min.reduction_no_dim": {f16}, # Inductor Exception - fp16 user-defined reduction
     "min.reduction_with_dim": {b8, f16}, 
     "multinomial": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "mvlgamma.mvlgamma_p_1": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
-    "mvlgamma.mvlgamma_p_3": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
-    "mvlgamma.mvlgamma_p_5": {f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
     "nan_to_num": {f16}, # Inductor Exception - C++ compile error
     "nanquantile": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
-    "nn.functional._scaled_dot_product_attention": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.avg_pool1d": {i64}, # Correctness -  AssertionError: Tensor-likes are not equal!
     "nn.functional.avg_pool2d": {i64},  # Correctness -  AssertionError: Tensor-likes are not equal!
     "nn.functional.adaptive_avg_pool2d": {f16}, # Unclear
     "nn.functional.ctc_loss": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten._ctc_loss.Tensor
-    "nn.functional.dropout": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.dropout2d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.dropout3d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.feature_alpha_dropout.with_train": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.fractional_max_pool2d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.fractional_max_pool3d": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.gaussian_nll_loss": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator
     "nn.functional.gelu": {f64},  # Correctness -  AssertionError: Tensor-likes are not equal!
     "nn.functional.huber_loss": {f16, f32, f64}, # Unclear
@@ -247,14 +243,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "quantile": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
     "rand_like": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "randint_like": {f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "randn": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "randn_like": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "repeat_interleave": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.repeat_interleave.Tensor
     "scatter_add": {f16}, # Inductor Exception - C++ compile error
-    "scatter_reduce.amax": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
-    "scatter_reduce.amin": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
-    "scatter_reduce.prod": {b8, f16, f32, f64, i32, i64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError AND # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor wit
+    "scatter_reduce.prod": {f16, f32, f64},
     "scatter_reduce.sum": {f16},  # Inductor Exception - C++ compile error
     "segment_reduce.lengths": {f16, f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
     "segment_reduce.offsets": {f16, f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
@@ -313,8 +305,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64}, # Complex Type - torch.complex32 / 64 / 128
     "fft.rfft2": {f16, f32, f64}, # Complex Type - torch.complex32 / 64 / 128
     "fft.rfftn": {f16, f32, f64}, # Complex Type - torch.complex32 / 64 / 128
-    "index_add": {f16, f32, f64}, # Unclear
-    "index_copy": {f16, f32, f64}, # Unclear
     "index_put": {f16, f32, f64}, # Fake Tensor Access - torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.index.Tensor
     "index_reduce": {f16, f32, f64}, # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor wit
     "istft": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator: aten.equal.default
@@ -341,20 +331,14 @@ inductor_expected_failures_single_sample["cuda"] = {
     "min.reduction_with_dim": {b8, i32, i64},  # Correctness - Tensor-likes are not Equal! / Bool is dtype mismatch.
     "multinomial": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.adaptive_avg_pool2d": {f16}, # Correctness - Tensor-likes are not close!
-    "nn.functional._scaled_dot_product_attention": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
+    "nn.functional._scaled_dot_product_attention": {f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.conv_transpose3d": {f16}, # Unclear
     "nn.functional.ctc_loss": {f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten._ctc_loss.Tensor
-    "nn.functional.dropout": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.dropout2d": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.dropout3d": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.grid_sample": {f16}, # Correctness - Tensor-likes are not close!
-    "nn.functional.feature_alpha_dropout.with_train": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.fractional_max_pool2d": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "nn.functional.fractional_max_pool3d": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.gaussian_nll_loss": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator
     "nn.functional.huber_loss": {f16, f32, f64}, # Unclear
     "nn.functional.one_hot": {i64}, # Graph Break - torchdynamo.exc.Unsupported: data dependent operator
+    "nn.functional.pairwise_distance": {f16, f32, f64},  # Inductor Exception - C++ compile error
     "nn.functional.rrelu": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "nonzero": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: nonzero
@@ -365,10 +349,10 @@ inductor_expected_failures_single_sample["cuda"] = {
     "polar": {f32, f64}, # Inductor Exception - NotImplementedError (Potentially due to complex)
     "rand_like": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "randint_like": {f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
-    "randn": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "randn_like": {f16, f32, f64}, # Graph Break - torchdynamo.exc.Unsupported: call_function in skip_files 
     "repeat_interleave": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shape operator: aten.repeat_interleave.Tensor
     "round.decimals_3": {f16}, # Correctness - Tensor-likes are not close!
+    "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64}, # Inductor Exception - torchdynamo.exc.TorchRuntimeError
     "segment_reduce.offsets": {f16, f32, f64}, # Inductor Exception - torchinductor.exc.LoweringException: AssertionError
     "sgn": {f16, f32, f64}, # Inductor Exception - NotImplementedError
@@ -382,7 +366,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique
     "unique_consecutive": {b8, f16, f32, f64, i32, i64}, # Graph Break - torchdynamo.exc.Unsupported: dynamic shapes: unique_consecutive
     "view_as_complex": {f16, f32, f64}, # Inductor Exception - NotImplementedError (Potentially due to complex)
-
 }
 
 inductor_should_fail_with_exception = defaultdict(dict)
@@ -394,8 +377,29 @@ inductor_should_fail_with_exception["cuda"] = {
     "__rpow__": {
         i32: "Pow input must be floating point.",
         i64: "Pow input must be floating point.",
+    },
+    "pow": {
+        i32: "Pow input must be floating point.",
+        i64: "Pow input must be floating point.",
     }
 }
+
+
+def wrapper_set_seed(op, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(*args, **kwargs)
+
+
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+
+# This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
+torchdynamo.variables.torch.tensor_dunder_fns.append(
+    torch.testing._internal.common_utils.disable_functorch
+)
+
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
     # the return value of empty is undefined
@@ -403,6 +407,7 @@ inductor_override_kwargs = {
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
+    "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
 }
 
@@ -493,7 +498,7 @@ class TestInductorOpInfo(TestCase):
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
-
+                # UNCOMMENT TO DEBUG SEGFAULTS
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
@@ -539,13 +544,12 @@ class TestInductorOpInfo(TestCase):
                 ]
                 if failure in str(e):
                     known_failure = True
-
             if not known_failure:
                 raise e
-        else:
-            # with open("test_output.txt", "a") as f:
-            #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-            seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
+
+        # with open("test_output.txt", "a") as f:
+        #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+        seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
         if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
             if FAIL_ON_SUCCESS:
