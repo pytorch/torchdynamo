@@ -454,6 +454,7 @@ class CppOverridesProxy(OpOverrides):
         else:
             return getattr(self.cpp_overrides, __name)
 
+
 class CppKernel(Kernel):
     overrides = CppOverridesProxy
     sexpr = cexpr
@@ -569,9 +570,9 @@ class CppKernel(Kernel):
             threads = torch.get_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
-        loops_nest_non_reduc, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
-            loops[self.reduction_depth :]
-        )
+        loops_nest_non_reduc, reductions = LoopNest(
+            loops[: self.reduction_depth]
+        ), LoopNest(loops[self.reduction_depth :])
         reductions.mark_reduction(self.reduction_vars)
 
         if config.cpp.simdlen:
@@ -716,8 +717,10 @@ class CppScheduling:
     def check_fast_vec(self, nodes):
         res = False
         with FastVecChecker():
+
             def get_index(*args, **kwargs):
                 return sympy.Symbol("dummy")
+
             _submodules = {"get_index": get_index}
 
             class PatchSubmodule:
@@ -729,7 +732,6 @@ class CppScheduling:
 
                 def __enter__(self):
                     node._body.submodules = _submodules
-
 
             for node in nodes:
                 with PatchSubmodule(node=node):
@@ -934,6 +936,7 @@ class LoopLevelWithTail(LoopLevel):
     def code_gen(self, main_loop_body, tail_loop_body):
         assert isinstance(main_loop_body, Kernel)
         assert isinstance(tail_loop_body, Kernel)
+
 
 @dataclasses.dataclass
 class LoopNest:
