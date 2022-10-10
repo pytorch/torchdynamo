@@ -130,7 +130,6 @@ inductor_skips["cuda"] = {
     "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.triplet_margin_loss": {f16},
     "special.ndtr": {f64},
-    #"log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
