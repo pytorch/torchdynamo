@@ -160,9 +160,9 @@ def _register_lowering(
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
         # kwargs tensors not supported yet
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+        keys = [k for k, x in kwargs.items() if isinstance(x, TensorBox)]
 
-        if (type_promotion_kind or convert_input_to_bool) and indices:
+        if (type_promotion_kind or convert_input_to_bool) and (indices or keys):
             if convert_input_to_bool:
                 dtype = torch.bool
             else:
@@ -170,24 +170,51 @@ def _register_lowering(
                 promoting_args = [
                     a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
                 ]
+                promoting_kwargs = [
+                    kwa
+                    for kwa in kwargs.values()
+                    if isinstance(kwa, Number) or hasattr(kwa, "get_dtype")
+                ]
+
                 dtype = get_promoted_dtype(
-                    *promoting_args, type_promotion_kind=type_promotion_kind
+                    *(promoting_args + promoting_kwargs),
+                    type_promotion_kind=type_promotion_kind,
                 )
             for i in indices:
                 args[i] = to_dtype(args[i], dtype)
+
+            for k in keys:
+                kwargs[k] = to_dtype(kwargs[k], dtype)
+
             for i in range(len(args)):
                 if isinstance(args[i], ir.Constant):
                     args[i] = ir.Constant(
                         args[i].value, dtype, args[indices[0]].get_device()
                     )
 
-        if broadcast and indices:
+            for k in kwargs.keys():
+                if isinstance(kwargs[k], ir.Constant):
+                    kwargs[k] = ir.Constant(
+                        kwargs[k].value, dtype, args[indices[0]].get_device()
+                    )
+
+        if broadcast and (indices or keys):
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
+
+            for k, x in zip(keys, broadcast_tensors(*[kwargs[k] for k in keys])):
+                kwargs[k] = x
+
             for i in range(len(args)):
                 if isinstance(args[i], ir.Constant):
                     args[i] = ExpandView.create(
                         args[i], list(args[indices[0]].get_size())
+                    )
+
+            for k in kwargs.keys():
+                if isinstance(args[i], ir.Constant):
+                    kwargs[k] = ExpandView.create(
+                        kwargs[k], list(args[indices[0]].get_size())
                     )
 
         return decomp_fn(*args, **kwargs)

@@ -23,6 +23,7 @@ import numpy
 import sympy
 import torch.fx
 import torch.utils._pytree as pytree
+from cv2 import norm
 from sympy import Expr
 from sympy import Integer
 from torch._prims_common import is_boolean_dtype
@@ -2831,45 +2832,60 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel, *args, **kwargs):
         args_flat, args_spec = pytree.tree_flatten(args)
+        kwargs_flat, kwargs_spec = pytree.tree_flatten(kwargs)
 
-        is_arg_tensor = []
-        tensor_args = []
-        non_tensor_args = []
-        for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
-            if is_arg_tensor[-1]:
-                tensor_args.append(arg)
-            else:
-                non_tensor_args.append(arg)
+        def bucket_args(arg_list):
+            is_arg_tensor = []
+            tensor_args = []
+            non_tensor_args = []
+            for arg in arg_list:
+                is_arg_tensor.append(isinstance(arg, IRNode))
+                if is_arg_tensor[-1]:
+                    tensor_args.append(arg)
+                else:
+                    non_tensor_args.append(arg)
+            return (is_arg_tensor, tensor_args, non_tensor_args)
 
-        def unflatten_args(new_tensor_args, new_non_tensor_args):
+        def unflatten_args(is_tensor_list, new_tensor_args, new_non_tensor_args, spec):
             new_args = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)
-            for is_tensor in is_arg_tensor:
+            for is_tensor in is_tensor_list:
                 if is_tensor:
                     new_args.append(next(it_tensors))
                 else:
                     new_args.append(next(it_non_tensors))
-            return pytree.tree_unflatten(new_args, args_spec)
+            return pytree.tree_unflatten(new_args, spec)
 
-        tensor_args = [
-            cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
-        ]
+        def normalize(tensor_list):
+            return [cls.require_contiguous(cls.realize_input(x)) for x in tensor_list]
+
+        def gen_examples(tensor_list):
+            return [
+                torch.zeros(
+                    [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
+                    dtype=x.get_dtype(),
+                    device=x.get_device(),
+                )
+                for x in tensor_args
+            ]
+
+        is_arg_tensor, tensor_args, non_tensor_args = bucket_args(args_flat)
+        is_kwarg_tensor, tensor_kwargs, non_tensor_kwargs = bucket_args(args_flat)
+
+        tensor_args = normalize(tensor_args)
+        tensor_kwargs = normalize(tensor_kwargs)
 
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
         # TODO(jansel): replace this with dynamic shape formulas
-        example_args = [
-            torch.zeros(
-                [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
-                dtype=x.get_dtype(),
-                device=x.get_device(),
-            )
-            for x in tensor_args
-        ]
+        example_args = gen_examples(tensor_args)
+        example_kwargs = gen_examples(tensor_kwargs)
         example_output = kernel(
-            *unflatten_args(example_args, non_tensor_args), **kwargs
+            *unflatten_args(is_arg_tensor, example_args, non_tensor_args, args_spec),
+            **unflatten_args(
+                is_kwarg_tensor, example_kwargs, non_tensor_kwargs, kwargs_spec
+            ),
         )
 
         if isinstance(example_output, (list, tuple)):
@@ -2878,7 +2894,9 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel,
                 tensor_args,
                 non_tensor_args,
-                unflatten_args,
+                functools.partial(
+                    unflatten_args, is_tensor_list=is_arg_tensor, spec=args_spec
+                ),
             )
             return [
                 (
@@ -2908,7 +2926,9 @@ class FallbackKernel(ExternKernelAlloc):
                 kernel,
                 tensor_args,
                 non_tensor_args,
-                unflatten_args,
+                functools.partial(
+                    unflatten_args, is_tensor_list=is_arg_tensor, spec=args_spec
+                ),
                 kwargs,
             )
 
