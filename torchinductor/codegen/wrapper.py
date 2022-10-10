@@ -160,20 +160,23 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
+        old_reused_as = state.reused_as(self.node.get_name())
         reused_as_removed = self.reused_as.get_name() in V.graph.removed_buffers
         node_removed = self.node.get_name() in V.graph.removed_buffers
-        if reused_as_removed:
+        if not reused_as_removed:
+            state.update_reused_as(self.node.get_name(), self.reused_as)
+            if old_reused_as is not None:
+                return ReuseLine(old_reused_as, self.reused_as)
+            elif node_removed:
+                return AllocateLine(self.reused_as)
+            else:
+                return self
+        else:
+            if old_reused_as is not None:
+                state.update_reused_as(self.reused_as.get_name(), old_reused_as)
+            elif not node_removed:
+                state.update_reused_as(self.reused_as.get_name(), self.node)
             return NullLine()
-        elif node_removed:
-            return AllocateLine(self.reused_as)
-        # Neither reused_as nor node is removed
-        reuse_line = self
-        old_reused_as = state.reused_as(self.node.get_name())
-        if old_reused_as is not None:
-            reuse_line = ReuseLine(old_reused_as, self.reused_as)
-        state.update_reused_as(self.node.get_name(), self.reused_as)
-        assert reuse_line.node.get_name() not in V.graph.removed_buffers
-        return reuse_line
 
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
