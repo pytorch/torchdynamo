@@ -125,26 +125,17 @@ inductor_skips["cuda"] = {
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
     "nn.functional.poisson_nll_loss": {f64},
-    "nn.functional.selu": {f64},
-    "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f16, f64},
     "nn.functional.conv_transpose3d": {f16, f64},
     "nn.functional._scaled_dot_product_attention": {f64},
-    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
     "special.ndtr": {f64},
-    "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
-    # failed since moving PyTorch pin https://github.com/pytorch/torchdynamo/pull/1453
-    "dsplit": {f16, f32, f64},
-    "hsplit": {f16, f32, f64},
 }
 
 
