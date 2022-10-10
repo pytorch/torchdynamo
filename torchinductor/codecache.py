@@ -74,18 +74,20 @@ def cpp_compiler():
 
 @functools.lru_cache(1)
 def cpp_compiler_search(search):
-    lock_dir = get_lock_dir()
-    lock = FileLock(os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT)
-    with lock:
-        for cxx in search:
-            try:
-                if cxx is None:
+    for cxx in search:
+        try:
+            if cxx is None:
+                lock_dir = get_lock_dir()
+                lock = FileLock(
+                    os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
+                )
+                with lock:
                     cxx = install_gcc_via_conda()
-                subprocess.check_output([cxx, "--version"])
-                return cxx
-            except (subprocess.SubprocessError, FileNotFoundError):
-                continue
-        raise exc.InvalidCxxCompiler()
+            subprocess.check_output([cxx, "--version"])
+            return cxx
+        except (subprocess.SubprocessError, FileNotFoundError):
+            continue
+    raise exc.InvalidCxxCompiler()
 
 
 def install_gcc_via_conda():
@@ -153,10 +155,10 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            if key not in cls.cache:
+        if key not in cls.cache:
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
                     cmd = cpp_compile_command(
