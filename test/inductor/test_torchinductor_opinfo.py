@@ -193,7 +193,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.irfftn": {b8, f32, f64, i32, i64}, # Complex Type - torch.complex32 / 64 / 128
     "fft.rfft": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
     "fft.rfft2": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
-    "index_add": {f16}, # Inductor Exception - C++ compile error
+    "index_add": {f32, f64, i32, i6416}, # Inductor Exception - C++ compile error
     "fft.rfftn": {f32, f64}, # Complex Type - torch.complex32 / 64 / 128
     "index_put": {f16, f32, f64}, # Fake Tensor Access - torch._subclasses.fake_tensor.DynamicOutputShapeException: aten.index.Tensor
     "index_reduce": {f16, f32, f64}, # Fake Tensor Bug - RuntimeError: It appears that you're trying to get value out of a tracing tensor
