@@ -70,6 +70,14 @@ Install TorchDynamo with:
 python setup.py develop
 ```
 
+### Verify installation
+
+Run
+```shell
+python tools/verify_install.py
+```
+to verify that TorchDynamo is correctly installed (only checks for minimum requirements -- does not check for development requirements).
+
 ## Usage Example
 
 Here is a basic example of how to use TorchDynamo. One can decorate a function
