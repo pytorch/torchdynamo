@@ -1207,6 +1207,12 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
+    # to check that index is valid we need to freeze the size
+    size_hint = V.graph.sizevars.size_hint(x.get_size()[dim])
+    V.graph.sizevars.guard_equals(x.get_size()[dim], size_hint)
+    if index < 0:
+        index = index + size_hint
+    assert 0 <= index and index < size_hint
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
