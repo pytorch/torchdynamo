@@ -65,6 +65,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make setup_nightly_gpu
+            python setup.py develop
             python tools/verify_install.py
       - store_test_results:
           path: test-results
