@@ -2183,6 +2183,7 @@ class CommonTemplate:
                 torch.index_select(a, 1, b),
                 torch.index_select(torch.index_select(a, 2, b), 1, b),
             )
+
         for ind_dtype in (torch.int32, torch.int64):
             self.common(
                 fn,
