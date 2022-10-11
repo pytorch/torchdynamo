@@ -340,7 +340,6 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             cudagraphs=cudagraphs,
             graph_id=graph_id,
         )
-        return out
 
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
