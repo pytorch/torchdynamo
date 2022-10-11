@@ -73,10 +73,7 @@ class MinfierTests(torchdynamo.testing.TestCase):
             try:
                 opt_mod(x)
             except Exception as e:
-                import traceback
-
-                traceback.print_exc()
-                # pass
+                pass
 
         inner()
 
