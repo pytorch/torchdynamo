@@ -3872,4 +3872,4 @@ if HAS_CUDA:
 if __name__ == "__main__":
     from torchdynamo.testing import run_tests
 
-    run_tests()
+    run_tests(needs="filelock")
