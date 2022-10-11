@@ -919,9 +919,10 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
-        if device == "cuda" and len(params) != 0:
+        param_list = list(params)
+        if device == "cuda" and len(param_list) != 0:
             # capturable is only supported on cuda at the moment
-            self.optimizer = torch.optim.Adam(params, capturable=True)
+            self.optimizer = torch.optim.Adam(param_list, capturable=True)
         else:
             self.optimizer = None
 
