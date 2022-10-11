@@ -14,6 +14,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from . import config
 from . import exc
 from .allowed_functions import is_allowed
+from .bytecode_analysis import propagate_line_nums
 from .bytecode_analysis import remove_dead_code
 from .bytecode_analysis import remove_pointless_jumps
 from .bytecode_transformation import is_generator
@@ -375,6 +376,8 @@ def _compile(
 
         if config.dead_code_elimination:
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+
+        instructions[:] = propagate_line_nums(instructions)
 
     try:
         for attempt in itertools.count():

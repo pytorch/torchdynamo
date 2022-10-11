@@ -59,6 +59,35 @@ def remove_pointless_jumps(instructions):
     return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
 
+def propagate_line_nums(instructions):
+    """Ensure every instruction has line number set in case some are removed"""
+    cur_line_no = None
+
+    def populate_line_num(inst):
+        nonlocal cur_line_no
+        if inst.starts_line:
+            cur_line_no = inst.starts_line
+
+        inst.starts_line = cur_line_no
+
+    return [populate_line_num(inst) for inst in instructions]
+
+
+def remove_extra_line_nums(instructions):
+    """Remove extra starts line properties before packing bytecode"""
+
+    cur_line_no = None
+
+    def remove_line_num(inst):
+        nonlocal cur_line_no
+        if inst.starts_line == cur_line_no:
+            inst.starts_line = None
+        else:
+            cur_line_no = inst.starts_line
+
+    return [remove_line_num(inst) for inst in instructions]
+
+
 @dataclasses.dataclass
 class ReadsWrites:
     reads: set
