@@ -245,6 +245,7 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
+
         def gather_leaf_tensors(args, kwargs):
             leaf_tensors = []
             args, args_spec = tree_flatten(args)
@@ -262,12 +263,20 @@ def check_model(
             flat_diff_results = [r for r in flat_results if r.requires_grad]
             assert len(flat_diff_results) > 0
 
-            grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
+            grads = [
+                torch.ones(r.shape, device=r.device, dtype=r.dtype)
+                for r in flat_diff_results
+            ]
 
             leaf_tensors = gather_leaf_tensors(ref_inputs, ref_kwargs)
             assert len(leaf_tensors) > 0
-            return torch.autograd.grad(flat_diff_results, leaf_tensors,
-                                    grads, allow_unused=True, retain_graph=True)
+            return torch.autograd.grad(
+                flat_diff_results,
+                leaf_tensors,
+                grads,
+                allow_unused=True,
+                retain_graph=True,
+            )
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct)
         actual_grad = compute_grads(example_inputs, kwargs, actual)

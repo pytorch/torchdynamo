@@ -402,8 +402,8 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
-
-    "gradient": {"check_gradient": False}   # segfault on check_gradient
+    "gradient": {"check_gradient": False},  # segfault on check_gradient
+    "linalg.solve_triangular": {"check_gradient": False},  # segfault on check_gradient
 }
 
 # Always test with all sample for following ops
@@ -452,6 +452,10 @@ class TestInductorOpInfo(TestCase):
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
             self.skipTest(f"{op_name} in {dtype} not supported")
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
+            op_name, set()
+        ) or dtype in inductor_gradient_expected_failures_single_sample[
+            device_type
+        ].get(
             op_name, set()
         ):
             test_expect = TestExpect.XFAILURE
@@ -526,8 +530,6 @@ class TestInductorOpInfo(TestCase):
                         fn,
                         args,
                         kwargs,
-                        check_lowp=False,
-                        nopython=True,
                         **adjusted_kwargs,
                     )
 
