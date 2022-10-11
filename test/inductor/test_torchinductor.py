@@ -192,13 +192,7 @@ def check_model(
     def compile_fx_wrapper(model_, example_inputs_):
         nonlocal called
         called = True
-        compiled = compile_fx_inner(model_, example_inputs_)
-
-        def run(*args):
-            args = list(args)
-            return compiled(args)
-
-        return run
+        return compile_fx(model_, example_inputs_)
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
