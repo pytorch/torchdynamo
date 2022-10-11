@@ -9,8 +9,8 @@ on:
 jobs:
   test-inductor-opinfo:
     strategy:
-        pytorch_test_range:
-          range: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
+      matrix:
+        pytorch_test_range: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
                     "PYTORCH_TEST_RANGE_START=100 PYTORCH_TEST_RANGE_END=200",
                     "PYTORCH_TEST_RANGE_START=200 PYTORCH_TEST_RANGE_END=300",
                     "PYTORCH_TEST_RANGE_START=300 PYTORCH_TEST_RANGE_END=400",
@@ -26,7 +26,7 @@ jobs:
         cache: 'pip'
     - run: make setup_nightly
     - run: make develop
-    - run: PYTORCH_ALL_SAMPLES=1 ${{ pytorch_test_range.range } pytest test/inductor/test_torchinductor_opinfo.py
+    - run: PYTORCH_ALL_SAMPLES=1 ${{ matrix.pytorch_test_range } pytest test/inductor/test_torchinductor_opinfo.py
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
