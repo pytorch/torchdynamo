@@ -52,6 +52,7 @@ if START is not None or END is not None:
     START = int(START)
     END = int(END)
     assert START < END
+    END = min(END, len(op_db))
 else:
     START = 0
     END = len(op_db)
@@ -413,6 +414,9 @@ class TestInductorOpInfo(TestCase):
     @_ops(op_db[START:END])
     @patch("torchdynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
+        # import pdb
+        # pdb.set_trace()
+
         torchdynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
@@ -534,6 +538,37 @@ class TestInductorOpInfo(TestCase):
                 raise RuntimeError(
                     f"unexpected success {op_name}, {dtype}, {device_type}"
                 )
+
+        print(len(op_db))
+
+def report_percent_passing_ops():
+    from itertools import chain
+    total = len(op_db)
+    all_skips = [inductor_skips, inductor_expected_failures_single_sample, inductor_should_fail_with_exception]
+    excluded_cuda_keys = list(set(chain.from_iterable(skips['cuda'].keys() for skips in all_skips)))
+    excluded_cpu_keys = list(set(chain.from_iterable(skips['cpu'].keys() for skips in all_skips)))
+    excluded_both = set(excluded_cuda_keys + excluded_cpu_keys)
+
+    pass_percentage_cuda = ((total - len(excluded_cuda_keys)) / total) * 100
+    pass_percentage_cpu = ((total - len(excluded_cpu_keys)) / total) * 100
+    pass_percentage_total = ((total - len(excluded_both)) / total) * 100
+
+    total_by_dtype = total * len([f16, f32, f64, i32, i64, b8])
+    
+    excluded_cuda_keys_by_dtype = sum([len(x) for x in list(chain.from_iterable(skips['cuda'].values() for skips in all_skips))])
+    excluded_cpu_keys_by_dtype = sum([len(x) for x in list(chain.from_iterable(skips['cpu'].values() for skips in all_skips))])
+    
+    pass_percentage_cuda_by_dtype = ((total_by_dtype - excluded_cuda_keys_by_dtype) / total_by_dtype) * 100
+    pass_percentage_cpu_by_dtype = ((total_by_dtype - excluded_cpu_keys_by_dtype) / total_by_dtype) * 100
+
+    return {
+        "pass_percentage_cuda": pass_percentage_cuda,
+        "pass_percentage_cpu": pass_percentage_cpu,
+        "pass_percentage_total": pass_percentage_total,
+        "pass_percentage_cuda_by_dtype": pass_percentage_cuda_by_dtype,
+        "pass_percentage_cpu_by_dtype": pass_percentage_cpu_by_dtype
+    }
+    
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals())

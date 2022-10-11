@@ -1,0 +1,42 @@
+name: Test Inductor
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  example_matrix:
+    strategy:
+      matrix:
+        version: [10, 12, 14]
+    steps:
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.version }
+jobs:
+  test-inductor:
+    strategy:
+        matrix:
+          version: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
+                    "PYTORCH_TEST_RANGE_START=100 PYTORCH_TEST_RANGE_END=200",
+                    "PYTORCH_TEST_RANGE_START=200 PYTORCH_TEST_RANGE_END=300",
+                    "PYTORCH_TEST_RANGE_START=300 PYTORCH_TEST_RANGE_END=400",
+                    "PYTORCH_TEST_RANGE_START=400 PYTORCH_TEST_RANGE_END=500",
+                    "PYTORCH_TEST_RANGE_START=500 PYTORCH_TEST_RANGE_END=600",
+                    "PYTORCH_TEST_RANGE_START=600 PYTORCH_TEST_RANGE_END=700"]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+        cache: 'pip'
+    - run: make setup_nightly
+    - run: make develop
+    - run: PYTORCH_ALL_SAMPLES=1 PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=10 pytest test/inductor/test_torchinductor_opinfo.py
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
