@@ -489,7 +489,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
             copy.deepcopy(gm), clone_inputs(example_inputs)
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
-    except Exception as e:
+    except Exception:
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
