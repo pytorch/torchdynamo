@@ -405,6 +405,9 @@ inductor_override_kwargs = {
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     "linalg.solve_triangular": {"check_gradient": False},  # segfault on check_gradient
+    "linalg.lu_factor": {"check_gradient": False},
+    "linalg.lu_factor_ex": {"check_gradient": False},
+    "linalg.lu_solve": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops
