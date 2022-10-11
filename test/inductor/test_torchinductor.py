@@ -136,6 +136,35 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
+def compute_grads(args, kwrags, results):
+    def gather_leaf_tensors(args, kwargs):
+        args, _ = tree_flatten(args)
+        kwargs, _ = tree_flatten(kwargs)
+        args = args + kwargs
+        leaf_tensors = [
+            arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
+        ]
+        return leaf_tensors
+
+    flat_results, _ = tree_flatten(results)
+    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    assert len(flat_diff_results) > 0
+
+    grads = [
+        torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results
+    ]
+
+    leaf_tensors = gather_leaf_tensors(args, kwrags)
+    assert len(leaf_tensors) > 0
+    return torch.autograd.grad(
+        flat_diff_results,
+        leaf_tensors,
+        grads,
+        allow_unused=True,
+        retain_graph=True,
+    )
+
+
 @patch.object(torchinductor.config.triton, "cudagraphs", False)
 @patch("torchdynamo.config.raise_on_backend_error", True)
 def check_model(
@@ -245,39 +274,6 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
-
-        def gather_leaf_tensors(args, kwargs):
-            leaf_tensors = []
-            args, args_spec = tree_flatten(args)
-            kwargs, kwargs_spec = tree_flatten(kwargs)
-            args = args + kwargs
-            for arg in args:
-                if not isinstance(arg, torch.Tensor):
-                    continue
-                if arg.requires_grad:
-                    leaf_tensors.append(arg)
-            return leaf_tensors
-
-        def compute_grads(args, kwrags, results):
-            flat_results, _ = tree_flatten(results)
-            flat_diff_results = [r for r in flat_results if r.requires_grad]
-            assert len(flat_diff_results) > 0
-
-            grads = [
-                torch.ones(r.shape, device=r.device, dtype=r.dtype)
-                for r in flat_diff_results
-            ]
-
-            leaf_tensors = gather_leaf_tensors(ref_inputs, ref_kwargs)
-            assert len(leaf_tensors) > 0
-            return torch.autograd.grad(
-                flat_diff_results,
-                leaf_tensors,
-                grads,
-                allow_unused=True,
-                retain_graph=True,
-            )
-
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct)
         actual_grad = compute_grads(example_inputs, kwargs, actual)
 

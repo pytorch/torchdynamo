@@ -18,7 +18,6 @@ from torch.testing._internal.common_utils import skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_utils import suppress_warnings
 
 import torchdynamo
-import torchinductor.config
 
 from .test_torchinductor import check_model
 from .test_torchinductor import check_model_cuda
@@ -360,10 +359,38 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
-inductor_gradient_expected_failures_single_sample["cpu"] = {
-}
-
 inductor_gradient_expected_failures_single_sample["cuda"] = {
+    "amax": {f16, f32, f64},
+    "amin": {f16, f32, f64},
+    "asin": {f16},
+    "cumprod": {f16},
+    "dsplit": {f32},
+    "linalg_vector_norm": {f64},
+    "masked_amax": {f16, f32, f64},
+    "masked_amin": {f16, f32, f64},
+    "max_reduction_no_dim": {f16, f32, f64},
+    "median": {f16, f32, f64},
+    "min_reduction_no_dim": {f16, f32, f64},
+    "nan_to_num": {f16, f32, f64},
+    "nanmean": {f16, f32, f64},
+    "nanmedian": {f16, f32, f64},
+    "nanquantile": {f32, f64},
+    "nansum": {f16, f32, f64},
+    "native_batch_norm": {f16},
+    "nn_functional__scaled_dot_product_attention": {f16},
+    "nn_functional_avg_pool2d": {f16, f32, f64},
+    "nn_functional_batch_norm": {f16},
+    "nn_functional_batch_norm_without_cudnn": {f16},
+    "nn_functional_cosine_embedding_loss": {f16},
+    "nn_functional_cosine_similarity": {f16},
+    "nn_functional_instance_norm": {f16},
+    "nn_functional_normalize": {f16},
+    "nn_functional_softsign": {f16},
+    "norm_inf": {f64},
+    "quantile": {f32, f64},
+    "scatter_reduce_amax": {f16, f32, f64},
+    "scatter_reduce_amin": {f16, f32, f64},
+    "tanh": {f16},
 }
 
 inductor_should_fail_with_exception = defaultdict(dict)
@@ -404,10 +431,10 @@ inductor_override_kwargs = {
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
-    "linalg.solve_triangular": {"check_gradient": False},  # segfault on check_gradient
+    "linalg.solve_triangular": {"check_gradient": False},
     "linalg.lu_factor": {"check_gradient": False},
-    "linalg.lu_factor_ex": {"check_gradient": False},
-    "linalg.lu_solve": {"check_gradient": False},
+    # "linalg.lu_factor_ex": {"check_gradient": False},
+    # "linalg.lu_solve": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops
@@ -432,7 +459,6 @@ class TestInductorOpInfo(TestCase):
     )  # inductor kernels failing this test intermittently
     @_ops(op_db[START:END])
     @patch("torchdynamo.config.raise_on_unsafe_aot_autograd", True)
-    @patch.object(torchinductor.config.triton, "cudagraphs", False)
     def test_comprehensive(self, device, dtype, op):
         torchdynamo.reset()
         with torch.no_grad():
