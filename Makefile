@@ -4,7 +4,7 @@ PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo
             $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py)  \
             $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py)  \
             $(wildcard test/*.py) $(wildcard test/*/*.py)  \
-            $(wildcard .circleci/*.py)
+            $(wildcard .circleci/*.py) $(wildcard tools/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -12,7 +12,7 @@ PIP ?= python -m pip
 
 # versions used in CI
 # Also update the "Install nightly binaries" section of the README when updating these
-PYTORCH_VERSION ?= dev20221006
+PYTORCH_VERSION ?= dev20221010
 TRITON_VERSION ?= d3c925db8a81ca74f14680876b9311e7d079c5a1
 
 
@@ -54,12 +54,12 @@ setup:
 
 setup_nightly:
 	$(PIP) install ninja
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 	$(PIP) install -r requirements.txt
 
 setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
-	$(PIP) install --pre torch==1.13.0.$(PYTORCH_VERSION) \
+	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) \
                       torchvision==0.15.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu116

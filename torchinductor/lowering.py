@@ -1212,6 +1212,10 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
+    if index < 0:
+        index = index + x.get_size()[dim]
+    V.graph.sizevars.guard_leq(0, index)
+    V.graph.sizevars.guard_lt(index, x.get_size()[dim])
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -1219,7 +1223,7 @@ def select_scatter(x, src, dim: int, index: int):
         return ops.where(
             ops.eq(
                 ops.index_expr(idx[dim], torch.int32),
-                ops.constant(index, torch.int32),
+                ops.index_expr(index, torch.int32),
             ),
             src_loader(idx),
             x_loader(idx),
@@ -1596,12 +1600,12 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 def check_and_broadcast_indices(indices):
     assert all(
-        i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+        i.get_dtype() in (torch.int64, torch.int32, torch.bool, torch.uint8)
         for i in indices
         if i is not None
     ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
     assert all(
-        [i.get_dtype() == torch.int64 for i in indices if i is not None]
+        [i.get_dtype() in (torch.int32, torch.int64) for i in indices if i is not None]
     ), "bool indices are not supported yet"
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
     assert len(valid_idxs) > 0, "requires at least 1 non-None index"
