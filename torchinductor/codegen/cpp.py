@@ -12,6 +12,7 @@ from torch._prims_common import is_float_dtype
 from .. import codecache
 from .. import config
 from ..utils import sympy_product
+from ..utils import sympy_symbol
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
