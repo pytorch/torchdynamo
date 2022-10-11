@@ -227,7 +227,7 @@ class WrapperCodeGen(CodeGen):
                 )
 
         self.prefix.splice(
-            f"""
+            """
 
             async_compile.wait(globals())
             del async_compile
@@ -240,7 +240,7 @@ class WrapperCodeGen(CodeGen):
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
                 self.prefix.writeline(f"{lhs} = args")
-                self.prefix.writeline(f"args.clear()")
+                self.prefix.writeline("args.clear()")
             for name in V.graph.randomness_seeds:
                 self.prefix.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"

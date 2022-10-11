@@ -6,7 +6,6 @@ from typing import List
 
 import functorch
 import torch.fx
-from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
@@ -341,7 +340,6 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         out._boxed_call = True
         return out
 
-
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
@@ -355,7 +353,6 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         )
         out._boxed_call = True
         return out
-
 
     with overrides.patch_functions():
 
