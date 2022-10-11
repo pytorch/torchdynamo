@@ -1,4 +1,4 @@
-name: Test Inductor
+name: Test Inductor OpInfo Backed
 
 on:
   push:
@@ -7,19 +7,10 @@ on:
   pull_request:
 
 jobs:
-  example_matrix:
+  test-inductor-opinfo:
     strategy:
-      matrix:
-        version: [10, 12, 14]
-    steps:
-      - uses: actions/setup-node@v3
-        with:
-          node-version: ${{ matrix.version }
-jobs:
-  test-inductor:
-    strategy:
-        matrix:
-          version: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
+        pytorch_test_range:
+          range: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
                     "PYTORCH_TEST_RANGE_START=100 PYTORCH_TEST_RANGE_END=200",
                     "PYTORCH_TEST_RANGE_START=200 PYTORCH_TEST_RANGE_END=300",
                     "PYTORCH_TEST_RANGE_START=300 PYTORCH_TEST_RANGE_END=400",
@@ -35,7 +26,7 @@ jobs:
         cache: 'pip'
     - run: make setup_nightly
     - run: make develop
-    - run: PYTORCH_ALL_SAMPLES=1 PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=10 pytest test/inductor/test_torchinductor_opinfo.py
+    - run: PYTORCH_ALL_SAMPLES=1 ${{ pytorch_test_range.range } pytest test/inductor/test_torchinductor_opinfo.py
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
