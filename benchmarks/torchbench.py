@@ -346,8 +346,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
-        if self.optimizer is not None:
-            self.optimizer.step()
+        self.optimizer_step()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None

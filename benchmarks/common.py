@@ -919,7 +919,7 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
-        if device == "cuda":
+        if device == "cuda" and len(params) != 0:
             # capturable is only supported on cuda at the moment
             self.optimizer = torch.optim.Adam(params, capturable=True)
         else:
@@ -1039,6 +1039,10 @@ class BenchmarkRunner:
                     break
             batch_size = self.decay_batch_exp(batch_size)
         return 1
+
+    def optimizer_step(self):
+        if self.optimizer is not None:
+            self.optimizer.step()
 
     def get_benchmark_indices(self, length):
         start = self._args.partition_id * (length // self._args.total_partitions)
