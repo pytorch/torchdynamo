@@ -135,7 +135,7 @@ def compile_fx_inner(
         f"graph {graph_id}",
     )
 
-    # aot autograd needs to know we take in inputs as lists
+    # aot autograd needs to know to pass in inputs as a list
     result._boxed_call = True
     return result
 
@@ -239,8 +239,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
+    # copy static_inputs because it will be cleared in model
     with torch.cuda.stream(stream):
-        model(static_inputs)
+        model(list(static_inputs))
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()
@@ -248,7 +249,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     # record
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream):
-        static_outputs = model(static_inputs)
+        static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
