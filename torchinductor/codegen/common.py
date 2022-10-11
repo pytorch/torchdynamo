@@ -17,6 +17,7 @@ from .. import metrics
 from ..utils import free_symbol_startswith
 from ..utils import sympy_dot
 from ..utils import sympy_subs
+from ..utils import sympy_symbol
 from ..utils import unique
 from ..virtualized import V
 from ..virtualized import ops
@@ -538,7 +539,7 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(index_var):
-                return sympy.Symbol(str(index_var))
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

@@ -21,6 +21,7 @@ from ..utils import free_symbol_startswith
 from ..utils import instance_descriptor
 from ..utils import sympy_product
 from ..utils import sympy_subs
+from ..utils import sympy_symbol
 from ..virtualized import V
 from ..virtualized import ops
 from .common import DeferredLine
@@ -325,10 +326,10 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
-            expr = ir.IndexingDiv(sympy.Symbol(f"{self.prefix}index"), divisor)
+            expr = ir.IndexingDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
-                sympy.Symbol(f"{self.prefix}index"), divisor, length
+                sympy_symbol(f"{self.prefix}index"), divisor, length
             )
 
         if expr not in self.nodes:
@@ -441,7 +442,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name
 
     def symbol(self):
-        return sympy.Symbol(self.name)
+        return sympy_symbol(self.name)
 
     def __hash__(self):
         return hash(self.name)

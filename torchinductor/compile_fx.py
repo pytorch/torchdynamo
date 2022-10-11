@@ -103,11 +103,13 @@ def compile_fx_inner(
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()
 
-    complex_memory_overlap_inputs = any(
-        complex_memory_overlap(t) for t in example_inputs
-    )
+    # complex_memory_overlap_inputs = any(
+    #     complex_memory_overlap(t) for t in example_inputs
+    # )
+    complex_memory_overlap_inputs = False
 
     if (
+        False and
         cudagraphs
         and set(graph.device_types) == {"cuda"}
         and not graph.mutated_inputs

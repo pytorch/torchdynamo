@@ -37,6 +37,7 @@ from .utils import cache_on_self
 from .utils import sympy_dot
 from .utils import sympy_product
 from .utils import sympy_subs
+from .utils import sympy_symbol
 from .virtualized import V
 from .virtualized import ops
 
@@ -306,7 +307,7 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix="i"):
         return [
-            sympy.Integer(0) if s == 1 else sympy.Symbol(f"{prefix}{n}")
+            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}")
             for n, s in enumerate(ranges)
         ]
 
@@ -1181,7 +1182,7 @@ class View(BaseView):
         return idx
 
     def reindex_str(self):
-        index_old = [sympy.Symbol(f"i{n}") for n in range(len(self.size))]
+        index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
@@ -1250,7 +1251,7 @@ class View(BaseView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
-        vars = [sympy.Symbol(f"view{i}") for i in range(len(new_size))]
+        vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
@@ -1966,7 +1967,6 @@ class ComputedBuffer(Buffer):
             for i, reads_buf in enumerate(reads_bufs):
                 if isinstance(reads_buf, Convolution):
                     priority_idx.append(i)
-
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -2377,7 +2377,7 @@ class ExternKernel(InputsKernel):
         sizes = self.get_size()
         strides = self.get_stride()
         strides = [sizevars.size_hint(x) for x in strides]
-        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        index_vars = [sympy_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
         lookup = {pos: idx for idx, pos in enumerate(index_order)}
@@ -3436,7 +3436,7 @@ class LoopBody:
 
     def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
-        var = sympy.Symbol(name)
+        var = sympy_symbol(name)
         self.indirect_vars.append([var])
         return var
 

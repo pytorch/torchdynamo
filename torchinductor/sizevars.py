@@ -17,6 +17,7 @@ from . import ir
 from .codegen.common import IndentedBuffer
 from .utils import VarRanges
 from .utils import sympy_subs
+from .utils import sympy_symbol
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class SizeVarAllocator(object):
         1-element tensor for the CUDA backend.
         """
         self.need_seed = True
-        return sympy.Symbol("seed")
+        return sympy_symbol("seed")
 
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
@@ -207,7 +208,7 @@ class SizeVarAllocator(object):
                     # approximate test passed, try sound version
                     va = index_vars[a]
                     vb = index_vars[b]
-                    v = sympy.Symbol("_merge_tester")
+                    v = sympy_symbol("_merge_tester")
                     expr1 = sympy_subs(index_formulas[k], {va: v * sizes[a], vb: 0})
                     expr2 = sympy_subs(index_formulas[k], {va: 0, vb: v})
                     if self.simplify(expr1) == self.simplify(expr2):
@@ -371,7 +372,15 @@ class SizeVarAllocator(object):
         return var
 
     def size_hint(self, expr: Expr) -> int:
-        return int(sympy_subs(sympy.expand(expr), self.var_to_val))
+        if isinstance(expr, sympy.Expr):
+            additional_mapping = {}
+            for s in expr.free_symbols:
+                if not s.is_integer:
+                    additional_mapping[s] = sympy_symbol(s.name)
+
+            expr = sympy_subs(expr, additional_mapping)
+        out = sympy_subs(sympy.expand(expr), self.var_to_val)
+        return int(out)
 
     def _lru_cache(self, fn, maxsize=None):
         """

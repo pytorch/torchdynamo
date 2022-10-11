@@ -19,6 +19,7 @@ from .utils import VarRanges
 from .utils import sympy_product
 from .utils import sympy_str
 from .utils import sympy_subs
+from .utils import sympy_symbol
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -45,8 +46,8 @@ class MemoryDep(typing.NamedTuple):
         ):
             c = canonicalization_prefix()
             size = (self.size[1], self.size[0])
-            s0 = sympy.Symbol(c + "0")
-            s1 = sympy.Symbol(c + "1")
+            s0 = sympy_symbol(c + "0")
+            s1 = sympy_symbol(c + "1")
             index = sympy_subs(self.index, {s0: s1})
             return MemoryDep(self.name, index, size)
         else:
@@ -208,7 +209,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     var_ranges: VarRanges = collections.OrderedDict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy.Symbol(f"{prefix}{next(cnt)}")
+        v = sympy_symbol(f"{prefix}{next(cnt)}")
         var_ranges[v] = length
         return v
 

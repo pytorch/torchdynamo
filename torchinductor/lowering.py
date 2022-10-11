@@ -21,7 +21,7 @@ from . import ir
 from . import overrides
 from .decomposition import decompositions
 from .decomposition import get_decompositions
-from .ir import ExpandView
+from .ir import ExpandView, IndexingConstant, IndexingDiv
 from .ir import PermuteView
 from .ir import Pointwise
 from .ir import Reduction
@@ -251,19 +251,22 @@ def broadcast_symbolic_shapes(a, b):
 
 
 def promote_constants(inputs):
-    if not any(isinstance(x, (int, float)) for x in inputs):
+    if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     ex = next(x for x in inputs if isinstance(x, TensorBox))
-    return [
-        (
-            ExpandView.create(
+    out = []
+    for x in inputs:
+        if isinstance(x, (int, float)):
+            out.append(ExpandView.create(
                 ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
-            )
-            if isinstance(x, (int, float))
-            else x
-        )
-        for x in inputs
-    ]
+            ))
+        elif isinstance(x, sympy.Expr):
+            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+        else:
+            out.append(x)
+
+    return out
+
 
 
 def make_pointwise(
@@ -430,12 +433,13 @@ def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
 
-    if isinstance(a, (float, int)):
-        a = constant_like(a)(b)
-    if isinstance(b, (float, int)):
-        b = constant_like(b)(a)
-
-    dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
+    a, b = promote_constants([a, b])
+    # if isinstance(a, (float, int)):
+    #     a = constant_like(a)(b)
+    # if isinstance(b, (float, int)):
+    #     b = constant_like(b)(a)
+    # dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
+    dtype = a.get_dtype()
     return make_pointwise(fn, override_return_dtype=dtype)(
         cond, to_dtype(a, dtype), to_dtype(b, dtype)
     )
@@ -593,8 +597,8 @@ def repeat(x, repeats):
     new_size = list(x.get_size())
 
     for i in range(len(repeats)):
-        assert repeats[i] >= 1
-        if repeats[i] > 1:
+        assert repeats[i] != 0
+        if repeats[i] != 1:
             new_size[i] = new_size[i] * repeats[i]
 
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
@@ -604,7 +608,7 @@ def repeat(x, repeats):
         assert len(index) == len(repeats)
         index = list(index)
         for i in range(len(repeats)):
-            if repeats[i] > 1:
+            if repeats[i] != 1:
                 if old_size[i] == 1:
                     index[i] = sympy.Integer(0)
                 else:
@@ -1563,7 +1567,7 @@ def gather(x, dim, index):
     )
 
 
-@register_lowering(aten.embedding, type_promotion_kind=None)
+# @register_lowering(aten.embedding, type_promotion_kind=None)
 def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False):
     assert not sparse
     assert isinstance(weight, TensorBox)
@@ -3294,10 +3298,22 @@ register_inplace(aten.sigmoid_, sigmoid)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
+@register_lowering(aten.sym_numel)
+def sym_numel(a):
+    return a.get_numel()
+
 
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
+
+@register_lowering(operator.add)
+def op_add(a, b):
+    return a + b
+
+@register_lowering(operator.floordiv)
+def op_floordiv(a, b):
+    return IndexingDiv(a, b)
 
 
 @register_lowering(aten._foobar)

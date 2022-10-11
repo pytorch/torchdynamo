@@ -215,7 +215,14 @@ class GraphLowering(torch.fx.Interpreter):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
-            sizes, strides = self.symbolic_sizes_strides(example)
+            shape_env = None
+            for i in example.shape:
+                if isinstance(i, torch.SymIntNode):
+                    shape_env = i.get_pyobj().shape_env
+            sizes = tuple([i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in example.shape ])
+            strides = tuple([i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in example.stride()])
+            if shape_env is not None:
+                self.sizevars.var_to_val = shape_env.var_to_val
         # TODO(jansel): handle input aliasing
         tensor = TensorBox.create(
             InputBuffer(
@@ -254,7 +261,8 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            return lowerings[target](*args, **kwargs)
+            out = lowerings[target](*args, **kwargs)
+            return out
         except Exception as e:
             raise LoweringException(e, target, args, kwargs) from e
 
