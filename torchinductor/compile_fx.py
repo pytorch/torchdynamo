@@ -103,19 +103,17 @@ def compile_fx_inner(
         if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
             shape_env = inp.fake_mode.shape_env
 
-    graph = GraphLowering(gm, shape_env=shape_env)
+    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()
 
-    # complex_memory_overlap_inputs = any(
-    #     complex_memory_overlap(t) for t in example_inputs
-    # )
-    complex_memory_overlap_inputs = False
+    complex_memory_overlap_inputs = any(
+        complex_memory_overlap(t) for t in example_inputs
+    )
 
     if (
-        False
-        and cudagraphs
+        cudagraphs
         and set(graph.device_types) == {"cuda"}
         and not graph.mutated_inputs
         and not has_incompatible_cudagraph_ops(gm)
@@ -154,18 +152,18 @@ def clone_preserve_strides(x):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
-    # check_inputs = [
-    #     i
-    #     for i in range(len(inputs))
-    #     if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
-    #     and inputs[i].device.type == "cuda"
-    # ]
+    check_inputs = [
+        i
+        for i in range(len(inputs))
+        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        and inputs[i].device.type == "cuda"
+    ]
 
-    # if len(check_inputs) == 0:
-    #     return model
+    if len(check_inputs) == 0:
+        return model
 
     def run(*new_inputs):
-        for i in range(len(new_inputs)):
+        for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 if isinstance(new_inputs, tuple):
                     new_inputs = list(new_inputs)

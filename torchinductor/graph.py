@@ -62,7 +62,7 @@ class GraphLowering(torch.fx.Interpreter):
         return size, stride
 
     def __init__(
-        self, gm: torch.fx.GraphModule, shape_env=None, num_dynamic_inputs=None
+        self, gm: torch.fx.GraphModule, shape_env=None, num_static_inputs=None
     ):
         super().__init__(gm)
         if shape_env is None:
@@ -81,8 +81,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants = {}
         self.removed_buffers = set()
         self.wrapper_code = None
-        self.num_dynamic_inputs = num_dynamic_inputs
-        self.num_static_inputs = None
+        self.num_static_inputs = num_static_inputs
         self.mutated_inputs = set()
         self.unaligned_buffers = set()
         self.randomness_offset = sympy.Integer(0)
@@ -133,9 +132,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_utils.dynamo_timed
     def run(self, *args):
-        if self.num_dynamic_inputs is None:
-            self.num_dynamic_inputs = len(args)
-        self.num_static_inputs = len(args) - self.num_dynamic_inputs
         return super().run(*args)
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
