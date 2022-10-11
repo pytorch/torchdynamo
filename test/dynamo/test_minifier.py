@@ -72,7 +72,7 @@ class MinfierTests(torchdynamo.testing.TestCase):
             x.requires_grad = before_aot
             try:
                 opt_mod(x)
-            except Exception as e:
+            except Exception:
                 pass
 
         inner()
