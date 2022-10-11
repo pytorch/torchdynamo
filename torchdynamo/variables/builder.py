@@ -39,6 +39,7 @@ from ..utils import is_namedtuple
 from ..utils import is_numpy_int_type
 from ..utils import istensor
 from ..utils import istype
+from ..utils import odict_values
 from ..utils import tuple_iterator
 from ..utils import tuple_iterator_getitem
 from ..utils import tuple_iterator_len
@@ -73,6 +74,7 @@ from .tensor import UnspecializedPythonVariable
 from .torch import TorchPyOperator
 from .torch import TorchVariable
 from .torch import tensor_dunder_fns
+from .torch import torch_special_class_types
 from .user_defined import UserDefinedClassVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -82,6 +84,10 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
+
+    def __post_init__(self):
+        if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
+            raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -152,6 +158,7 @@ class VariableBuilder:
         return {
             tuple: TupleVariable,
             list: ListVariable,
+            odict_values: ListVariable,
             torch.nn.ParameterList: ListVariable,
             torch.nn.ModuleList: ListVariable,
         }[type(value)]
@@ -175,7 +182,7 @@ class VariableBuilder:
         make_guards = self.make_guards
         if istensor(value):
             return self.wrap_tensor(value)
-        elif istype(value, (tuple, list)) or is_namedtuple(value):
+        elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to
             # have a stricter match.
             if istype(value, (tuple, list)) and all(
@@ -351,6 +358,11 @@ class VariableBuilder:
                     else GuardBuilder.TYPE_MATCH
                 ),
             )
+        elif value in tensor_dunder_fns:
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif (
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
@@ -421,6 +433,13 @@ class VariableBuilder:
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
+            )
+        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
+            value.__self__, torch_special_class_types
+        ):
+            return TorchVariable(
+                value,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

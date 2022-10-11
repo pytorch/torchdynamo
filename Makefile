@@ -4,7 +4,7 @@ PY_FILES := $(wildcard *.py) $(wildcard torchdynamo/*.py) $(wildcard torchdynamo
             $(wildcard torchinductor/*.py) $(wildcard torchinductor/*/*.py)  \
             $(wildcard benchmarks/*.py) $(wildcard benchmarks/*/*.py)  \
             $(wildcard test/*.py) $(wildcard test/*/*.py)  \
-            $(wildcard .circleci/*.py)
+            $(wildcard .circleci/*.py) $(wildcard tools/*.py)
 C_FILES := $(wildcard torchdynamo/*.c torchdynamo/*.cpp)
 CLANG_TIDY ?= clang-tidy-10
 CLANG_FORMAT ?= clang-format-10
@@ -12,7 +12,7 @@ PIP ?= python -m pip
 
 # versions used in CI
 # Also update the "Install nightly binaries" section of the README when updating these
-PYTORCH_VERSION ?= dev20221005
+PYTORCH_VERSION ?= dev20221006
 TRITON_VERSION ?= d3c925db8a81ca74f14680876b9311e7d079c5a1
 
 

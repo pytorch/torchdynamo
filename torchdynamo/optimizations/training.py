@@ -88,7 +88,7 @@ class AotAutogradStrategy(object):
     @classmethod
     def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
         if count_calls(gm.graph) < 2:
-            return gm.forward  # no point for tiny graphs
+            return gm  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
@@ -470,9 +470,7 @@ def apply_cuda_graphs(gm):
             submod = gm.get_submodule(n.target)
             gm.delete_submodule(n.target)
             mutated_inputs = find_input_mutations(submod.graph)
-            gm.register_attr_or_module(
-                n.target, CudaGraphModule(submod, mutated_inputs)
-            )
+            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
     # NB: we didn't actually change the graph, no need for recompile
 
 
