@@ -89,16 +89,6 @@ class MemoryPlanningState:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
-    def live_reused_as(self, buf):
-        return self.live_reused_as_dict.get(buf.get_name(), None)
-
-    def update_live_reused_as(self, old_live_buf, new_live_buf):
-        self.live_reused_as_dict[old_live_buf.get_name()] = new_live_buf
-        # Replace values under old_live_buf with new_live_buf
-        for key, value in self.live_reused_as_dict.items():
-            if value.get_name() == old_live_buf.get_name():
-                self.live_reused_as_dict[key] = new_live_buf
-
 
 class MemoryPlanningLine:
     def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
@@ -156,22 +146,11 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        reused_as_removed = self.reused_as.get_name() in V.graph.removed_buffers
-        node_removed = self.node.get_name() in V.graph.removed_buffers
-        cur_live_reused_as = state.live_reused_as(self.node)
-        if cur_live_reused_as is None and not node_removed:
-            cur_live_reused_as = self.node
-        if not reused_as_removed:
-            state.update_live_reused_as(self.node, self.reused_as)
-            if cur_live_reused_as is not None:
-                return ReuseLine(cur_live_reused_as, self.reused_as)
-            else:
-                return AllocateLine(self.reused_as)
-        else:
-            # reused_as_removed == True
-            if cur_live_reused_as is not None:
-                state.update_live_reused_as(self.reused_as, cur_live_reused_as)
+        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.reused_as.get_name() in V.graph.removed_buffers:
+            # we hit this case only for inplace buffers
             return NullLine()
+        return self
 
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
