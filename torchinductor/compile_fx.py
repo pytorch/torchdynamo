@@ -6,6 +6,7 @@ from typing import List
 
 import functorch
 import torch.fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
@@ -97,8 +98,12 @@ def compile_fx_inner(
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
+    shape_env = None
+    for inp in example_inputs:
+        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
+            shape_env = inp.fake_mode.shape_env
 
-    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+    graph = GraphLowering(gm, shape_env=shape_env)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()

@@ -44,11 +44,11 @@ class PositiveGuard:
 
 
 class SizeVarAllocator(object):
-    def __init__(self, prefix="s", zero_one_const=True):
+    def __init__(self, shape_env, zero_one_const=True):
         super().__init__()
-        self.prefix = prefix
+        self.shape_env = shape_env
+        self.var_to_val = self.shape_env.var_to_val
         self.val_to_var: Dict[int, Expr] = {0: Integer(0), 1: Integer(1)}
-        self.var_to_val: Dict[Expr, int] = collections.OrderedDict()
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = {}
         self.need_seed = False

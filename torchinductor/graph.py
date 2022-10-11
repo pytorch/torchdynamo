@@ -8,6 +8,7 @@ import torch
 import torch.fx
 from sympy import Integer
 from torch._decomp import get_decompositions
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 from . import config
@@ -38,36 +39,16 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        size = [self.sizevars[i] for i in ex.size()]
-        stride = [None] * len(size)
-        for i, val in enumerate(ex.stride()):
-            if val in (0, 1):
-                stride[i] = Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None and ex.stride()[i] >= 0
-            }
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex.stride()[i] in candidates:
-                    stride[i] = candidates[ex.stride()[i]]
-                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = sorted(
-                    [
-                        (ex.stride()[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ]
-                )[0]
-                stride[i] = self.sizevars[val]
+        if not self.reuse_shape_env:
+            size = ex.size()
+            stride = ex.stride()
+        else:
+            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+
+        size = [i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in ex.shape]
+        stride = [i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in ex.stride()]
         return size, stride
+
 
     def static_sizes_strides(self, ex: torch.Tensor):
         """
@@ -77,9 +58,16 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs=None):
+    def __init__(self, gm: torch.fx.GraphModule, shape_env=None, num_dynamic_inputs=None):
         super().__init__(gm)
-        self.sizevars = SizeVarAllocator("s")
+        if shape_env is None:
+            shape_env = ShapeEnv()
+            self.reuse_shape_env = False
+        else:
+            self._shape_env = shape_env
+            self.reuse_shape_env = True
+        self._shape_env = shape_env
+        self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs = {}
         self.graph_inputs_original = {}
         self.graph_outputs = None
@@ -215,14 +203,7 @@ class GraphLowering(torch.fx.Interpreter):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
-            shape_env = None
-            for i in example.shape:
-                if isinstance(i, torch.SymIntNode):
-                    shape_env = i.get_pyobj().shape_env
-            sizes = tuple([i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in example.shape ])
-            strides = tuple([i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in example.stride()])
-            if shape_env is not None:
-                self.sizevars.var_to_val = shape_env.var_to_val
+            sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
         tensor = TensorBox.create(
             InputBuffer(
