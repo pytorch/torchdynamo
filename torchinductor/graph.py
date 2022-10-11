@@ -320,6 +320,15 @@ class GraphLowering(torch.fx.Interpreter):
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
+            elif (
+                len(n.args) > 1
+                and isinstance(result, TensorBox)
+                and result.should_realize()
+            ):
+                # Prevent excessive accumulation in a computed buffer, when
+                # there are multiple branches meach with small number of memory
+                # reads, but they converge to a user.
+                result.realize_hint()
         return result
 
     def codegen(self):

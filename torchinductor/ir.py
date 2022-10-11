@@ -962,6 +962,9 @@ class BaseView(IRNode):
     def mark_reuse(self, users):
         return self.data.mark_reuse(users)
 
+    def should_realize(self):
+        return self.data.should_realize()
+
     def realize(self):
         return self.data.realize()
 
@@ -1434,6 +1437,9 @@ class BaseConstant(IRNode):
         return self.device
 
     def mark_reuse(self, users):
+        pass
+
+    def should_realize(self):
         pass
 
     def get_reads(self):
@@ -3334,6 +3340,12 @@ class StorageBox(MutableBox):
         if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
 
+    def should_realize(self):
+        return isinstance(self.data, (Pointwise, Reduction)) and (
+            self.num_reads() > config.realize_reads_threshold
+            or len(self.inner_fn_str()) > config.realize_bytes_threshold
+        )
+
     def mark_reuse(self, users):
         """
         A heuristic to decide if we should realize a tensor
@@ -3352,8 +3364,7 @@ class StorageBox(MutableBox):
             users > 1
             and isinstance(self.data, (Pointwise, Reduction))
             and (
-                self.num_reads() > config.realize_reads_threshold
-                or len(self.inner_fn_str()) > config.realize_bytes_threshold
+                self.should_realize()
                 or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
         ):
