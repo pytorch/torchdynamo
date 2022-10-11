@@ -180,3 +180,16 @@ class TestDistributed(torchdynamo.testing.TestCase):
         opt_outputs = opt_fn(inputs)
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    def test_empty_graph(self):
+        def fn():
+            get_world_size = torch.distributed.distributed_c10d.get_world_size()
+            return (get_world_size,)
+
+        opt_fn = torchdynamo.optimize("inductor")(fn)
+        res = None
+        try:
+            res = opt_fn()[0]
+        except Exception:
+            pass
+        self.assertEqual(res, 1)
