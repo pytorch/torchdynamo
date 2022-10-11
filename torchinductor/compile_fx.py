@@ -333,7 +333,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
-        out = compile_fx_inner(
+        return compile_fx_inner(
             model,
             example_inputs,
             num_fixed=fixed,
@@ -345,7 +345,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
-        out = compile_fx_inner(
+        return compile_fx_inner(
             model,
             example_inputs,
             num_fixed=fixed,
@@ -353,7 +353,6 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             is_backward=True,
             graph_id=graph_id,
         )
-        return out
 
     with overrides.patch_functions():
 
