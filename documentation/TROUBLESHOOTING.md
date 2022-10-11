@@ -29,9 +29,10 @@ We're also actively developing debug tools, profilers, and improving our errors/
 | Minifier for any backend            | Find smallest subgraph which reproduces errors for any backend                                                               | set environment variable TORCHDYNAMO_REPRO_AFTER="torchdynamo"                |
 | Minifier for TorchInductor          | If the error is known to occur after AOTAutograd find smallest subgraph wich reproduces errors during TorchInductor lowering | set environment variable TORCHDYNAMO_REPRO_AFTER="aot"                       |
 | `torchdynamo.explain`               | Find graph breaks and display reasoning for them                                                                             | `torchdynamo.explain(fn, *inputs)`                                           |
-| Record/Replay (in progress)         | Record and replay frames which to reproduce errors during graph capture                                                      | `torchdynamo.config.replay_record_enabled = True`                            |
+| Record/Replay         | Record and replay frames which to reproduce errors during graph capture                                                      | `torchdynamo.config.replay_record_enabled = True`                            |
 | TorchDynamo function name filtering | only compile functions with the given name to reduce noise when debugging an issue                                           | set environment variable TORCHDYNAMO_DEBUG_FUNCTION=\<name\>                 |
-| TorchInductor Tracing               | Show time taken in each TorchInductor stage + output code and graph visualization                                            | set the environment variable TORCHINDUCTOR_TRACE=1                           | s |
+| TorchInductor Debug logging | Print general TorchInductor debug info and generated Triton/C++ code | `torchinductor.config.debug = True` |
+| TorchInductor Tracing               | Show time taken in each TorchInductor stage + output code and graph visualization                                            | set the environment variable TORCHINDUCTOR_TRACE=1 or `torchinductor.config.trace.enabled = True`                           | s |
 
 # Guide to Diagnosing Runtime Errors
 Below is the TorchDynamo compiler stack. 
@@ -109,7 +110,9 @@ As the message suggests you can set `torchdynamo.config.verbose=True` to get a f
 - `logging.WARNING` (default): Print graph breaks in addition to all below log levels
 - `logging.ERROR`: Print errors only
 
-If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to enable this. Setting the environment variable TORCHDYNAMO_DEBUG_FUNCTION to the desired function name will only run torchdynamo on functions with that name. Additionally there is a record/replay tool [being developed](https://github.com/pytorch/torchdynamo/pull/1089) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
+If a model is sufficiently large, the logs can become overwhelming. If an error occurs deep within a model's python code, it can be useful to execute only the frame in which the error occurs to enable easier debugging. There are two tools available to enable this:
+- Setting the environment variable TORCHDYNAMO_DEBUG_FUNCTION to the desired function name will only run torchdynamo on functions with that name.
+- There is a record/replay tool (set `torchdynamo.config.replay_record_enabled = True`) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
 
 ## TorchInductor Errors
@@ -352,7 +355,7 @@ some_fun(x)
 Torchdynamo will attempt to compile all of the torch/tensor operations within some_fun into a single FX graph, but it may fail to capture everything into one graph.
 
 Some graph break reasons are insurmountable to TorchDynamo, and can't be easily fixed.
-- calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without TorchDynamo being able to introduce necessary guards to ensure that the compiled program would be safe to reuse. Graph breaks can hinder performance if the resulting fragments are small. To maximize performance, it's important to have as few graph breaks as possible.
+- calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without TorchDynamo being able to introduce necessary [guards](./GuardsOverviewPt1.md) to ensure that the compiled program would be safe to reuse. Graph breaks can hinder performance if the resulting fragments are small. To maximize performance, it's important to have as few graph breaks as possible.
 
 ### Identifying the cause of a graph break
 
@@ -433,11 +436,14 @@ TBD
 # File an Issue
 You should feel encouraged to [file a github issue](https://github.com/pytorch/torchdynamo/issues) and expect a timely response.
 
-Before filing an issue, read over the README.md, TROUBLESHOOTING.md, and search for similar issues.
+Before filing an issue, read over the [README](../README.md), [TROUBLESHOOTING](./TROUBLESHOOTING.md), and search for similar issues.
 
 When filing an issue, please include
-- a minimal repro script if possible
+- your OS/python/pytorch/CUDA/triton info by running:
+```shell
+python tools/verify_install.py
+```
+- a minimal repro script if possible, which can be generated by running Minifier
 - a description of the error
 - the expected behavior
-- a log (set `torchdynamo.config.log_file` to a valid file name to dump the logs to a file and `torchdynamo.config.log_level=logging.DEBUG`)
-- your OS/python/pytorch version
+- a log (set `torchdynamo.config.log_file` to a valid file name to dump the logs to a file and `torchdynamo.config.log_level = logging.DEBUG` and `torchdynamo.config.verbose = True`)
