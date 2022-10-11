@@ -25,6 +25,7 @@ try:
     import sympy
 
     importlib.import_module("functorch")
+    importlib.import_module("filelock")
 
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
@@ -46,7 +47,7 @@ except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch")
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
 HAS_CPU = False
