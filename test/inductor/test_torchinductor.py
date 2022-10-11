@@ -6,12 +6,14 @@ import importlib
 import random
 import sys
 import unittest
+import weakref
 from unittest.mock import patch
 
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils._pytree import tree_unflatten
 
@@ -3653,6 +3655,56 @@ class CommonTemplate:
             rand_strided((), (), device="cpu"),
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    def test_list_clearing(self):
+
+        if self.device == "cpu":
+            contexts = [contextlib.nullcontext]
+        else:
+            contexts = [
+                contextlib.nullcontext,
+                lambda: patch.object(config.triton, "cudagraphs", True),
+            ]
+
+        for context in contexts:
+            with context():
+                inps = [
+                    torch.rand([5, 5]).to(self.device),
+                    torch.rand([5, 5]).to(self.device),
+                ]
+                inp_refs = [weakref.ref(inp) for inp in inps]
+
+                def fn(x, y):
+                    a = x + y
+                    return (a @ a,)
+
+                fn_fx = make_fx(fn)(inps[0], inps[1])
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+
+                test_self = self
+                matmul_seen = False
+
+                class TestRefMode(TorchDispatchMode):
+                    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+
+                        nonlocal inps
+                        nonlocal inp_refs
+                        nonlocal test_self
+                        nonlocal matmul_seen
+
+                        # by matmul, inputs should be deallocated
+                        if func is aten.mm.out:
+                            matmul_seen = True
+                            test_self.assertEqual(len(inps), 0)
+                            test_self.assertIsNone(inp_refs[0]())
+                            test_self.assertIsNone(inp_refs[1]())
+
+                        return func(*args, **kwargs)
+
+                with TestRefMode():
+                    fn_compiled(inps)
+                self.assertTrue(matmul_seen)
 
 
 if HAS_CPU:
