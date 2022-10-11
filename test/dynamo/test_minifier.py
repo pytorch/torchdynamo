@@ -58,7 +58,7 @@ class MinfierTests(torchdynamo.testing.TestCase):
         inner()
         self.assertTrue(os.path.exists(repro_file))
 
-    def test_after_aot(self):
+    def _test_around_aot(self, before_aot):
         mod = MockModule()
         opt_mod = torchdynamo.optimize("inductor")(mod)
         repro_dir = "/tmp/test_minifier"
@@ -69,11 +69,21 @@ class MinfierTests(torchdynamo.testing.TestCase):
         @patch.object(torchdynamo.config, "repro_dir", repro_dir)
         def inner():
             x = torch.randn(4)
+            x.requires_grad = before_aot
             try:
                 opt_mod(x)
-            except Exception:
-                pass
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                # pass
 
         inner()
 
         self.assertTrue(os.path.exists(repro_file))
+
+    def test_before_aot(self):
+        self._test_around_aot(True)
+
+    def test_after_aot(self):
+        self._test_around_aot(False)
