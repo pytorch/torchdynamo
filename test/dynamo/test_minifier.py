@@ -84,7 +84,7 @@ class MinfierTests(torchdynamo.testing.TestCase):
 
         self.assertTrue(os.path.exists(repro_file))
 
-    def test_before_aot(self):
+    def test_at_aot(self):
         self._test_around_aot(True)
 
     def test_after_aot(self):
