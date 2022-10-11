@@ -918,6 +918,13 @@ class BenchmarkRunner:
             self.grad_scaler = torch.cuda.amp.GradScaler()
             self.autocast = torch.cuda.amp.autocast
 
+    def init_optimizer(self, device, params):
+        if device == "cuda":
+            # capturable is only supported on cuda at the moment
+            self.optimizer = torch.optim.Adam(params, capturable=True)
+        else:
+            self.optimizer = None
+
     @property
     def args(self):
         return self._args

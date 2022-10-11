@@ -263,11 +263,7 @@ class TimmRunnner(BenchmarkRunner):
         else:
             model.eval()
 
-        if device == "cuda":
-            # capturable is only supported on cuda at the moment
-            self.optimizer = torch.optim.Adam(model.parameters(), capturable=True)
-        else:
-            self.optimizer = None
+        self.init_optimizer(device, model.parameters())
 
         self.validate_model(model, example_inputs)
 
