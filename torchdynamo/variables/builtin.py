@@ -325,7 +325,6 @@ class BuiltinVariable(VariableTracker):
             return args[0]
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
-
         if handler:
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
@@ -662,8 +661,17 @@ class BuiltinVariable(VariableTracker):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
             if source:
-                example_value = obj.proxy.node.meta["example_value"].grad
-                return VariableBuilder(tx, source)(example_value).add_options(options)
+                # We are going to be raising this tensor as grapharg. So, ensure
+                # that we have real grad value instead of fake tensor value.
+                # Walk through the inputs of the subgraph and find if we already
+                # have the original tensor stored in the graphargs.
+                for grapharg in tx.output.graphargs:
+                    if grapharg.source == source.base:
+                        example_value = grapharg.example.grad
+                        return VariableBuilder(tx, source)(example_value).add_options(
+                            options
+                        )
+                unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
         elif isinstance(

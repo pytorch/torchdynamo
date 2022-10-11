@@ -27,6 +27,7 @@ from torch.utils._pytree import tree_map
 from .. import config
 from .. import variables
 from ..exc import TorchRuntimeError
+from ..exc import Unsupported
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -136,6 +137,8 @@ class TensorVariable(VariableTracker):
                         example_value = wrap_fake_exception(
                             lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
                         )
+                except Unsupported:
+                    raise
                 except RuntimeError as e:
                     if use_fake_tensors and isinstance(e, DataDependentOutputException):
                         if (
@@ -266,6 +269,16 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
+        elif proxy.node.target == torch._C._DisableFuncTorch:
+            from . import UserDefinedObjectVariable
+
+            return UserDefinedObjectVariable(example_value)
+        elif proxy.node.target.__name__ == "set_state" and isinstance(
+            proxy.node.target.__self__, torch._C.Generator
+        ):
+            from . import TorchVariable
+
+            return TorchVariable(proxy.node.target)
         else:
             assert (
                 False

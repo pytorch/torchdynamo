@@ -54,7 +54,7 @@ try:
 
     CppCodeCache.load("")
     HAS_CPU = True
-except (CalledProcessError, OSError):
+except (CalledProcessError, OSError, torchinductor.exc.InvalidCxxCompiler):
     pass
 
 aten = torch.ops.aten
@@ -68,6 +68,7 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 torchinductor.config.triton.autotune = False  # too slow
 
 
@@ -419,6 +420,19 @@ class TestIndexingSimplification(unittest.TestCase):
         # Constant fold from divisor into base
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
         self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
+
+        # Nested modular indexing is correctly simplified
+        var_ranges = {"i1": 13, "i2": 121}
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        var_ranges = {"i2": 784}
+        expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
+        expected = IndexingDiv(ModularIndexing(i2, 1, 28), 7)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
@@ -1376,6 +1390,50 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
+    def test_conv2d_channels_last(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(3, 3, 1, 1),
+            ToTuple(),
+        )
+        # only weight is channels_last
+        self.common(
+            m.to(memory_format=torch.channels_last),
+            (torch.randn([2, 3, 16, 16]),),
+        )
+        # only activation is channels_last
+        self.common(
+            m,
+            (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+        )
+        # activation and weight are all channels_last
+        self.common(
+            m.to(memory_format=torch.channels_last),
+            (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+        )
+
+    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
+    def test_conv3d_channels_last(self):
+        m = torch.nn.Sequential(
+            torch.nn.Conv3d(3, 3, 1, 1),
+            ToTuple(),
+        )
+        # only weight is channels_last
+        self.common(
+            m.to(memory_format=torch.channels_last_3d),
+            (torch.randn([2, 3, 16, 16, 16]),),
+        )
+        # only activation is channels_last
+        self.common(
+            m,
+            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
+        )
+        # activation and weight are all channels_last
+        self.common(
+            m.to(memory_format=torch.channels_last_3d),
+            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
+        )
+
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
             return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
@@ -2126,13 +2184,14 @@ class CommonTemplate:
                 torch.index_select(torch.index_select(a, 2, b), 1, b),
             )
 
-        self.common(
-            fn,
-            (
-                torch.randn(8, 8, 8),
-                torch.tensor([0, 0, 2, 1], dtype=torch.int64),
-            ),
-        )
+        for ind_dtype in (torch.int32, torch.int64):
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8, 8),
+                    torch.tensor([0, 0, 2, 1], dtype=ind_dtype),
+                ),
+            )
 
     # https://github.com/pytorch/torchdynamo/issues/467
     @patch.object(torchdynamo.config, "fake_tensor_propagation", False)

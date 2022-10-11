@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+import torch.onnx.operators
 from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
@@ -1316,8 +1317,28 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    def test_torch_profiler(self):
+        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        def fn(x):
+            y = x**2
+            with torch.profiler.profile():
+                y = y + 2
+                with torch.profiler.record_function("my_function"):
+                    z = y**3
+                    z.tolist()  # graph break
+                    z = z + 1
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_fn = torchdynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as AutogradProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
@@ -1535,14 +1556,13 @@ class MiscTests(torchdynamo.testing.TestCase):
     @patch.object(torchdynamo.config, "fake_tensor_propagation", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
-            return torch.quantize_per_tensor(
-                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
-            )
+            return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
 
         x = torch.randn(2, 2)
-        with self.assertRaises(RuntimeError):
-            opt_f = torchdynamo.optimize_assert(torchdynamo.testing.CompileCounter())(f)
-            opt_f(x)
+        cnts = torchdynamo.testing.CompileCounter()
+        opt_f = torchdynamo.optimize(cnts)(f)
+        opt_f(x)
+        self.assertEqual(cnts.op_count, 0)
 
         torchdynamo.reset()
         with patch.object(torchdynamo.config, "fake_tensor_propagation", False):
@@ -2145,6 +2165,28 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = f(torch.ones(6), 3)
         self.assertEqual(result, 3)
 
+    @patch.object(torchdynamo.config, "dynamic_shapes", True)
+    def test_onnx_shape_as_tensor(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x):
+            return 1 + torch._shape_as_tensor(x)[0]
+
+        gm, _ = torchdynamo.export(f, torch.ones(6))
+
+        input_one_dim = torch.ones(6)
+        input_two_dims = torch.ones(7, 4)
+        self.assertEqual(f(input_one_dim), 7)
+        self.assertEqual(f(input_two_dims), 8)
+        self.assertEqual(f(input_two_dims), 8)
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f_onnx(x):
+            return 1 + torch.onnx.operators.shape_as_tensor(x)[0]
+
+        self.assertEqual(f_onnx(input_one_dim), 7)
+        self.assertEqual(f_onnx(input_two_dims), 8)
+        self.assertEqual(f_onnx(input_two_dims), 8)
+
     def test_cond(self):
         from functorch.experimental.cond import cond
 
@@ -2598,6 +2640,20 @@ class MiscTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    def test_repro_graph_breaks_in__get_item_by_idx(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = torch.nn.Sequential(
+                    torch.nn.Linear(3, 3), torch.nn.Linear(3, 3)
+                )
+
+            def forward(self, x):
+                return self.mod[0](x)
+
+        m = Mod()
+        graph, _ = torchdynamo.export(m, torch.randn(3, 3))
 
     def test_empty_graph(self):
         import torch.distributed as dist
