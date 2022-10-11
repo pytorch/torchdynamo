@@ -385,7 +385,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(SizeArg(inner, sympy.expand(outer)))
+            precompile_args.append(SizeArg(inner, sympy_symbol(outer)))
         return arg_defs, call_args, precompile_args
 
     def aliases(self):

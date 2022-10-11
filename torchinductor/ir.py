@@ -1851,6 +1851,15 @@ class NoneAsConstantBuffer(IRNode):
         return "None"
 
 
+class ShapeAsConstantBuffer(IRNode):
+    def __init__(self, shape):
+        super().__init__()
+        self.shape = shape
+
+    def codegen_reference(self):
+        return str(self.shape)
+
+
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops
@@ -2274,6 +2283,8 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
+        if isinstance(x, sympy.Expr):
+            return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())

@@ -39,16 +39,19 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        if not self.reuse_shape_env:
+        if self.reuse_shape_env:
             size = ex.size()
             stride = ex.stride()
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in ex.shape]
-        stride = [i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in ex.stride()]
+        size = [
+            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in size
+        ]
+        stride = [
+            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
+        ]
         return size, stride
-
 
     def static_sizes_strides(self, ex: torch.Tensor):
         """
@@ -58,7 +61,9 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def __init__(self, gm: torch.fx.GraphModule, shape_env=None, num_dynamic_inputs=None):
+    def __init__(
+        self, gm: torch.fx.GraphModule, shape_env=None, num_dynamic_inputs=None
+    ):
         super().__init__(gm)
         if shape_env is None:
             shape_env = ShapeEnv()
@@ -271,7 +276,9 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
-            isinstance(x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer))
+            isinstance(
+                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+            )
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
@@ -344,4 +351,5 @@ class GraphLowering(torch.fx.Interpreter):
             node.get_name()
             for node in self.graph_outputs
             if not isinstance(node, ir.NoneAsConstantBuffer)
+            and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]

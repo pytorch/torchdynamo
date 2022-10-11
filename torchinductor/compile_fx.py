@@ -6,10 +6,10 @@ from typing import List
 
 import functorch
 import torch.fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 from . import config
@@ -114,8 +114,8 @@ def compile_fx_inner(
     complex_memory_overlap_inputs = False
 
     if (
-        False and
-        cudagraphs
+        False
+        and cudagraphs
         and set(graph.device_types) == {"cuda"}
         and not graph.mutated_inputs
         and not has_incompatible_cudagraph_ops(gm)
@@ -154,18 +154,18 @@ def clone_preserve_strides(x):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
-    check_inputs = [
-        i
-        for i in range(len(inputs))
-        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
-        and inputs[i].device.type == "cuda"
-    ]
+    # check_inputs = [
+    #     i
+    #     for i in range(len(inputs))
+    #     if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+    #     and inputs[i].device.type == "cuda"
+    # ]
 
-    if len(check_inputs) == 0:
-        return model
+    # if len(check_inputs) == 0:
+    #     return model
 
     def run(*new_inputs):
-        for i in check_inputs:
+        for i in range(len(new_inputs)):
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 if isinstance(new_inputs, tuple):
                     new_inputs = list(new_inputs)

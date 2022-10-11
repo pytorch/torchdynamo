@@ -21,7 +21,9 @@ from . import ir
 from . import overrides
 from .decomposition import decompositions
 from .decomposition import get_decompositions
-from .ir import ExpandView, IndexingConstant, IndexingDiv
+from .ir import ExpandView
+from .ir import IndexingConstant
+from .ir import IndexingDiv
 from .ir import PermuteView
 from .ir import Pointwise
 from .ir import Reduction
@@ -257,16 +259,17 @@ def promote_constants(inputs):
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
-            out.append(ExpandView.create(
-                ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
-            ))
+            out.append(
+                ExpandView.create(
+                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+                )
+            )
         elif isinstance(x, sympy.Expr):
             out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
         else:
             out.append(x)
 
     return out
-
 
 
 def make_pointwise(
@@ -3298,6 +3301,7 @@ register_inplace(aten.sigmoid_, sigmoid)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
+
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
     return a.get_numel()
@@ -3307,9 +3311,11 @@ def sym_numel(a):
 def op_mul(a, b):
     return a * b
 
+
 @register_lowering(operator.add)
 def op_add(a, b):
     return a + b
+
 
 @register_lowering(operator.floordiv)
 def op_floordiv(a, b):

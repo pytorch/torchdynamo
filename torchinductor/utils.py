@@ -200,6 +200,7 @@ def sympy_str(expr: sympy.Expr):
 def sympy_symbol(name):
     return sympy.Symbol(name, integer=True, positive=True)
 
+
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
     """
     xreplace is faster than subs, but is way more picky

@@ -372,13 +372,6 @@ class SizeVarAllocator(object):
         return var
 
     def size_hint(self, expr: Expr) -> int:
-        if isinstance(expr, sympy.Expr):
-            additional_mapping = {}
-            for s in expr.free_symbols:
-                if not s.is_integer:
-                    additional_mapping[s] = sympy_symbol(s.name)
-
-            expr = sympy_subs(expr, additional_mapping)
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
         return int(out)
 
