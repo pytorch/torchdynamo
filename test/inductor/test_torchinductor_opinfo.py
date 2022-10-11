@@ -431,9 +431,10 @@ inductor_override_kwargs = {
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
+    # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
     "linalg.solve_triangular": {"check_gradient": False},
     "linalg.lu_factor": {"check_gradient": False},
-    # "linalg.lu_factor_ex": {"check_gradient": False},
+    "linalg.lu_factor_ex": {"check_gradient": False},
     # "linalg.lu_solve": {"check_gradient": False},
 }
 
