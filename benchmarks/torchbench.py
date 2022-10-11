@@ -282,7 +282,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size = benchmark.batch_size
 
         self.init_optimizer(device, model.parameters())
- 
+
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":
