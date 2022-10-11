@@ -152,6 +152,7 @@ def check_model(
     copy_to_cuda=True,
     reference_in_float=True,
     assert_equal=True,
+    check_gradient=False,
 ):
     torchdynamo.reset()
 
@@ -243,6 +244,43 @@ def check_model(
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
 
+    if check_gradient:
+        def gather_leaf_tensors(args, kwargs):
+            leaf_tensors = []
+            args, args_spec = tree_flatten(args)
+            kwargs, kwargs_spec = tree_flatten(kwargs)
+            args = args + kwargs
+            for arg in args:
+                if not isinstance(arg, torch.Tensor):
+                    continue
+                if arg.requires_grad:
+                    leaf_tensors.append(arg)
+            return leaf_tensors
+
+        def compute_grads(args, kwrags, results):
+            flat_results, _ = tree_flatten(results)
+            flat_diff_results = [r for r in flat_results if r.requires_grad]
+            assert len(flat_diff_results) > 0
+
+            grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
+
+            leaf_tensors = gather_leaf_tensors(ref_inputs, ref_kwargs)
+            assert len(leaf_tensors) > 0
+            return torch.autograd.grad(flat_diff_results, leaf_tensors,
+                                    grads, allow_unused=True, retain_graph=True)
+
+        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct)
+        actual_grad = compute_grads(example_inputs, kwargs, actual)
+
+        self.assertEqual(
+            actual_grad,
+            correct_grad,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            exact_dtype=exact_dtype,
+        )
+
     torchdynamo.reset()
 
 
@@ -261,6 +299,7 @@ def check_model_cuda(
     copy_to_cuda=True,
     reference_in_float=True,
     assert_equal=True,
+    check_gradient=False,
 ):
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -287,6 +326,7 @@ def check_model_cuda(
         nopython=nopython,
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
+        check_gradient=check_gradient,
     )
 
     if check_lowp:
@@ -312,6 +352,7 @@ def check_model_cuda(
             nopython=nopython,
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
+            check_gradient=check_gradient,
         )
 
 

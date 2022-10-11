@@ -357,6 +357,14 @@ inductor_expected_failures_single_sample["cuda"] = {
     "view_as_complex": {f16, f32, f64},
 }
 
+inductor_gradient_expected_failures_single_sample = defaultdict(dict)
+
+inductor_gradient_expected_failures_single_sample["cpu"] = {
+}
+
+inductor_gradient_expected_failures_single_sample["cuda"] = {
+}
+
 inductor_should_fail_with_exception = defaultdict(dict)
 
 inductor_should_fail_with_exception["cpu"] = {}
@@ -394,6 +402,8 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+
+    "gradient": {"check_gradient": False}   # segfault on check_gradient
 }
 
 # Always test with all sample for following ops
@@ -448,13 +458,13 @@ class TestInductorOpInfo(TestCase):
         else:
             test_expect = TestExpect.SUCCESS
 
-        additional_kwargs = {}
+        overridden_kwargs = {}
         if op_name in inductor_override_kwargs:
-            additional_kwargs = inductor_override_kwargs[op_name]
+            overridden_kwargs = inductor_override_kwargs[op_name]
         elif (op_name, device_type) in inductor_override_kwargs:
-            additional_kwargs = inductor_override_kwargs[(op_name, device_type)]
+            overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
-            additional_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
+            overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
 
         func = op.get_op()
 
@@ -489,24 +499,36 @@ class TestInductorOpInfo(TestCase):
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
+                    adjusted_kwargs = {
+                        "check_lowp": False,
+                        "nopython": True,
+                        "copy_to_cuda": False,
+                        "reference_in_float": False,
+                        "check_gradient": requires_grad,
+                    }
+                    adjusted_kwargs.update(overridden_kwargs)
+
                     self.check_model_cuda(
                         fn,
                         args,
                         kwargs,
-                        check_lowp=False,
-                        nopython=True,
-                        copy_to_cuda=False,
-                        reference_in_float=False,
-                        **additional_kwargs,
+                        **adjusted_kwargs,
                     )
                 elif device_type == "cpu":
+                    adjusted_kwargs = {
+                        "check_lowp": False,
+                        "nopython": True,
+                        "check_gradient": requires_grad,
+                    }
+                    adjusted_kwargs.update(overridden_kwargs)
+
                     self.check_model(
                         fn,
                         args,
                         kwargs,
                         check_lowp=False,
                         nopython=True,
-                        **additional_kwargs,
+                        **adjusted_kwargs,
                     )
 
         except Exception as e:
