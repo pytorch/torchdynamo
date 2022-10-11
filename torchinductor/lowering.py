@@ -1207,6 +1207,10 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
+    if index < 0:
+        index = index + x.get_size()[dim]
+    V.graph.sizevars.guard_leq(0, index)
+    V.graph.sizevars.guard_lt(index, x.get_size()[dim])
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -1214,7 +1218,7 @@ def select_scatter(x, src, dim: int, index: int):
         return ops.where(
             ops.eq(
                 ops.index_expr(idx[dim], torch.int32),
-                ops.constant(index, torch.int32),
+                ops.index_expr(index, torch.int32),
             ),
             src_loader(idx),
             x_loader(idx),

@@ -403,6 +403,7 @@ inductor_all_samples = {
     "index_put",
     "index_copy",
     "scatter_reduce.sum",
+    "select_scatter",
 }
 
 
