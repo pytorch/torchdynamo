@@ -15,7 +15,6 @@ from torch._prims_common import Number
 from torch._prims_common import elementwise_dtypes
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
-from torch._prims_common import type_to_dtype
 
 from . import config
 from . import ir
