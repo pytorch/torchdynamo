@@ -192,7 +192,13 @@ def check_model(
     def compile_fx_wrapper(model_, example_inputs_):
         nonlocal called
         called = True
-        return compile_fx(model_, example_inputs_)
+        compiled = compile_fx_inner(model_, example_inputs_)
+
+        def run(*args):
+            args = list(args)
+            return compiled(args)
+
+        return run
 
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
@@ -207,7 +213,6 @@ def check_model(
     #     for graph in exp[2]:
     #         print("Graph", graph)
     assert called, "Ran graph without calling compile_fx"
-
     assert type(actual) == type(correct)
 
     if reference_in_float:
@@ -3625,10 +3630,10 @@ class CommonTemplate:
         )
         compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
 
-        out = compiled(torch.randn(8, 4, device=self.device))
+        out = compiled([torch.randn(8, 4, device=self.device)])
         self.assertEqual(out[0].shape, (16, 2))
 
-        out = compiled(torch.randn(12, 4, device=self.device))
+        out = compiled([torch.randn(12, 4, device=self.device)])
         self.assertEqual(out[0].shape, (24, 2))
 
     @requires_cuda()
@@ -3692,7 +3697,7 @@ if HAS_CPU:
             fn_fx = make_fx(fn)(x1, y)
             fn_compiled = compile_fx_inner(fn_fx, [x1, y])
             fn(x2, y)
-            fn_compiled(x3, y)
+            fn_compiled([x3, y])
             assert same(x2, x3)
 
         def test_no_op_squeeze(self):
@@ -3783,7 +3788,7 @@ if HAS_CUDA:
             ]
             mod = make_fx(forward)(*inps)
             compiled = compile_fx_inner(mod, inps)
-            compiled(*inps)
+            compiled(inps)
 
         @patch.object(config, "fallback_random", True)
         def test_dtype_factory_issue(self):
@@ -3799,7 +3804,7 @@ if HAS_CUDA:
 
             mod = make_fx(forward)()
             compiled = compile_fx_inner(mod, ())
-            assert compiled()[0].device.type == "cuda"
+            assert compiled([])[0].device.type == "cuda"
 
         @patch.object(config.triton, "cudagraphs", True)
         def test_expanded_inputs_cudagraphs(self):

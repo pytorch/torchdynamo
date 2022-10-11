@@ -134,6 +134,9 @@ def compile_fx_inner(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
+
+    # aot autograd needs to know we take in inputs as lists
+    result._boxed_call = True
     return result
 
 
@@ -337,7 +340,6 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             cudagraphs=cudagraphs,
             graph_id=graph_id,
         )
-        out._boxed_call = True
         return out
 
     @dynamo_utils.dynamo_timed
@@ -351,7 +353,6 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             is_backward=True,
             graph_id=graph_id,
         )
-        out._boxed_call = True
         return out
 
     with overrides.patch_functions():
