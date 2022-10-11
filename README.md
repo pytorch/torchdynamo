@@ -101,6 +101,7 @@ Here is a basic example of how to use TorchDynamo. One can decorate a function
 or a method using `torchdynamo.optimize` to enable TorchDynamo optimization.
 
 ```py
+from typing import List
 import torch
 import torchdynamo
 
