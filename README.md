@@ -51,8 +51,8 @@ that you have installed locally matches the PyTorch version you are running. For
 the command below, you will need CUDA 11.7.
 
 ```shell
-pip install --pre torch==1.14.0.dev20221010+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
-pip install -U "git+https://github.com/openai/triton@09cc2d454b442301e88d1df153214732bd8714d8#subdirectory=python"
+pip install --pre torch==1.14.0.dev20221011+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"
 pip install -U "git+https://github.com/pytorch/torchdynamo"
 ```
 
