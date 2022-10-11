@@ -1019,6 +1019,18 @@ class CommonTemplate:
             ),
         )
 
+    def test_div8(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        self.common(fn, (1024, 100))
+
     def test_sum_keepdims(self):
         def fn(a, b):
             return (torch.sum(a + b, -1, keepdim=True),)
