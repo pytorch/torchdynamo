@@ -2633,7 +2633,6 @@ class MiscTests(torchdynamo.testing.TestCase):
         graph, _ = torchdynamo.export(m, torch.randn(3, 3))
 
 
-
 class CustomFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
