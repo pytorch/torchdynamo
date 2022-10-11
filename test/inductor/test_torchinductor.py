@@ -136,7 +136,7 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
-def compute_grads(args, kwrags, results):
+def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
         args, _ = tree_flatten(args)
         kwargs, _ = tree_flatten(kwargs)
@@ -149,10 +149,6 @@ def compute_grads(args, kwrags, results):
     flat_results, _ = tree_flatten(results)
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
-
-    grads = [
-        torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results
-    ]
 
     leaf_tensors = gather_leaf_tensors(args, kwrags)
     assert len(leaf_tensors) > 0
@@ -240,9 +236,9 @@ def check_model(
 
     assert type(actual) == type(correct)
 
+    correct_flat, correct_spec = tree_flatten(correct)
+    actual_flat, _ = tree_flatten(actual)
     if reference_in_float:
-        correct_flat, correct_spec = tree_flatten(correct)
-        actual_flat, _ = tree_flatten(actual)
         correct_flat = tuple(
             y.to(x.dtype)
             if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
@@ -261,9 +257,6 @@ def check_model(
             exact_dtype=exact_dtype,
         )
     else:
-        correct_flat, _ = tree_flatten(correct)
-        actual_flat, _ = tree_flatten(actual)
-
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
                 assert correct_val.device == actual_val.device
@@ -274,8 +267,18 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
-        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct)
-        actual_grad = compute_grads(example_inputs, kwargs, actual)
+
+        # generate random unit norm gradients
+        grads = [
+            torch.rand(r.shape, device=r.device, dtype=r.dtype)
+            for r in correct_flat
+            if r.requires_grad
+        ]
+        for g in grads:
+            g /= g.norm()
+
+        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
+        actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
 
         self.assertEqual(
             actual_grad,
