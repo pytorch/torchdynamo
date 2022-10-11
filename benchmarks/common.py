@@ -55,7 +55,6 @@ output_filename = None
 CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
-    "speech_transformer",
     # Huggingface
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
@@ -65,15 +64,12 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
-    "pytorch_struct",
-    "speech_transformer",
-    "vision_maskrcnn",
     "moco",
+    "pytorch_struct",
+    "vision_maskrcnn",
     # Huggingface
     "AlbertForMaskedLM",  # OOM
     "AlbertForQuestionAnswering",  # OOM
-    "AllenaiLongformerBase",
-    "BartForConditionalGeneration",
     "BigBird",
     "M2M100ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
@@ -85,7 +81,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "convit_base",  # fp64_OOM
     "mobilevit_s",  # Accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
-    "tacotron2",
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
@@ -93,13 +88,13 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     # TorchBench
     "detectron2",
     "hf_Reformer",
+    "moco",  # accuracy
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
+    "vision_maskrcnn",  # accuracy
     "yolov3",  # Accuracy
     # Huggingface
-    "AllenaiLongformerBase",  # OOM
-    "BartForConditionalGeneration",  # OOM
     "BigBird",
     "YituTechConvBert",
     # TIMM
@@ -120,6 +115,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "hf_GPT2",
     "hf_Reformer",
     "mobilenet_v3_large",
+    "moco",
     "pytorch_struct",
     "vgg16",
     "speech_transformer",  # from functionalization
@@ -138,23 +134,14 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "resnet50_quantized_qat",
     "timm_regnet",
     # Huggingface
-    "AlbertForMaskedLM",
     "AllenaiLongformerBase",
-    "BartForCausalLM",
-    "BartForConditionalGeneration",
-    "DebertaForMaskedLM",
-    "DebertaForQuestionAnswering",
-    "DebertaV2ForMaskedLM",
-    "GPTNeoForCausalLM",
-    "M2M100ForConditionalGeneration",
-    "MobileBertForMaskedLM",
-    "PegasusForConditionalGeneration",
-    "T5ForConditionalGeneration",
-    "T5Small",
-    "XGLMForCausalLM",
-    "XLNetLMHeadModel",
-    "PegasusForCausalLM",
-    "YituTechConvBert",
+    "AlbertForMaskedLM",  # OOM
+    "BartForConditionalGeneration",  # OOM
+    "M2M100ForConditionalGeneration",  # OOM
+    "MBartForConditionalGeneration",  # OOM
+    "MT5ForConditionalGeneration",  # OOM
+    "PegasusForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # fp64_OOM
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
@@ -166,7 +153,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
-    "volo_d1_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
