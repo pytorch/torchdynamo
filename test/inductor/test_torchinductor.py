@@ -3474,7 +3474,7 @@ class CommonTemplate:
         result = run(torch.randn([8, 32], device=self.device))
         result.sum().backward()
 
-        expected_kernel = 4
+        expected_kernel = 6
         if config.triton.mm != "aten" and self.device == "cuda":
             # fwd: 2 * (mm+dropout) kernels = 2 kernels
             # bwd: dropout + (mm) + 2 * (mm+dropout) kernels = 4 kernels
