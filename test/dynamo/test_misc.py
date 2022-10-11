@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+import torch.onnx.operators
 from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
@@ -2163,6 +2164,28 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         result = f(torch.ones(6), 3)
         self.assertEqual(result, 3)
+
+    @patch.object(torchdynamo.config, "dynamic_shapes", True)
+    def test_onnx_shape_as_tensor(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x):
+            return 1 + torch._shape_as_tensor(x)[0]
+
+        gm, _ = torchdynamo.export(f, torch.ones(6))
+
+        input_one_dim = torch.ones(6)
+        input_two_dims = torch.ones(7, 4)
+        self.assertEqual(f(input_one_dim), 7)
+        self.assertEqual(f(input_two_dims), 8)
+        self.assertEqual(f(input_two_dims), 8)
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f_onnx(x):
+            return 1 + torch.onnx.operators.shape_as_tensor(x)[0]
+
+        self.assertEqual(f_onnx(input_one_dim), 7)
+        self.assertEqual(f_onnx(input_two_dims), 8)
+        self.assertEqual(f_onnx(input_two_dims), 8)
 
     def test_cond(self):
         from functorch.experimental.cond import cond

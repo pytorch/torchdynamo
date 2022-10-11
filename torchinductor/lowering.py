@@ -1105,6 +1105,9 @@ if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
 
+fallback_arange = fallback_handler(aten.arange)
+
+
 @register_lowering([torch.arange, aten.arange])
 def arange(
     start,
@@ -1129,9 +1132,17 @@ def arange(
     if isinstance(step, float) and int(step) == step:
         step = int(step)
 
-    assert isinstance(start, int)
-    assert isinstance(end, int)
-    assert isinstance(step, int)
+    # Triton kernel doesn't support float arange yet, fallback to aten.arange
+    if not (isinstance(start, int) and isinstance(end, int) and isinstance(step, int)):
+        return fallback_arange(
+            start,
+            end,
+            step,
+            dtype=dtype,
+            device=device,
+            layout=layout,
+            pin_memory=pin_memory,
+        )
 
     dtype = dtype or torch.int64
     length = ceildiv((end - start), step)
@@ -1580,12 +1591,12 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
 
 def check_and_broadcast_indices(indices):
     assert all(
-        i.get_dtype() in (torch.int64, torch.bool, torch.uint8)
+        i.get_dtype() in (torch.int64, torch.int32, torch.bool, torch.uint8)
         for i in indices
         if i is not None
     ), f"indices must be int64, byte or bool. Got {[i.get_dtype() for i in indices if i is not None]}"
     assert all(
-        [i.get_dtype() == torch.int64 for i in indices if i is not None]
+        [i.get_dtype() in (torch.int32, torch.int64) for i in indices if i is not None]
     ), "bool indices are not supported yet"
     valid_idxs = [i for i, x in enumerate(indices) if isinstance(x, TensorBox)]
     assert len(valid_idxs) > 0, "requires at least 1 non-None index"
@@ -1756,7 +1767,6 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
-        assert False, "TODO: multiply not supported"
         reduce = "prod"
     else:
         assert reduce is None
@@ -1778,12 +1788,36 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
+fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
+
+
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
+    assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
+
     # TODO: Need to support more reduction type
-    assert reduce is None or reduce in {"sum"}
+    # For reduction of "sum", tl.atomic_add doesn't support bool or int64
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    ):
+        self.realize()
+        return fallback_scatter_reduce_(
+            self, dim, index, src, reduce, include_self=include_self
+        )
+
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
+
+    ndim = len(self.get_size())
+    if ndim == 0:
+        self = view(self, [1])
+
+    if isinstance(src, TensorBox) and len(src.get_size()) == 0:
+        src = view(src, [1])
+
+    if isinstance(index, TensorBox) and len(index.get_size()) == 0:
+        index = view(index, [1])
+
     assert -len(self.get_size()) <= dim < len(self.get_size())
 
     self.realize()
@@ -1845,6 +1879,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+
+    if ndim == 0:
+        self = view(self, [])
     return self
 
 
