@@ -71,8 +71,8 @@ class MemoryPlanningState:
         self.reuse_pool: Dict[
             Any, List["FreeIfNotReusedLine"]
         ] = collections.defaultdict(list)
-        self.reused_as_dict: Dict[
-            # key (buffer name) reused as value (buffer)
+        self.live_reused_as_dict: Dict[
+            # key (buffer name) reused as value (current live buffer)
             str,
             ir.Buffer,
         ] = {}
@@ -89,19 +89,15 @@ class MemoryPlanningState:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
 
-    def reused_as(self, buf_name):
-        if buf_name in self.reused_as_dict:
-            return self.reused_as_dict[buf_name]
-        else:
-            return None
+    def live_reused_as(self, buf):
+        return self.live_reused_as_dict.get(buf.get_name(), None)
 
-    def update_reused_as(self, buf_name, reused_as_buf):
-        # Map buf_name to reused_as_buf
-        self.reused_as_dict[buf_name] = reused_as_buf
-        # Replace values under buf_name with reused_as_buf
-        for key, value in self.reused_as_dict.items():
-            if value.get_name() == buf_name:
-                self.reused_as_dict[key] = reused_as_buf
+    def update_live_reused_as(self, old_live_buf, new_live_buf):
+        self.live_reused_as_dict[old_live_buf.get_name()] = new_live_buf
+        # Replace values under old_live_buf with new_live_buf
+        for key, value in self.live_reused_as_dict.items():
+            if value.get_name() == old_live_buf.get_name():
+                self.live_reused_as_dict[key] = new_live_buf
 
 
 class MemoryPlanningLine:
@@ -160,22 +156,21 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        old_reused_as = state.reused_as(self.node.get_name())
         reused_as_removed = self.reused_as.get_name() in V.graph.removed_buffers
         node_removed = self.node.get_name() in V.graph.removed_buffers
+        cur_live_reused_as = state.live_reused_as(self.node)
+        if cur_live_reused_as is None and not node_removed:
+            cur_live_reused_as = self.node
         if not reused_as_removed:
-            state.update_reused_as(self.node.get_name(), self.reused_as)
-            if old_reused_as is not None:
-                return ReuseLine(old_reused_as, self.reused_as)
-            elif node_removed:
-                return AllocateLine(self.reused_as)
+            state.update_live_reused_as(self.node, self.reused_as)
+            if cur_live_reused_as is not None:
+                return ReuseLine(cur_live_reused_as, self.reused_as)
             else:
-                return self
+                return AllocateLine(self.reused_as)
         else:
-            if old_reused_as is not None:
-                state.update_reused_as(self.reused_as.get_name(), old_reused_as)
-            elif not node_removed:
-                state.update_reused_as(self.reused_as.get_name(), self.node)
+            # reused_as_removed == True
+            if cur_live_reused_as is not None:
+                state.update_live_reused_as(self.reused_as, cur_live_reused_as)
             return NullLine()
 
     def codegen(self, code: IndentedBuffer):
