@@ -173,7 +173,7 @@ class TestDistributed(torchdynamo.testing.TestCase):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torchdynamo.optimize("aot_nvfuser")
+        @torchdynamo.optimize("aot_eager")
         def opt_fn(inputs):
             return ddp_m(inputs)
 
