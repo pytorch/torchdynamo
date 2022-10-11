@@ -36,7 +36,6 @@ class CheckSplitsCompiler:
         return gm
 
 
-@pytest.mark.skip("Module hangs in PyTorch CI")
 class TestDistributed(torchdynamo.testing.TestCase):
     """
     Test harness initializes dist process group
@@ -107,10 +106,6 @@ class TestDistributed(torchdynamo.testing.TestCase):
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
         """
@@ -132,10 +127,8 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
+    # hangs/crashes with inductor currently
+    @pytest.mark.skip
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
@@ -152,10 +145,6 @@ class TestDistributed(torchdynamo.testing.TestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
         """
@@ -175,10 +164,6 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 1)
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_aot_autograd(self):
         """
