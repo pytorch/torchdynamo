@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import random
 import sys
 import unittest
@@ -1198,6 +1199,48 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    def test_linear_unary(self):
+        class M(torch.nn.Module):
+            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.eltwise = eltwise_fn
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.eltwise(x)
+                return x
+
+        def _eltwise_list():
+            eltwise_list = [
+                torch.nn.ReLU(),
+                torch.nn.Sigmoid(),
+                torch.nn.Tanh(),
+                torch.nn.Hardswish(),
+                torch.nn.LeakyReLU(0.1, inplace=False),
+                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+                torch.nn.GELU(approximate="none"),
+                torch.nn.GELU(approximate="tanh"),
+            ]
+            return eltwise_list
+
+        options = itertools.product(
+            _eltwise_list(), [[2, 3, 10], [2, 10]], [True, False]
+        )
+        for eltwise_fn, input_shape, bias in options:
+            mod = M(eltwise_fn, input_shape[-1], 30, bias).eval()
+
+            def fn(x):
+                return mod(x)
+
+            v = torch.randn(input_shape)
+            self.common(
+                fn,
+                (v,),
+            )
 
     def test_gather1(self):
         def fn(a, b):
