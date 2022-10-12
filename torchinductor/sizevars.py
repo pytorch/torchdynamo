@@ -1,4 +1,3 @@
-import collections
 import dataclasses
 import functools
 import itertools
@@ -10,8 +9,6 @@ from typing import Tuple
 
 import sympy
 from sympy import Expr
-from sympy import Integer
-from sympy import Symbol
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import ir
@@ -45,19 +42,16 @@ class PositiveGuard:
 
 
 class SizeVarAllocator(object):
-    def __init__(self, shape_env=None, zero_one_const=True):
+    def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.val_to_var: Dict[int, Expr] = {0: Integer(0), 1: Integer(1)}
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = {}
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
-        if not zero_one_const:
-            self.val_to_var.clear()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
 
@@ -364,23 +358,10 @@ class SizeVarAllocator(object):
         return int(right)
 
     def __getitem__(self, val: int) -> Expr:
-        if val < 0:
-            # all variables are positive
-            return -self[-val]
-        if val in self.val_to_var:
-            return self.val_to_var[val]
-        var = Symbol(f"{self.prefix}{len(self.var_to_val)}")
-        self.val_to_var[val] = var
-        self.var_to_val[var] = val
-        return var
+        return self.shape_env.create_symbol(val)
 
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
-        if isinstance(out, sympy.Expr):
-            for s in out.free_symbols:
-                assert (
-                    s.is_integer
-                ), f"{s} has been created without the is_integer field"
         return int(out)
 
     def _lru_cache(self, fn, maxsize=None):

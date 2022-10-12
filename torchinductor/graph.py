@@ -6,7 +6,6 @@ import time
 import sympy
 import torch
 import torch.fx
-from sympy import Integer
 from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch

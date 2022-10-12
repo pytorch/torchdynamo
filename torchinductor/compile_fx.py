@@ -9,7 +9,6 @@ import torch.fx
 from functorch.compile import make_boxed_compiler
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 from . import config
