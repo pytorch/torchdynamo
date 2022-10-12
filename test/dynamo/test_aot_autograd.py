@@ -81,12 +81,8 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
             view = _stack0.view(1, 12, 1024, 513)
             return (view,)
 
-        x = torch.randn(
-            torch.Size([12, 4, 256, 513]), device="cuda", requires_grad=False
-        )
-        y = torch.randn(
-            torch.Size([12, 3, 512, 513]), device="cuda", requires_grad=True
-        )
+        x = torch.randn(torch.Size([12, 4, 256, 513]))
+        y = torch.randn(torch.Size([12, 3, 512, 513]))
         is_safe = [True]
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_fn = torchdynamo.optimize(compiler_fn)(fn)
@@ -115,12 +111,8 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
             view = _stack0.view(1, 12, 1024, 513)
             return (view,)
 
-        x = torch.randn(
-            torch.Size([12, 4, 256, 513]), device="cuda", requires_grad=False
-        )
-        y = torch.randn(
-            torch.Size([12, 3, 512, 513]), device="cuda", requires_grad=True
-        )
+        x = torch.randn(torch.Size([12, 4, 256, 513]))
+        y = torch.randn(torch.Size([12, 3, 512, 513]))
         is_safe = [True]
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_fn = torchdynamo.optimize(compiler_fn)(fn)
