@@ -25,8 +25,8 @@ inplace_buffers = False
 benchmark_harness = True
 
 # control store vs recompute heuristic
-realize_reads_threshold = 16
-realize_bytes_threshold = 8000
+realize_reads_threshold = 8
+realize_bytes_threshold = 4000
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False

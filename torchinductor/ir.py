@@ -1443,7 +1443,7 @@ class BaseConstant(IRNode):
         pass
 
     def has_exceeded_max_reads(self):
-        pass
+        return False
 
     def get_reads(self):
         return ()
@@ -3344,7 +3344,7 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_exceeded_max_reads(self):
-        return isinstance(self.data, (Pointwise, Reduction)) and (
+        return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_reads_threshold
             or len(self.inner_fn_str()) > config.realize_bytes_threshold
         )
