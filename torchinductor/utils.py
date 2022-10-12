@@ -1,5 +1,6 @@
 import collections
 import functools
+import logging
 import operator
 import time
 from importlib import import_module
@@ -15,6 +16,7 @@ from torch.fx.immutable_collections import immutable_list
 
 from . import config
 
+log = logging.getLogger(__name__)
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 # We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
@@ -32,6 +34,15 @@ def has_triton():
         return False
     try:
         import triton
+
+        if triton is not None:
+            # This is temp fix to hint people upgrad triton after https://github.com/pytorch/torchdynamo/pull/1585
+            triton_compiler_version = triton.runtime.version_key().split("-")[6]
+            if triton_compiler_version != "7929002797455b30efce6e41eddc6b57":
+                log.error(
+                    "Please update your triton version to af76c989eb4799b015f8b288ccd8421558772e56"
+                )
+                exit()
 
         return triton is not None
     except (ImportError, ModuleNotFoundError):
