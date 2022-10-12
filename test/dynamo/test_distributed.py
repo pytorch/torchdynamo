@@ -1,13 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import os
+import unittest
 from unittest.mock import patch
 
 import pytest
 import torch
 import torch.distributed as dist
 from torch import nn
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 import torchdynamo
 from torchdynamo import config
@@ -34,6 +33,13 @@ class CheckSplitsCompiler:
     def compile_fn(self, gm, example_inputs):
         self.compiler_called += 1
         return gm
+
+
+def skip_if_no_active_ddp():
+    from torch.nn.parallel import DistributedDataParallel as DDP
+
+    if not hasattr(DDP, "_get_active_ddp_module"):
+        raise unittest.SkipTest("requires pytorch landing in parallel")
 
 
 @pytest.mark.skip("Module hangs in PyTorch CI")
@@ -73,6 +79,8 @@ class TestDistributed(torchdynamo.testing.TestCase):
 
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager(self):
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
         ddp_m = torchdynamo.optimize("aot_eager")(ddp_m)
@@ -81,6 +89,8 @@ class TestDistributed(torchdynamo.testing.TestCase):
 
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
         ddp_m = torchdynamo.optimize("inductor")(ddp_m)
@@ -91,6 +101,8 @@ class TestDistributed(torchdynamo.testing.TestCase):
     @pytest.mark.xfail
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_aot_eager(self):
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
         m, inputs, correct_outputs = self.get_model()
         fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
         fsdp_m = torchdynamo.optimize("aot_eager")(fsdp_m)
@@ -101,16 +113,14 @@ class TestDistributed(torchdynamo.testing.TestCase):
     @pytest.mark.skip
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
         m, inputs, correct_outputs = self.get_model()
         fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
         fsdp_m = torchdynamo.optimize("inductor")(fsdp_m)
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
         """
@@ -119,6 +129,10 @@ class TestDistributed(torchdynamo.testing.TestCase):
         the user-provided compiler is called by the DDPOptimizer which is
         doing the graph splitting
         """
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        skip_if_no_active_ddp()
+
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
@@ -132,16 +146,15 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
         """
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        skip_if_no_active_ddp()
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
@@ -152,16 +165,15 @@ class TestDistributed(torchdynamo.testing.TestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
         """
         Ensures the DDPOptimizer returns a correct, compiled module without
         introducing graph splits. (Based on model parmeters fitting in the bucket)
         """
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        skip_if_no_active_ddp()
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
 
@@ -175,16 +187,15 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 1)
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_aot_autograd(self):
         """
         Explicitly check AotAutograd family of compilers work,
         since they require example inputs propagated between graph splits.
         """
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        skip_if_no_active_ddp()
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
