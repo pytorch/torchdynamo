@@ -163,9 +163,10 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
         except TypeError as e:
-            if re.match("function takes exactly \d+ arguments \(\d+ given\)", str(e)):
+            if re.match(r"function takes exactly \d+ arguments \(\d+ given\)", str(e)):
                 raise RuntimeError(
-                    """Consider updating Triton with `pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
+                    """Consider updating Triton with
+`pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
                 )
             else:
                 raise e
