@@ -12,6 +12,7 @@ import sympy
 from sympy import Expr
 from sympy import Integer
 from sympy import Symbol
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import ir
 from .codegen.common import IndentedBuffer
@@ -44,8 +45,10 @@ class PositiveGuard:
 
 
 class SizeVarAllocator(object):
-    def __init__(self, shape_env, zero_one_const=True):
+    def __init__(self, shape_env=None, zero_one_const=True):
         super().__init__()
+        if shape_env is None:
+            shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
         self.val_to_var: Dict[int, Expr] = {0: Integer(0), 1: Integer(1)}
@@ -373,6 +376,11 @@ class SizeVarAllocator(object):
 
     def size_hint(self, expr: Expr) -> int:
         out = sympy_subs(sympy.expand(expr), self.var_to_val)
+        if isinstance(out, sympy.Expr):
+            for s in out.free_symbols:
+                assert (
+                    s.is_integer
+                ), f"{s} has been created without the is_integer field"
         return int(out)
 
     def _lru_cache(self, fn, maxsize=None):

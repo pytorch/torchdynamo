@@ -138,7 +138,6 @@ inductor_skips["cuda"] = {
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
 }
 
-
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -181,8 +180,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
-    "index_add": {f16, f32, f64},
-    "index_copy": {f16, f32, f64},
+    "index_add": {f16},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -216,7 +214,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.gelu": {f64},
-    "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.pairwise_distance": {f16},
@@ -295,8 +292,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "index_add": {f16, f32, f64},
-    "index_copy": {f16, f32, f64},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -325,7 +320,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.grid_sample": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
-    "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
@@ -403,6 +397,7 @@ inductor_all_samples = {
     "index_put",
     "index_copy",
     "scatter_reduce.sum",
+    "select_scatter",
 }
 
 
