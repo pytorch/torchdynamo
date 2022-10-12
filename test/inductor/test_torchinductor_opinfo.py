@@ -21,16 +21,18 @@ from torch.testing._internal.common_utils import skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_utils import suppress_warnings
 
 import torchdynamo
-from torchinductor.utils import has_triton
 
 try:
+    from torchinductor.utils import has_triton
+
     try:
         from .test_torchinductor import check_model
         from .test_torchinductor import check_model_cuda
     except ImportError:
         from test_torchinductor import check_model
         from test_torchinductor import check_model_cuda
-except unittest.SkipTest:
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
     raise
