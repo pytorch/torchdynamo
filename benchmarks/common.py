@@ -1285,6 +1285,7 @@ class BenchmarkRunner:
                 "--diff_main called on main branch, what are you diffing?"
             )
 
+    @staticmethod
     def maybe_fresh_cache(fn):
         def inner(self, *args, **kwargs):
             cache_minder = NullContext()
