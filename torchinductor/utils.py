@@ -240,25 +240,24 @@ instance_descriptor = collections.namedtuple(
 )
 
 
-class TritonCacheMinder:
+@contextlib.contextmanager
+def fresh_triton_cache(cache_entries=None):
     """
-    Contextmanager used in benchmarking, which provides a clean triton cache dir
-    and also audits the files that were created during a run.
+    Contextmanager that provides a clean tmp cachedir for triton.
+
+    Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
+    generated with this cache instance.
     """
-    def __init__(self):
-        self.cache_entries = {}
-
-    @contextlib.contextmanager
-    def fresh_cache(self):
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": tmpdirname}):
-                yield
-                cache_dir = os.path.join(tmpdirname, "cache")
-                files = os.listdir(cache_dir)
-                self.cache_entries = {
-                    f: os.path.getsize(os.path.join(cache_dir, f))
-                    for f in files if ".lock" not in f
-                }
-
-    def get_cache_entries(self):
-        return self.cache_entries
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": tmpdirname}):
+            yield
+            if isinstance(cache_entries, dict):
+                assert len(cache_entries) == 0, "expected empty cache_entries dict"
+                files = os.listdir(tmpdirname)
+                cache_entries.update(
+                    {
+                        f: os.path.getsize(os.path.join(tmpdirname, f))
+                        for f in files
+                        if ".lock" not in f
+                    }
+                )

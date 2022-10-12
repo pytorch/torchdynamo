@@ -17,7 +17,6 @@ import warnings
 import numpy as np
 import pandas as pd
 import torch
-from torchinductor.utils import TritonCacheMinder
 from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean
 from scipy.stats import ttest_ind
@@ -34,6 +33,7 @@ from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
+from torchinductor.utils import fresh_triton_cache
 
 try:
     from functorch._src.aot_autograd import set_model_name
@@ -450,26 +450,24 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         else:
             yield
 
-    with TritonCacheMinder() as triton_cache_minder:
-        with maybe_profile(enabled=args.export_profiler_trace) as p:
-            frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
-            for rep in range(args.repeat):
-                inputs = (
-                    randomize_input(copy.deepcopy(example_inputs))
-                    if should_randomize_input
-                    else example_inputs
-                )
+    with maybe_profile(enabled=args.export_profiler_trace) as p:
+        frozen_model_iter_fn = torchdynamo.run(model_iter_fn)
+        for rep in range(args.repeat):
+            inputs = (
+                randomize_input(copy.deepcopy(example_inputs))
+                if should_randomize_input
+                else example_inputs
+            )
 
-                # interleave the runs to handle frequency scaling and load changes
-                timings[rep, 0], expected_output = timed(
-                    model, model_iter_fn, inputs, return_result=True
-                )
-                timings[rep, 1], actual_output = timed(
-                    model, frozen_model_iter_fn, inputs, return_result=True
-                )
-                if should_check_result:
-                    is_correct = is_correct and same(expected_output, actual_output)
-    triton_cache = triton_cache_minder.get_cache_entries()
+            # interleave the runs to handle frequency scaling and load changes
+            timings[rep, 0], expected_output = timed(
+                model, model_iter_fn, inputs, return_result=True
+            )
+            timings[rep, 1], actual_output = timed(
+                model, frozen_model_iter_fn, inputs, return_result=True
+            )
+            if should_check_result:
+                is_correct = is_correct and same(expected_output, actual_output)
     if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torchdynamo.config.base_dir, name)
@@ -503,11 +501,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         output_filename[:-4] + "_compilation_metrics.csv",
         ["dev", "name", "batch_size"] + headers,
         [current_device, current_name, current_batch_size] + data,
-    )
-    output_csv(
-        output_filename[:-4] + "_triton_cache.csv",
-        ["dev", "name", "batch_size", "triton_cache"],
-        [current_device, current_name, current_batch_size, triton_cache],
     )
     return format_speedup(speedup, pvalue, is_correct=is_correct)
 
@@ -1292,6 +1285,33 @@ class BenchmarkRunner:
                 "--diff_main called on main branch, what are you diffing?"
             )
 
+    def maybe_fresh_cache(fn):
+        def inner(self, *args, **kwargs):
+            cache_minder = NullContext()
+            if self.args.cold_start_latency:
+                cache_entries = {}
+                cache_minder = fresh_triton_cache(cache_entries)
+
+            try:
+                with cache_minder:
+                    return fn(self, *args, **kwargs)
+            finally:
+                dump_cache = False
+                if dump_cache and self.args.cold_start_latency:
+                    output_csv(
+                        output_filename[:-4] + "_triton_cache.csv",
+                        ["dev", "name", "batch_size", "triton_cache"],
+                        [
+                            current_device,
+                            current_name,
+                            current_batch_size,
+                            cache_entries,
+                        ],
+                    )
+
+        return inner
+
+    @maybe_fresh_cache
     def run_one_model(
         self,
         name,
@@ -1460,6 +1480,12 @@ def parse_args():
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--cold_start_latency",
+        action="store_true",
+        help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
