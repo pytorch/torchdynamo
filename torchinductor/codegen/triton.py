@@ -987,7 +987,8 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            self.codegen_static_numels(code)
+            if not config.dynamic_shapes:
+                self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
