@@ -88,6 +88,12 @@ class LinearEltwise(nn.Linear):
         return y
 
 
+def is_bfloat16_module(m):
+    weight_is_bf16 = m.weight.dtype == torch.bfloat16
+    bias_is_bf16 = m.bias is None or m.bias.dtype == torch.bfloat16
+    return weight_is_bf16 and bias_is_bf16
+
+
 def fuse_linear_eltwise_eval(linear, eltwise, op_name, op_info):
     return LinearEltwise(
         linear,
@@ -125,6 +131,9 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
                 eltwise = modules[node.target]
                 eval_mode = all(not n.training for n in [linear, eltwise])
                 if not eval_mode:
+                    continue
+                # only fuse for linear when the dtype is bf16
+                if not is_bfloat16_module(linear):
                     continue
                 fused_linear = fuse_func(
                     linear, eltwise, pointwise_name, pointwise_info
