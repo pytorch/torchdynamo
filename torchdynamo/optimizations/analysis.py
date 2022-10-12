@@ -54,6 +54,14 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         n.meta["alias_groups"] = {
             self.tensor_alias_group(obj) for obj in self.extract_tensors(result)
         }
+
+        if (
+            not n.meta["alias_groups"]
+            and n.op == "call_function"
+            and n.target == operator.setitem
+        ):
+            n.meta["alias_groups"] = {self.tensor_alias_group(tensor_args[0])}
+
         n.meta["mutates_alias_groups"] = {
             self.tensor_alias_group(tensor)
             for tensor, v1, v2 in zip(tensor_args, input_versions1, input_versions2)
