@@ -316,7 +316,7 @@ class Loops(IRNode):
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                return self.inner_fn(self._index(self.ranges))
+                return str(self.inner_fn(self._index(self.ranges)))
         except Exception as e:
             return f"inner_fn(): {e}"
 
@@ -433,8 +433,11 @@ class Reduction(Loops):
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                return self.inner_fn(
-                    self._index(self.ranges), self._index(self.reduction_ranges, "r")
+                return str(
+                    self.inner_fn(
+                        self._index(self.ranges),
+                        self._index(self.reduction_ranges, "r"),
+                    )
                 )
         except Exception as e:
             return f"inner_fn(): {e}"
@@ -962,8 +965,8 @@ class BaseView(IRNode):
     def mark_reuse(self, users):
         return self.data.mark_reuse(users)
 
-    def should_realize(self):
-        return self.data.should_realize()
+    def has_exceeded_max_reads(self):
+        return self.data.has_exceeded_max_reads()
 
     def realize(self):
         return self.data.realize()
@@ -1439,7 +1442,7 @@ class BaseConstant(IRNode):
     def mark_reuse(self, users):
         pass
 
-    def should_realize(self):
+    def has_exceeded_max_reads(self):
         pass
 
     def get_reads(self):
@@ -3340,7 +3343,7 @@ class StorageBox(MutableBox):
         if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
 
-    def should_realize(self):
+    def has_exceeded_max_reads(self):
         return isinstance(self.data, (Pointwise, Reduction)) and (
             self.num_reads() > config.realize_reads_threshold
             or len(self.inner_fn_str()) > config.realize_bytes_threshold
@@ -3360,13 +3363,10 @@ class StorageBox(MutableBox):
             fn_str = loops.inner_fn_str()
             return any([fn_str.startswith(op + "(") for op in heavy_ops])
 
-        if (
-            users > 1
-            and isinstance(self.data, (Pointwise, Reduction))
-            and (
-                self.should_realize()
-                or (is_cpu(self.data) and should_realize_on_cpu(self.data))
-            )
+        if isinstance(self.data, (Pointwise, Reduction)) and (
+            users * self.num_reads() > config.realize_reads_threshold
+            or users * len(self.inner_fn_str()) > config.realize_bytes_threshold
+            or (is_cpu(self.data) and should_realize_on_cpu(self.data))
         ):
             self.realize()
 
