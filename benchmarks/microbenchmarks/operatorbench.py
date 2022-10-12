@@ -3,7 +3,11 @@ import click
 import numpy as np
 import torch
 import triton
-from operator_inp_utils import OperatorInputsLoader
+from operator_inp_utils import (
+    OperatorInputsLoader,
+    serialize_args_and_kwargs,
+    SkipTests,
+)
 
 from torchdynamo.optimizations.backends import cudagraphs_inner
 from torchdynamo.testing import same
@@ -148,8 +152,22 @@ def skip_operator(operator):
 @click.option(
     "--measure-nvfuser", help="default we only measure inductor", default=False
 )
+@click.option("--verbose", help="enable more details", is_flag=True)
+@click.option(
+    "--skip-tests-file",
+    help="skip tests in a given file.\nThe format is 'op;dtype;serialized input string' per a test instance",
+    default="",
+)
 def benchmark(
-    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser
+    suite,
+    op,
+    dtype,
+    max_samples,
+    accuracy_checking,
+    repeats,
+    measure_nvfuser,
+    verbose,
+    skip_tests_file,
 ):
     assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
     if suite == "timm":
@@ -164,6 +182,8 @@ def benchmark(
     if op == "all":
         filename = f"timings_{suite}_{op.replace('.', '_')}{dtype}.txt"
         f = open(filename, "a")
+
+    skip = SkipTests(skip_tests_file)
 
     dtype = torch.float16 if dtype == "float16" else torch.float32
 
@@ -184,6 +204,16 @@ def benchmark(
             print(f"Iter {i}")
             try:
                 inps = next(inp_gen)
+
+                if skip_tests_file and skip.skipTest(operator, dtype, inps):
+                    print(
+                        f"Skipping {operator},{dtype} with the following inputs: {serialize_args_and_kwargs(inps)}"
+                    )
+                    continue
+                if verbose:
+                    print(
+                        f"Running with the following inputs: {serialize_args_and_kwargs(inps)}"
+                    )
                 if inps is None:
                     break
                 args, kwargs = inps

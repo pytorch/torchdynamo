@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import os
+import collections
 from collections import Counter
 from collections import defaultdict
 from functools import partial
@@ -115,6 +116,11 @@ def serialize_torch_args(e):
         return serialize_tensor(e)
     else:
         return truncate_inp(e)
+
+
+def serialize_args_and_kwargs(inps):
+    arg_meta, kwarg_meta = tree_map(serialize_torch_args, (inps[0], inps[1]))
+    return repr((arg_meta, kwarg_meta))
 
 
 def contains_tensor(elems):
@@ -331,3 +337,22 @@ class OperatorInputsLoader:
             else:
                 union.merge(OperatorInputsLoader(path))
         return union
+
+
+class SkipTests:
+    def __init__(self, path):
+        skips_by_opsntype = collections.defaultdict(set)
+
+        if path:
+            with open(path) as sf:
+                for sl in sf:
+                    (op, typ, inps_str) = sl.strip().split(";")
+                    skips_by_opsntype[(op, typ)].add(inps_str)
+
+        self.skips_by_opsntype = skips_by_opsntype
+
+    def skipTest(self, op, typ, inps):
+        typ_str = str(typ).split(".")[-1]
+        inps_str = serialize_args_and_kwargs(inps)
+        key = (str(op), typ_str)
+        return key in self.skips_by_opsntype and inps_str in self.skips_by_opsntype[key]
