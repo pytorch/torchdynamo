@@ -162,11 +162,12 @@ def align_inputs(model, inputs, static_input_idxs=()):
     def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
-                if isinstance(new_inputs, tuple):
-                    new_inputs = list(new_inputs)
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        new_inputs = [x.to("cuda") if is_unspec_input(x) else x for x in new_inputs]
-        return model(new_inputs)
+        new_inputs_to_cuda = [
+            x.to("cuda") if is_unspec_input(x) else x for x in new_inputs
+        ]
+        new_inputs.clear()
+        return model(new_inputs_to_cuda)
 
     return run
 
