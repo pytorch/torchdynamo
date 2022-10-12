@@ -585,7 +585,7 @@ class Kernel(CodeGen):
                     self.cse.store_cache[name] = value
                     for other_name in self.current_node.get_mutations():
                         self.cse.store_cache[other_name] = value
-                if name not in V.graph.removed_buffers:
+                if name not in V.graph.scheduler.buffer_names_no_longer_needed:
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod

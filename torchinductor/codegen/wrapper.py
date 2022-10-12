@@ -71,11 +71,6 @@ class MemoryPlanningState:
         self.reuse_pool: Dict[
             Any, List["FreeIfNotReusedLine"]
         ] = collections.defaultdict(list)
-        self.live_reused_as_dict: Dict[
-            # key (buffer name) reused as value (current live buffer)
-            str,
-            ir.Buffer,
-        ] = {}
 
     def __contains__(self, key):
         return bool(self.reuse_pool.get(key, None))

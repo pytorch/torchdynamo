@@ -380,7 +380,7 @@ class CppKernel(Kernel):
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
 
-        if name not in V.graph.removed_buffers:
+        if name not in V.graph.scheduler.buffer_names_no_longer_needed:
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
             self.reduction_suffix.writeline(
