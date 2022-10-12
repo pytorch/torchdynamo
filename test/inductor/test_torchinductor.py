@@ -159,6 +159,7 @@ def check_model(
     ref_inputs = example_inputs
     ref_kwargs = kwargs
     has_lowp_args = False
+    original_lowp_dtype = torch.half
 
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
@@ -172,9 +173,15 @@ def check_model(
             else:
                 return x
 
+        def get_original_lowp_dtype(example_inputs):
+            dtypes = [x.dtype for x in example_inputs if isinstance(x, torch.Tensor)]
+            dtype_set = set(dtypes)
+            return dtype_set.pop() if len(dtype_set) == 1 else torch.half
+
         ref_inputs = list(map(upcast_fn, example_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args:
+            original_lowp_dtype = get_original_lowp_dtype(example_inputs)
             if hasattr(model, "to"):
                 model = model.to(torch.float)
 
@@ -184,7 +191,7 @@ def check_model(
     # downcast the model back if needed
     if reference_in_float and has_lowp_args:
         if hasattr(model, "to"):
-            model = model.to(torch.half)
+            model = model.to(original_lowp_dtype)
 
     torchinductor.metrics.reset()
 
@@ -1201,19 +1208,6 @@ class CommonTemplate:
         )
 
     def test_linear_unary(self):
-        class M(torch.nn.Module):
-            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
-                self.linear = torch.nn.Linear(
-                    in_channels, out_channels, bias=bias, **kwargs
-                )
-                self.eltwise = eltwise_fn
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = self.eltwise(x)
-                return x
-
         def _eltwise_list():
             eltwise_list = [
                 torch.nn.ReLU(),
@@ -1230,15 +1224,18 @@ class CommonTemplate:
         options = itertools.product(
             _eltwise_list(), [[2, 3, 10], [2, 10]], [True, False]
         )
+        dtype = torch.bfloat16
         for eltwise_fn, input_shape, bias in options:
-            mod = M(eltwise_fn, input_shape[-1], 30, bias).eval()
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias), eltwise_fn
+            ).eval()
 
-            def fn(x):
-                return mod(x)
+            # only fuse for linear when the dtype is bf16
+            mod = mod.to(dtype)
+            v = torch.randn(input_shape).to(dtype)
 
-            v = torch.randn(input_shape)
             self.common(
-                fn,
+                mod,
                 (v,),
             )
 
