@@ -250,9 +250,14 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs):
+def promote_constants(inputs, override_return_dtype=None):
     if not any(isinstance(x, (int, float)) for x in inputs):
         return inputs
+    if all(isinstance(x, (int, float)) for x in inputs):
+        dtype = override_return_dtype or get_promoted_dtype(
+            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
+        return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, TensorBox))
     return [
         (
@@ -274,7 +279,7 @@ def make_pointwise(
     allow_alpha=False,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
-        inputs = promote_constants(inputs)
+        inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
                 inputs = list(inputs)
@@ -1207,6 +1212,10 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
+    if index < 0:
+        index = index + x.get_size()[dim]
+    V.graph.sizevars.guard_leq(0, index)
+    V.graph.sizevars.guard_lt(index, x.get_size()[dim])
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -1214,7 +1223,7 @@ def select_scatter(x, src, dim: int, index: int):
         return ops.where(
             ops.eq(
                 ops.index_expr(idx[dim], torch.int32),
-                ops.constant(index, torch.int32),
+                ops.index_expr(index, torch.int32),
             ),
             src_loader(idx),
             x_loader(idx),
@@ -3173,16 +3182,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
-
-    # This is a temp fix for https://github.com/pytorch/torchdynamo/issues/1450
-    # The root cause of the problem is a one-element bool tensor was stored as
-    # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
-    # which confuses the backward pass when it calls sum on the bool tensor.
-    # A better place to fix is in triton.py (see the comment there), but it is
-    # blocked by a trition issue on bool comparison, causing opinfo tests like
-    # test_comprehensive_gt_cuda_bool to fail.
-    if is_boolean_dtype(x.get_dtype()):
-        x = to_dtype(to_dtype(x, dtype), torch.bool)
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
