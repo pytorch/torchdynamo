@@ -10,6 +10,7 @@ jobs:
   test-inductor-opinfo:
     strategy:
       matrix:
+        fail-fast: false
         pytorch_test_range: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
                     "PYTORCH_TEST_RANGE_START=100 PYTORCH_TEST_RANGE_END=200",
                     "PYTORCH_TEST_RANGE_START=200 PYTORCH_TEST_RANGE_END=300",

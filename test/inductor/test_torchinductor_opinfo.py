@@ -139,6 +139,16 @@ inductor_skips["cuda"] = {
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
 }
 
+inductor_all_skips = defaultdict(dict)
+
+inductor_all_skips["cpu"] = {}
+inductor_all_skips["cuda"] = {
+    "inner" : {b8, f16, f32, f64, i32, i64}, # segfault
+    "erfinv": {b8, f16, f32, f64, i32, i64}, # segfault
+    "erfc": {b8, f16, f32, f64, i32, i64}, # segfault
+    "erf": {b8, f16, f32, f64, i32, i64}, # segfault
+}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -352,6 +362,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "view_as_complex": {f16, f32, f64},
 }
 
+inductor_expected_failures_all_sample = defaultdict(dict)
+
+inductor_expected_failures_all_sample["cpu"] = {}
+inductor_expected_failures_all_sample["cuda"] = {}
+
 inductor_should_fail_with_exception = defaultdict(dict)
 
 inductor_should_fail_with_exception["cpu"] = {}
@@ -439,12 +454,21 @@ class TestInductorOpInfo(TestCase):
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
             self.skipTest(f"{op_name} in {dtype} not supported")
+        elif dtype in inductor_all_skips[device_type].get(op_name, set()) and ALL_SAMPLES:
+            test_expect = TestExpect.SKIP
+            self.skipTest(f"{op_name} in {dtype} not supported for ALL_SAMPLES")
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
             op_name, set()
         ):
             test_expect = TestExpect.XFAILURE
+        elif dtype in inductor_expected_failures_all_sample[device_type].get(
+            op_name, set()
+        ) and ALL_SAMPLES:
+            test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
+
+        
 
         additional_kwargs = {}
         if op_name in inductor_override_kwargs:
@@ -481,9 +505,9 @@ class TestInductorOpInfo(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 # UNCOMMENT TO DEBUG SEGFAULTS
-                # with open("test_output.txt", "a") as f:
-                #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-                #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
+                with open("test_output.txt", "a") as f:
+                    print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+                    print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
@@ -538,8 +562,6 @@ class TestInductorOpInfo(TestCase):
                 raise RuntimeError(
                     f"unexpected success {op_name}, {dtype}, {device_type}"
                 )
-
-        print(len(op_db))
 
 def report_percent_passing_ops():
     from itertools import chain
