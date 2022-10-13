@@ -611,7 +611,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    def test_arange(self):
+    def test_arange1(self):
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
             rng2 = torch.arange(10, 18, device=x.device)
@@ -620,12 +620,26 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
-    def test_arange1(self):
+    def test_arange2(self):
         def fn(x):
             rng1 = torch.arange(8, device=x.device)
             return (x + rng1,)
 
         self.common(fn, (torch.randint(4, (8, 8)),), check_lowp=False)
+
+    def test_arange3(self):
+        def fn(x):
+            return x + torch.ops.aten.arange.start_step(
+                0, 53, 4, dtype=torch.int64, device=x.device
+            )
+
+        self.common(fn, (torch.randn(14),))
+
+    def test_arange4(self):
+        def fn(x):
+            return x - torch.arange(512, -512, -1.0, device=x.device)
+
+        self.common(fn, (torch.randn(1024),))
 
     def test_linspace(self):
         def fn(x):
@@ -3228,6 +3242,18 @@ class CommonTemplate:
             ((8, 128), (128, 1), torch.int64),
         ]
         args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        self.common(forward, args)
+
+    def test_sizehint_issue1(self):
+        def forward(x):
+            return torch.nn.functional.unfold(
+                x, kernel_size=[4, 4], dilation=1, padding=0, stride=[4, 4]
+            )
+
+        args = [((2, 24, 56, 56), (75264, 3136, 56, 1), torch.float32, False)]
+        args = [
+            rand_strided(sh, st, dt).requires_grad_(rg) for (sh, st, dt, rg) in args
+        ]
         self.common(forward, args)
 
     @unittest.skip("https://github.com/pytorch/torchdynamo/issues/1297")
