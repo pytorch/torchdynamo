@@ -478,12 +478,13 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
-
-    dim = _validate_dim(x, dim, 0)
+    offset = len(x.get_size()) == 0
+    dim = _validate_dim(x, dim, offset)
     new_shape = list(x.get_size())
-    removed = new_shape.pop(dim)
-    if V.graph.sizevars.maybe_guard_equals(removed, 1):
-        return view(x, new_shape)
+    if len(new_shape) > 0:
+        removed = new_shape.pop(dim)
+        if V.graph.sizevars.maybe_guard_equals(removed, 1):
+            return view(x, new_shape)
 
     # squeeze does nothing if the size isn't 1
     return x
