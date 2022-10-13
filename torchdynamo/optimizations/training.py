@@ -12,7 +12,7 @@ from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
-from torch._deomp import register_decomposition
+from torch._decomp import register_decomposition
 
 from .. import config
 from ..debug_utils import wrap_compiler_debug
