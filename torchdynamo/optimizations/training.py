@@ -406,8 +406,7 @@ def convolution_backward(
     assert result[2] is None
     reduction_axes = [i for i in range(x.dim()) if i != 1]
     bias_grad = grad_output.sum(reduction_axes)
-    result[2] = bias_grad
-    return result
+    return (result[0], result[1], bias_grad)
 
 def create_nvprims_backend(*, executor):
     class NvPrims(AotAutogradStrategy):
