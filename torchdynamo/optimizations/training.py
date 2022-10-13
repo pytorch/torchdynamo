@@ -368,9 +368,7 @@ def convolution(
             True,
             True)
     if bias is not None:
-        #kernel_dims = len(weight.get_size()) - 2
-        #out_chan = result.get_size()[-1 - kernel_dims]
-        bias = view(bias, [-1] + (x.dim() - 2) * [1])
+        bias = bias.view([-1] + (x.dim() - 2) * [1])
         result = result.add(bias)
     return result
 
