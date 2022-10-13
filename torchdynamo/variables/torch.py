@@ -4,11 +4,13 @@ import types
 from typing import Dict
 from typing import List
 
+import numpy
 import torch._C
 import torch.nn
 
 from torchdynamo.source import GetItemSource
 from torchdynamo.source import NNModuleSource
+from torchdynamo.variables.lists import ListVariable
 from torchdynamo.variables.lists import TupleVariable
 from torchdynamo.variables.misc import AutocastModeVariable
 from torchdynamo.variables.misc import AutogradProfilerContextWrapperVariable
@@ -23,6 +25,7 @@ from ..utils import istype
 from ..utils import product
 from ..utils import proxy_args_kwargs
 from ..utils import specialize_args_kwargs
+from ..utils import tensortype_to_dtype
 from .base import VariableTracker
 from .tensor import TensorWithTFOverrideVariable
 
@@ -217,6 +220,18 @@ class TorchVariable(VariableTracker):
             assert len(args) == 2
             return args[1]
         else:
+            # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
+            # as FX symbolic trace doesn't support numpy int/float as base types.
+            if (
+                self.value in tensortype_to_dtype
+                and len(args) == 1
+                and isinstance(args[0], ListVariable)
+                and args[0].is_python_constant()
+            ):
+                for x in args[0].items:
+                    if isinstance(x.value, numpy.generic):
+                        x.value = x.value.item()
+
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(

@@ -183,6 +183,20 @@ LOGGING_CONFIG = {
 }
 
 
+tensortype_to_dtype = {
+    torch.FloatTensor: (torch.float32, torch.float),
+    torch.DoubleTensor: (torch.float64, torch.double),
+    torch.HalfTensor: (torch.float16, torch.half),
+    torch.BFloat16Tensor: (torch.bfloat16,),
+    torch.ByteTensor: (torch.uint8,),
+    torch.CharTensor: (torch.int8,),
+    torch.LongTensor: (torch.int64, torch.long),
+    torch.IntTensor: (torch.int32, torch.int),
+    torch.ShortTensor: (torch.int16, torch.short),
+    torch.BoolTensor: (torch.bool,),
+}
+
+
 # initialize torchdynamo loggers
 def init_logging():
     if "PYTEST_CURRENT_TEST" not in os.environ:
