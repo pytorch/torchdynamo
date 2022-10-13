@@ -1995,7 +1995,11 @@ class CommonTemplate:
     def test_cat(self):
         def fn(a):
             tmp = a * 2
-            return torch.cat((a, a[:, :4] + 1, a + 2), -1), torch.cat((tmp, tmp), 0)
+            return (
+                torch.cat((a, a[:, :4] + 1, a + 2), -1),
+                torch.cat((tmp, tmp), 0),
+                torch.cat((tmp, tmp.double()), 0),
+            )
 
         self.common(
             fn,

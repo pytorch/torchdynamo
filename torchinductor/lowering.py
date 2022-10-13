@@ -157,6 +157,11 @@ def _register_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         args = list(args)
+        unpacked = False
+        # TODO maybe we need to use pytrees here
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            unpacked = True
+            args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
         # kwargs tensors not supported yet
@@ -173,14 +178,20 @@ def _register_lowering(
                 dtype = get_promoted_dtype(
                     *promoting_args, type_promotion_kind=type_promotion_kind
                 )
-            for i in indices:
-                args[i] = to_dtype(args[i], dtype)
+            # sometimes args are an immutable list so we can't mutate them
+            new_args = []
             for i in range(len(args)):
-                if isinstance(args[i], ir.Constant):
-                    args[i] = ir.Constant(
-                        args[i].value, dtype, args[indices[0]].get_device()
+                if i in indices:
+                    new_args.append(to_dtype(args[i], dtype))
+                elif isinstance(args[i], ir.Constant):
+                    new_args.append(
+                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
                     )
-
+                else:
+                    new_args.append(args[i])
+            args = new_args
+        if unpacked:
+            args = [args]
         if broadcast and indices:
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
