@@ -15,7 +15,6 @@ from torch._prims_common import Number
 from torch._prims_common import elementwise_dtypes
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_integer_dtype
-from torch._prims_common import type_to_dtype
 
 from . import config
 from . import ir
@@ -185,9 +184,9 @@ def _register_lowering(
                 if i in indices:
                     new_args.append(to_dtype(args[i], dtype))
                 elif isinstance(args[i], ir.Constant):
-                    new_args.append(ir.Constant(
-                        args[i].value, dtype, args[indices[0]].get_device()
-                    ))
+                    new_args.append(
+                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
+                    )
                 else:
                     new_args.append(args[i])
             args = new_args
