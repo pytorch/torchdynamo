@@ -19,7 +19,7 @@ size_asserts = True
 pick_loop_orders = True
 
 # generate inplace computations
-inplace_buffers = True
+inplace_buffers = False#True
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -74,7 +74,7 @@ class cpp:
     simdlen = None
     min_chunk_size = 4096
     cxx = (
-        None,  # download gcc12 from conda-forge if conda is installed
+        #None,  # download gcc12 from conda-forge if conda is installed
         "g++-12",
         "g++-11",
         "g++-10",
@@ -122,7 +122,7 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = True #os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True

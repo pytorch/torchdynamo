@@ -861,7 +861,7 @@ class TritonKernel(Kernel):
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
         self.cse.store_cache[name] = result_var
-        if name not in V.graph.scheduler.buffer_names_no_longer_needed:
+        if self.need_store(name):
             var = self.args.output(name)
             self.suffix.writeline(
                 DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")

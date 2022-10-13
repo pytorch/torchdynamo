@@ -585,7 +585,7 @@ class Kernel(CodeGen):
                     self.cse.store_cache[name] = value
                     for other_name in self.current_node.get_mutations():
                         self.cse.store_cache[other_name] = value
-                if name not in V.graph.scheduler.buffer_names_no_longer_needed:
+                if self.need_store(name):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
@@ -614,3 +614,7 @@ class Kernel(CodeGen):
             x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
         }
         return sympy_subs(index, replacements)
+
+    def need_store(self, name):
+        inplace_reused = any(name in inplaced.other_names[:-1] for inplaced in unique(self.args.inplace_buffers.values()))
+        return not inplace_reused and name not in V.graph.removed_buffers
