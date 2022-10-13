@@ -762,7 +762,7 @@ class CppKernelProxy(CppKernel):
         itervars = self.simd_vec_kernel.itervars
         rangs = self.simd_vec_kernel.ranges
         loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
-        loops_nest_non_reduc, reductions = LoopNest(
+        loops_nest_non_reduc, _ = LoopNest(
             loops[: self.reduction_depth]
         ), LoopNest(loops[self.reduction_depth :])
 
