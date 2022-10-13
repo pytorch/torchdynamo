@@ -174,6 +174,9 @@ def special_erf(x):
     a5 = 1.061405429
     p = 0.3275911
 
+    if x.dtype == torch.bool:
+        x = torch.gt(x, 0).int()
+
     sign = torch.sign(x)
     x = torch.abs(x)
 

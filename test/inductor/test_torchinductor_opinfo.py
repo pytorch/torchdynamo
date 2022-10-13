@@ -273,7 +273,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "erf": {b8},
     "fft.fft": {f16, f32, f64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
