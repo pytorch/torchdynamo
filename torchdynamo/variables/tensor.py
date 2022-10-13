@@ -179,6 +179,14 @@ class TensorVariable(VariableTracker):
 
             options.update(specialized_props)
             return cls(proxy, **options)
+        elif (
+            proxy.node.target.__name__ == "set_state"
+            and isinstance(proxy.node.target.__self__, torch._C.Generator)
+            or proxy.node.target == torch.random.set_rng_state
+        ):
+            from . import TorchVariable
+
+            return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
@@ -273,12 +281,6 @@ class TensorVariable(VariableTracker):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
-        elif proxy.node.target.__name__ == "set_state" and isinstance(
-            proxy.node.target.__self__, torch._C.Generator
-        ):
-            from . import TorchVariable
-
-            return TorchVariable(proxy.node.target)
         else:
             assert (
                 False
