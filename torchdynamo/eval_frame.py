@@ -88,10 +88,6 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
-
 
 class _TorchDynamoContext:
     def __init__(
@@ -164,9 +160,6 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if self.first_ctx:
-                _step_logger()(logging.INFO, "torchdynamo begin tracing")
-
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
@@ -176,8 +169,6 @@ class _TorchDynamoContext:
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
-                if self.first_ctx:
-                    _step_logger()(logging.INFO, "torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
