@@ -212,7 +212,7 @@ class DeferredLine:
         self.line = line
 
     def __call__(self):
-        if self.name not in V.graph.removed_buffers:
+        if self.name not in V.graph.removed_buffers and self.name not in V.graph.inplaced_to_remove:
             return self.line
         return None
 
@@ -419,6 +419,12 @@ class KernelArgs:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
+
+    def inplace_reused_buffers(self):
+        buffers = set()
+        for inplaced in unique(self.inplace_buffers.values()):
+            buffers.update(inplaced.other_names[:-1])
+        return buffers
 
 
 class CSE:

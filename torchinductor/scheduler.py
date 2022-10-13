@@ -354,7 +354,6 @@ class SchedulerNode(BaseSchedulerNode):
                         V.kernel.args.make_inplace(
                             input_node.get_name(), self.get_name()
                         )
-                        V.kernel.must_keep_buffers.add(input_node.get_name())
                         return
         super().allocate()
 
@@ -1018,7 +1017,10 @@ class Scheduler:
                 and name not in self.mutation_renames
                 and name not in self.mutation_real_name
             ):
-                self.remove_buffer(name)
+                if name in V.kernel.args.inplace_reused_buffers():
+                    V.graph.inplaced_to_remove.update(name)
+                else:
+                    self.remove_buffer(name)
 
     def remove_buffer(self, name):
         # Assign a special value instead of deleting the entry
