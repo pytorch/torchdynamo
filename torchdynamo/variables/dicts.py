@@ -177,8 +177,8 @@ class ConstDictVariable(VariableTracker):
 
     @classmethod
     def get_key(cls, arg: VariableTracker):
-        if isinstance(arg, TensorVariable) and arg.parameter_value is not None:
-            return arg.parameter_value
+        if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
+            return arg.specialized_value
         else:
             return arg.as_python_constant()
 
@@ -187,7 +187,7 @@ class ConstDictVariable(VariableTracker):
         return (
             key.is_python_constant()
             or isinstance(key, TensorVariable)
-            and key.parameter_value is not None
+            and key.specialized_value is not None
         )
 
     @classmethod
