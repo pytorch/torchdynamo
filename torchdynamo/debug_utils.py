@@ -385,7 +385,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
 
-        def deferred_for_real_inputs(*real_inputs):
+        def deferred_for_real_inputs(real_inputs):
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
@@ -420,14 +420,14 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     raise ValueError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return compiled_fn(*real_inputs)
+                    return compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
                     compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                     # Call the compiled function with real inputs
-                    return compiled_fn(*real_inputs)
+                    return compiled_fn(real_inputs)
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
@@ -441,6 +441,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
+            compiled_fn._boxed_call = True
         else:
             compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
 
