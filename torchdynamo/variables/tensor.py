@@ -165,7 +165,10 @@ class TensorVariable(VariableTracker):
             # Optimizing a Tensor with requries_grad=True (instead of an nn.Parameter) is valid.
             # This is a pattern of doing gradient descent on the inputs (instead of weights).
             # We should specialized parameter value for both cases.
-            if is_parameter or (initial_example_value is not None and initial_example_value.requires_grad):
+            if is_parameter or (
+                initial_example_value is not None
+                and initial_example_value.requires_grad
+            ):
                 specialized_value = initial_example_value
             else:
                 specialized_value = None
