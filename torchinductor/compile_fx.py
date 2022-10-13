@@ -324,7 +324,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         return model_
 
     functorch.compile.config.use_functionalize = True
-    functorch.compile.config.use_fake_tensor = True
+    functorch.compile.config.use_fake_tensor = False
 
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)

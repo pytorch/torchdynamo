@@ -11,16 +11,17 @@ from torch import nn
 import torchdynamo
 import torchdynamo.test_case
 from torchdynamo import config
+from torchdynamo.optimizations.distributed import DDPOptimizer
 from torchdynamo.testing import same
 
 
 class ToyModel(nn.Module):
-    def __init__(self, in_feat=10, hidden_feat=5000, num_hidden=2, out_feat=5):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
         super().__init__()
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
-            + [nn.Linear(5000, 5000), nn.ReLU()] * num_hidden
-            + [nn.Linear(5000, 5), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
         )
 
     def forward(self, inputs):
@@ -177,7 +178,9 @@ class TestDistributed(torchdynamo.test_case.TestCase):
         from torch.nn.parallel import DistributedDataParallel as DDP
 
         skip_if_no_active_ddp()
-        m, inputs, correct_outputs = self.get_model()
+        m = ToyModel(10, 5).to(self.device)
+        inputs = torch.randn(20, 10).to(self.device)
+        correct_outputs = m(inputs)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
 
         check_splits_compiler = CheckSplitsCompiler()
@@ -210,7 +213,7 @@ class TestDistributed(torchdynamo.test_case.TestCase):
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @patch.object(config, "optimize_ddp", True)
+    @patch.object(config, "optimize_ddp", False)
     def test_custom_layer(self):
         """
         Just ensures that the appropriate number of splits happen (based on
@@ -258,14 +261,29 @@ class TestDistributed(torchdynamo.test_case.TestCase):
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=1)
 
         check_splits_compiler = CheckSplitsCompiler()
+        ddp_opt = DDPOptimizer(
+            ddp_m.bucket_bytes_cap,
+            parameters_to_ignore=[],
+            backend_compile_fn=check_splits_compiler.compile_fn,
+        )
 
-        @torchdynamo.optimize(check_splits_compiler.compile_fn)
+        @torchdynamo.optimize(ddp_opt.compile_fn)
         def opt_fn(inputs):
             return ddp_m(inputs)
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
+        self.assertEqual([b.size for b in ddp_opt.buckets], [1050624, 1048576, 1050624])
+        print([b.params for b in ddp_opt.buckets])
+        self.assertEqual(
+            [b.params for b in ddp_opt.buckets],
+            [
+                ["self_seq_0_linear_weight", "self_seq_0_linear_bias"],
+                ["self_seq_2_weight"],
+                ["self_seq_4_linear_weight", "self_seq_4_linear_bias"],
+            ],
+        )
 
     def test_empty_graph(self):
         def fn():
