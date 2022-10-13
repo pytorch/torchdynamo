@@ -332,6 +332,8 @@ def prims_executor(gm, inputs, *, executor):
     from torch._prims.executor import execute
     from torch.fx.experimental.proxy_tensor import make_fx
 
+    print("printing graph:\n", gm.graph)
+
     # First we trace the graph conditionally decomposing nodes
     # that can be sent to the nvfuser executor
     with TorchRefsNvfuserCapabilityMode():
@@ -352,8 +354,10 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
-    # TODO: pass in extra flags
-    result = torch._convolution(
+    if bias is None:
+        return NotImplemented
+
+    result = torch.ops.aten.convolution(
             x,
             weight,
             None,  # bias handled below
@@ -362,16 +366,77 @@ def convolution(
             dilation,
             transposed,
             output_padding,
-            groups,
-            torch._C._get_cudnn_benchmark(),
-            torch._C._get_cudnn_deterministic() or torch._C._get_deterministic_algorithms(),
-            torch._C._get_cudnn_enabled(),
-            torch._C._get_cudnn_allow_tf32())
-    if bias is not None:
-        bias = bias.view([-1] + (x.dim() - 2) * [1])
-        result = result.add(bias)
+            groups)
+    bias = bias.view([-1] + (x.dim() - 2) * [1])
+    result = result.add(bias)
     return result
 
+@register_decomposition(torch.ops.aten.convolution)
+def convolution(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int,
+):
+    if bias is None:
+        return NotImplemented
+
+    # remove bias output from convolution
+    result = torch.ops.aten.convolution(
+            x,
+            weight,
+            None,  # bias handled below
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups)
+    bias = bias.view([-1] + (x.dim() - 2) * [1])
+    result = result.add(bias)
+    return result
+
+@register_decomposition(torch.ops.aten.convolution_backward)
+def convolution_backward(
+    grad_output: torch.Tensor,
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias_sizes_opt: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int,
+    output_mask: List[int],
+):
+    if output_mask[2] is False:
+        return NotImplemented
+
+    # remove bias output from convolution_backward
+    output_mask[2] = False
+    result = torch.ops.aten.convolution_backward(
+            grad_output
+            x,
+            weight,
+            None,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            output_mask)
+    assert result[2] is None
+    reduction_axes = [i for i in range(x.dim()) if i != 1]
+    bias_grad = grad_output.sum(reduction_axes)
+    result[2] = bias_grad
+    return result
 
 def create_nvprims_backend(*, executor):
     class NvPrims(AotAutogradStrategy):
@@ -382,6 +447,7 @@ def create_nvprims_backend(*, executor):
             aten = torch.ops.aten
             default_decompositions = {
                 aten.convolution,
+                aten.convolution_backward,
             }
             self.aten2aten_decompositions = get_decompositions(default_decompositions)
 
