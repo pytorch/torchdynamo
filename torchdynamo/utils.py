@@ -29,6 +29,9 @@ import tabulate
 import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._python_dispatch import _len_torch_dispatch_stack
+from torch.utils._python_dispatch import _pop_mode
+from torch.utils._python_dispatch import _push_mode
 
 from . import config
 from . import logging as torchdynamo_logging
@@ -129,6 +132,17 @@ tensortype_to_dtype = {
     torch.ShortTensor: (torch.int16, torch.short),
     torch.BoolTensor: (torch.bool,),
 }
+
+
+@contextmanager
+def disable_current_modes():
+    mode_len = _len_torch_dispatch_stack()
+    old_modes = [_pop_mode() for _ in range(mode_len)]
+    try:
+        yield old_modes
+    finally:
+        for i in range(mode_len):
+            _push_mode(old_modes[mode_len - 1 - i])
 
 
 class DuplicateWarningChecker(object):
