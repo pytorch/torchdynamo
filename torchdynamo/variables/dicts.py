@@ -34,7 +34,7 @@ class ConstDictVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         for key, value in self.items.items():
-            if isinstance(key, torch.nn.Parameter):
+            if isinstance(key, torch.Tensor):
                 codegen.extend_output(
                     [
                         codegen.create_load_global(global_key_name(key), add=True),
@@ -114,7 +114,7 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(args[0])
 
-            if isinstance(k, torch.nn.Parameter):
+            if isinstance(k, torch.Tensor):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
@@ -194,7 +194,7 @@ class ConstDictVariable(VariableTracker):
     def _key_to_var(cls, tx, key, **options):
         from .builder import VariableBuilder
 
-        if isinstance(key, torch.nn.Parameter):
+        if isinstance(key, torch.Tensor):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
@@ -228,7 +228,7 @@ class DefaultDictVariable(ConstDictVariable):
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-                    if isinstance(k, torch.nn.Parameter):
+                    if isinstance(k, torch.Tensor):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     if self.default_factory is list:

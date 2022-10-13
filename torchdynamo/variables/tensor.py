@@ -162,7 +162,13 @@ class TensorVariable(VariableTracker):
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
-            parameter_value = initial_example_value if is_parameter else None
+            # Optimizing a Tensor with requries_grad=True (instead of an nn.Parameter) is valid.
+            # This is a pattern of doing gradient descent on the inputs (instead of weights).
+            # We should specialized parameter value for both cases.
+            if is_parameter or (initial_example_value is not None and initial_example_value.requires_grad):
+                parameter_value = initial_example_value
+            else:
+                parameter_value = None
 
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(example_value, FakeTensor):
