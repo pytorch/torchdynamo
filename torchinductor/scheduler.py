@@ -1017,8 +1017,8 @@ class Scheduler:
                 and name not in self.mutation_renames
                 and name not in self.mutation_real_name
             ):
-                if name in V.kernel.args.inplace_reused_buffers():
-                    V.graph.inplaced_to_remove.update(name)
+                if name in V.kernel.args.inplaced_buffer_names():
+                    V.graph.inplaced_to_remove.add(name)
                 else:
                     self.remove_buffer(name)
 

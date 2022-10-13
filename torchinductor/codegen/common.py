@@ -420,10 +420,10 @@ class KernelArgs:
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
 
-    def inplace_reused_buffers(self):
+    def inplaced_buffer_names(self):
         buffers = set()
         for inplaced in unique(self.inplace_buffers.values()):
-            buffers.update(inplaced.other_names[:-1])
+            buffers.update(inplaced.other_names)
         return buffers
 
 
