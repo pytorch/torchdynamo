@@ -346,11 +346,11 @@ conda create --name=torchdynamo python=3.8
 conda activate torchdynamo
 
 # install pytorch nightlies
-# for CUDA version, replace `cpuonly` with `cudatoolkit=11.6`
+# for CUDA version, replace `cpuonly` with `pytorch-cuda=11.6`
 conda install pytorch torchvision torchaudio torchtext cpuonly -c pytorch-nightly
 pip install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
 
-git clone git@github.com:pytorch/torchdynamo.git
+git clone https://github.com/pytorch/torchdynamo
 cd torchdynamo
 pip install -r requirements.txt
 
