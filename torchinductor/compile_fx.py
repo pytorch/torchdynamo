@@ -6,6 +6,7 @@ from typing import List
 
 import functorch
 import torch.fx
+from functorch._src.aot_autograd import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
@@ -84,7 +85,7 @@ def compile_fx_inner(
     graph_id=None,
 ):
     if dynamo_utils.count_calls(gm.graph) == 0:
-        return gm
+        return make_boxed_func(gm.forward)
 
     _step_logger()(
         logging.INFO,
