@@ -586,7 +586,7 @@ class TorchPyOperator(VariableTracker):
             gm.__name__ = next_name
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
-            tx.output.register_attr_or_module(gm, next_name, source=src)
+            tx.output.register_attr_or_module(gm, next_name, current_tx=tx, source=src)
             return next_name, gm, guards
 
         # Get args as proxies

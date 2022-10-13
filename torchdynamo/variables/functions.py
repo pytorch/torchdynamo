@@ -278,6 +278,7 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     return tx.output.register_attr_or_module(
         res,
         name,
+        current_tx=tx,
         **options,
     )
 

@@ -195,7 +195,7 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
+    def register_attr_or_module(self, mod: torch.nn.Module, *names, current_tx=None, **options):
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
@@ -209,7 +209,7 @@ class OutputGraph(fx.Tracer):
             def wrap_name(module_key):
                 return TensorVariable.create(
                     self,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    self.create_proxy("get_attr", module_key, tuple(), {}, current_tx=current_tx),
                     example_value=mod,
                     **options,
                 )
@@ -399,10 +399,11 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO:
+            if config.log_level <= torchdynamo_logging.CODE:
+                graph_str = gm.print_readable() if config.output_graph_code else format_graph_tabular(gm.graph)
                 log.log(
                     torchdynamo_logging.CODE,
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
                 )
         except ImportError:
             log.warning(

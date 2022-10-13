@@ -53,6 +53,7 @@ from .utils import counters
 from .utils import fake_tensors_available
 from .utils import graph_break_dup_warning_checker
 from .utils import istype
+from .utils import proxy_args_kwargs
 from .variables.base import MutableLocal
 from .variables.base import VariableTracker
 from .variables.base import typestr
@@ -705,7 +706,12 @@ class InstructionTranslatorBase(object):
             self.push(
                 TensorVariable.create(
                     self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    proxy=self.output.create_proxy(
+                        "call_function",
+                        supported_tensors[op],
+                        *proxy_args_kwargs([left, right], {}),
+                        current_tx=self,
+                    ),
                     **options,
                 )
             )
@@ -979,28 +985,28 @@ class InstructionTranslatorBase(object):
         )
 
     def UNPACK_SEQUENCE(self, inst):
-        # TODO(jansel): rewrite this using unpack_var_sequence
         seq = self.pop()
-        options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
             assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
-            for i in reversed(seq.items):
+            for i in reversed(seq.unpack_var_sequence(self)):
                 self.push(i)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
-            val = seq.as_python_constant()
+            val = seq.unpack_var_sequence(self)
             assert len(val) == inst.argval
             for i in reversed(val):
-                self.push(ConstantVariable(i, **options))
+                self.push(i)
         elif isinstance(seq, TensorVariable):
-            proxy = seq.as_proxy()
-            for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+            val = seq.unpack_var_sequence_range(self, range(inst.argval))
+            assert len(val) == inst.argval
+            for i in reversed(val):
+                self.push(i)
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
-            proxy = getattr(seq.obj.as_proxy(), seq.name)
-            for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+            val = seq.obj.unpack_var_sequence_range(self, range(inst.argval))
+            assert len(val) == inst.argval
+            for i in reversed(val):
+                self.push(i)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 
