@@ -1064,23 +1064,6 @@ class LoopLevelWithTail(LoopLevel):
     def lines(self):
         assert False
 
-    def code_gen(self, code):
-        assert self.main_loop_body
-        assert self.tail_loop_body
-        assert isinstance(self.main_loop_body, Kernel)
-        assert isinstance(self.tail_loop_body, Kernel)
-        for loop, kernel in (
-            (self.main_loop, self.main_loop_body),
-            (self.tail_loop, self.tail_loop_body),
-        ):
-            with contextlib.ExitStack() as stack:
-                code.writelines(loop.lines())
-                stack.enter_context(code.indent())
-                with contextlib.ExitStack() as stack:
-                    code.splice(kernel.loads)
-                    code.splice(kernel.compute)
-                    code.splice(kernel.stores)
-
 
 @dataclasses.dataclass
 class LoopNest:
@@ -1098,7 +1081,6 @@ class LoopNest:
         loops[0].parallel = par_depth
         for i in range(1, par_depth):
             loops[i].collapsed = True
-        loops[0].simd_omp = loops[par_depth - 1].simd_omp
 
     def split_most_inner_loop(self, factor):
         sympy_factor = sympy.Integer(factor)
@@ -1117,29 +1099,9 @@ class LoopNest:
         loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
         self.loops[-1] = loop_with_tail
 
-    def vectorize_most_inner_loop(self, simd_vec_kernel, simd_omp_kernel):
-        if simd_vec_kernel is not None and simd_vec_kernel.simd_vec:
-            self.split_most_inner_loop(config.cpp.simdlen)
-            loop_with_tail = self.loops[-1]
-            assert isinstance(loop_with_tail, LoopLevelWithTail)
-
-            simd_vec_kernel.simd = False
-            simd_vec_kernel.fast_vec = True
-
-            loop_with_tail.tail_loop.simd_omp = True
-            loop_with_tail.tail_loop.simd_len = int(config.cpp.simdlen / 2)
-            loop_with_tail.tail_loop.simd_vec = False
-
-            loop_with_tail.main_loop_body = simd_vec_kernel
-            loop_with_tail.tail_loop_body = simd_omp_kernel
-
     def codegen(self, code, stack):
         for loop in self.loops:
-            if isinstance(loop, LoopLevelWithTail):
-                assert self.loops[-1] == loop
-                loop.code_gen(code)
-            else:
-                code.writelines(loop.lines())
-                stack.enter_context(code.indent())
+            code.writelines(loop.lines())
+            stack.enter_context(code.indent())
         else:
             stack.enter_context(code.indent())
