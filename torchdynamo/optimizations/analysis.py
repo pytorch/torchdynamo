@@ -11,6 +11,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
 
 from .. import config
+from ..utils import clone_inputs
 from ..utils import fake_tensors_available
 
 if fake_tensors_available:
@@ -123,6 +124,10 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
+    # Clone the inputs such that intermediate tensors (not leaf tensors) with
+    # requires_grad to True are now converted to False to avoid Runtime Error
+    # like "leaf variable that requires grad is inplace modified"
+    example_inputs = clone_inputs(example_inputs)
     if fake_tensors_available and config.fake_tensor_propagation:
         with FakeTensorMode() as fake_mode:
             pass
