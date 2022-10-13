@@ -363,10 +363,10 @@ def convolution(
             transposed,
             output_padding,
             groups,
-            True,
-            False,
-            True,
-            True)
+            torch._C._get_cudnn_benchmark(),
+            torch._C._get_cudnn_deterministic() or torch._C._get_deterministic_algorithms(),
+            torch._C._get_cudnn_enabled(),
+            torch._C._get_cudnn_allow_tf32())
     if bias is not None:
         bias = bias.view([-1] + (x.dim() - 2) * [1])
         result = result.add(bias)
