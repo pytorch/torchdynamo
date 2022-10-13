@@ -312,7 +312,7 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif override_fn_when_cuda_float64 and is_cuda and dtype  == torch.float64:
+            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
                 return fn(*[load(index) for load in loaders])
@@ -3223,26 +3223,31 @@ add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
 exp = register_pointwise(
-    aten.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, use_libdevice_for_f64=True
+    aten.exp,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
     aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 sqrt = register_pointwise(
-    aten.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True
+    aten.sqrt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 
 register_pointwise(
-    aten.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True
+    aten.cos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(
-    aten.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True
+    aten.sin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(aten.abs, use_libdevice_for_f64=True)
 register_pointwise(aten.bitwise_and)
@@ -3253,8 +3258,9 @@ register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 register_pointwise(
-    aten.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True
+    aten.log,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
