@@ -600,7 +600,7 @@ class CppSimdVecKernel(CppKernel):
         assert self.simd_len
         assert self.simd_len > 0
         most_inner_var = self.itervars[-1]
-        replacement = {most_inner_var : most_inner_var * self.simd_len}
+        replacement = {most_inner_var: most_inner_var * self.simd_len}
         new_index = sympy_subs(expanded_index, replacement)
         return new_index
 
@@ -774,8 +774,7 @@ class CppKernelProxy(CppKernel):
         par_depth = 0
         if loops_nest_non_reduc:
             par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[: self.reduction_depth],
-                threads
+                self.simd_vec_kernel.call_ranges[: self.reduction_depth], threads
             )
 
         with contextlib.ExitStack() as stack:
@@ -795,8 +794,8 @@ class CppKernelProxy(CppKernel):
             loop_with_tail: LoopLevelWithTail = loops_nest_non_reduc.loops[-1]
             for loop, kernel in (
                 (loop_with_tail.main_loop, loop_with_tail.main_loop_body),
-                (loop_with_tail.tail_loop, loop_with_tail.tail_loop_body)
-                ):
+                (loop_with_tail.tail_loop, loop_with_tail.tail_loop_body),
+            ):
 
                 code.writelines(loop.lines())
                 with contextlib.ExitStack() as stack:
@@ -804,6 +803,7 @@ class CppKernelProxy(CppKernel):
                     code.splice(kernel.loads)
                     code.splice(kernel.compute)
                     code.splice(kernel.stores)
+
 
 class CppScheduling:
     def __init__(self, scheduler):
@@ -836,7 +836,9 @@ class CppScheduling:
             nodes, key=lambda x: int(x.is_reduction())
         ).group
 
-        with CppSimdVecKernelChecker(self.kernel_group.args, self.kernel_group.ws.num_threads) as kernel_checker:
+        with CppSimdVecKernelChecker(
+            self.kernel_group.args, self.kernel_group.ws.num_threads
+        ) as kernel_checker:
             vars, reduction_vars = kernel_checker.set_ranges(group, reduction_group)
             for node in nodes:
                 if node.group[1] in [
@@ -905,7 +907,9 @@ class CppScheduling:
         if simd_vec_kernel:
             metrics.generated_kernel_count -= 1
 
-        cpp_kernel_proxy = CppKernelProxy(kernel_group.args, kernel_group.ws.num_threads)
+        cpp_kernel_proxy = CppKernelProxy(
+            kernel_group.args, kernel_group.ws.num_threads
+        )
         cpp_kernel_proxy.simd_vec_kernel = simd_vec_kernel
         cpp_kernel_proxy.simd_omp_kernel = simd_omp_kernel
 
@@ -926,7 +930,7 @@ class KernelGroup:
         self.stack.enter_context(self.ws)
         self.count = 0
 
-    def new_kernel(self, simd_vec = False):
+    def new_kernel(self, simd_vec=False):
         if simd_vec:
             return CppSimdVecKernel(self.args, self.ws.num_threads)
         else:
