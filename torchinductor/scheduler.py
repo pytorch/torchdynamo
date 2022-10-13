@@ -944,7 +944,7 @@ class Scheduler:
         - Estimate of the saved memory operations
         - Fusions closer together in original order
         """
-        memory_score = self.score_fusion_memory(node1, node1)
+        memory_score = self.score_fusion_memory(node1, node2)
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
@@ -993,6 +993,11 @@ class Scheduler:
                 node = self.name_to_node[name]
                 if node.can_free():
                     V.graph.wrapper_code.codegen_free(node.node)
+            elif name in V.graph.graph_inputs:
+                storage = V.graph.graph_inputs[name].data
+                assert storage.is_input_buffer()
+                V.graph.wrapper_code.codegen_free(storage.data)
+
         self.buffer_names_to_free.clear()
 
     def remove_kernel_local_buffers(self):

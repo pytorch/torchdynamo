@@ -3195,16 +3195,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
     ) and dtype is None:
         dtype = torch.int64
 
-    # This is a temp fix for https://github.com/pytorch/torchdynamo/issues/1450
-    # The root cause of the problem is a one-element bool tensor was stored as
-    # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
-    # which confuses the backward pass when it calls sum on the bool tensor.
-    # A better place to fix is in triton.py (see the comment there), but it is
-    # blocked by a trition issue on bool comparison, causing opinfo tests like
-    # test_comprehensive_gt_cuda_bool to fail.
-    if is_boolean_dtype(x.get_dtype()):
-        x = to_dtype(to_dtype(x, dtype), torch.bool)
-
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 

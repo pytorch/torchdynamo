@@ -293,7 +293,7 @@ def inductor_fails(fx_g, args, check_str=None):
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
-        compile_mod(*args)
+        compile_mod(args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
