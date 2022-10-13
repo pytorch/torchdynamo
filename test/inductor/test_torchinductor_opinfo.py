@@ -142,7 +142,11 @@ inductor_skips["cuda"] = {
 
 inductor_all_skips = defaultdict(dict)
 
-inductor_all_skips["cpu"] = {}
+inductor_all_skips["cpu"] = {
+    "nn.functional.pad.constant": {b8, f16, f32, f64, i32, i64}, # segfault,
+    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64}, # segfault,
+    "linalg.solve_ex": {b8, f16, f32, f64, i32, i64}, # segfault,
+}
 inductor_all_skips["cuda"] = {
     "inner" : {b8, f16, f32, f64, i32, i64}, # segfault
     "erfinv": {b8, f16, f32, f64, i32, i64}, # segfault
