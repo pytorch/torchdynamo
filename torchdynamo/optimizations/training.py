@@ -350,9 +350,8 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
-    result =
-        # TODO: pass in extra flags
-        torch._convolution(
+    # TODO: pass in extra flags
+    result = torch._convolution(
             x,
             weight,
             None,  # bias handled below
