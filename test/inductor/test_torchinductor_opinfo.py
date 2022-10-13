@@ -57,6 +57,8 @@ else:
     START = 0
     END = len(op_db)
 
+print(f"RUNNING FROM {START} TO {END}")
+
 seen_succeeded = defaultdict(dict)
 seen_failed = defaultdict(dict)
 failed_reasons = defaultdict(set)
@@ -146,6 +148,8 @@ inductor_all_skips["cpu"] = {
     "nn.functional.pad.constant": {b8, f16, f32, f64, i32, i64}, # segfault,
     "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64}, # segfault,
     "linalg.solve_ex": {b8, f16, f32, f64, i32, i64}, # segfault,
+    "nn.functional.pad.reflect": {b8, f16, f32, f64, i32, i64}, # segfault,
+    "linalg.solve_triangular":  {b8, f16, f32, f64, i32, i64}, # segfault
 }
 inductor_all_skips["cuda"] = {
     "inner" : {b8, f16, f32, f64, i32, i64}, # segfault
