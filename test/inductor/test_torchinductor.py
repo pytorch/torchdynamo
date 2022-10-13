@@ -1995,7 +1995,11 @@ class CommonTemplate:
     def test_cat(self):
         def fn(a):
             tmp = a * 2
-            return torch.cat((a, a[:, :4] + 1, a + 2), -1), torch.cat((tmp, tmp), 0)
+            return (
+                torch.cat((a, a[:, :4] + 1, a + 2), -1),
+                torch.cat((tmp, tmp), 0),
+                torch.cat((tmp, tmp.double()), 0),
+            )
 
         self.common(
             fn,
@@ -3161,6 +3165,15 @@ class CommonTemplate:
                 torch.randn(2, 3),
             ],
         )
+
+    # issue #1150
+    def test_dense_mask_index(self):
+        def fn(x, y):
+            y = torch.ops.aten.select.int(y, 0, 2)
+            z = x * y
+            return z.sum()
+
+        self.common(fn, [torch.randn(102400), torch.randn(3)])
 
     def test_new_empty_strided(self):
         def fn(a):

@@ -97,6 +97,8 @@ decompositions = get_decompositions(
         aten.tril.default,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
+        aten.softplus,
+        aten.softplus_backward,
     ]
 )
 
