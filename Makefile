@@ -98,7 +98,7 @@ build-deps: clone-deps
 	(cd ../torchvision && python setup.py clean && python setup.py develop)
 	(cd ../torchtext   && python setup.py clean && python setup.py develop)
 	(cd ../detectron2  && python setup.py clean && python setup.py develop)
-	# (cd ../torchbenchmark && python install.py --continue_on_fail)
+	(cd ../torchbenchmark && python install.py --continue_on_fail)
 	(cd ../triton/python && python setup.py clean && python setup.py develop)
 	make setup_lint
 	python setup.py develop

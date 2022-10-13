@@ -10,5 +10,4 @@ numpy
 pytest
 pyyaml
 sympy
-torch
-filelock
+torch>=1.12.0
