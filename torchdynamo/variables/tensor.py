@@ -180,7 +180,8 @@ class TensorVariable(VariableTracker):
             options.update(specialized_props)
             return cls(proxy, **options)
         elif (
-            proxy.node.target.__name__ == "set_state"
+            hasattr(proxy.node.target, "__name__")
+            and proxy.node.target.__name__ == "set_state"
             and isinstance(proxy.node.target.__self__, torch._C.Generator)
             or proxy.node.target == torch.random.set_rng_state
         ):
