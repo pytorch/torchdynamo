@@ -20,7 +20,7 @@ if fake_tensors_available:
     from torch._subclasses.fake_tensor import DataDependentOutputException
     from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
-import numpy as np
+
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch.utils._pytree import tree_map
@@ -646,6 +646,35 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
+class UnspecializedNumpyVariable(TensorVariable):
+    """
+    This is a 1-element tensor represents unspecialized numpy float/int.
+    """
+
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        raw_value = kwargs.pop("raw_value", None)
+        super(UnspecializedNumpyVariable, self).__init__(proxy, **kwargs)
+        self.raw_value = raw_value
+
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable, raw_value):
+        # Convert a `TensorVariable` instance into an `UnspecializedNumpyVariable` instance.
+        return UnspecializedNumpyVariable(
+            **dict(tensor_variable.__dict__), raw_value=raw_value
+        )
+
+    def as_specialized(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+
+        for g in self.guards:
+            if g.is_volatile:
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable(value=self.raw_value, guards=self.guards)
+
+
 class UnspecializedPythonVariable(TensorVariable):
     """
     This is a 1-element tensor represents unspecialized python float/int.
@@ -653,9 +682,6 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
-        if isinstance(raw_value, np.number):
-            raw_value = raw_value.item()
-
         need_unwrap = kwargs.pop("need_unwrap", True)
         super(UnspecializedPythonVariable, self).__init__(proxy, **kwargs)
         self.raw_value = raw_value
