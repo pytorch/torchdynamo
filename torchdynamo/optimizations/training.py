@@ -357,35 +357,6 @@ def convolution(
     if bias is None:
         return NotImplemented
 
-    result = torch.ops.aten.convolution(
-            x,
-            weight,
-            None,  # bias handled below
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups)
-    bias = bias.view([-1] + (x.dim() - 2) * [1])
-    result = result.add(bias)
-    return result
-
-@register_decomposition(torch.ops.aten.convolution)
-def convolution(
-    x: torch.Tensor,
-    weight: torch.Tensor,
-    bias: torch.Tensor,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
-    transposed: bool,
-    output_padding: List[int],
-    groups: int,
-):
-    if bias is None:
-        return NotImplemented
-
     # remove bias output from convolution
     result = torch.ops.aten.convolution(
             x,
