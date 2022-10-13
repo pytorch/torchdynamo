@@ -585,7 +585,7 @@ class Kernel(CodeGen):
                     self.cse.store_cache[name] = value
                     for other_name in self.current_node.get_mutations():
                         self.cse.store_cache[other_name] = value
-                if self.need_store(name):
+                if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
@@ -615,6 +615,3 @@ class Kernel(CodeGen):
         }
         return sympy_subs(index, replacements)
 
-    def need_store(self, name):
-        inplace_reused = any(name in inplaced.other_names[:-1] for inplaced in unique(self.args.inplace_buffers.values()))
-        return not inplace_reused and name not in V.graph.removed_buffers

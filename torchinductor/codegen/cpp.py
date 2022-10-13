@@ -380,7 +380,7 @@ class CppKernel(Kernel):
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
 
-        if self.need_store(name):
+        if name not in V.graph.removed_buffers:
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
             self.reduction_suffix.writeline(
