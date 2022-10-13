@@ -121,7 +121,7 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        with fake_mode.restore():
+        with fake_mode.restore() if hasattr(fake_mode, "restore") else fake_mode:
             ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         new_gm = copy.deepcopy(gm)
