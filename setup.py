@@ -31,7 +31,7 @@ if "develop" in sys.argv:
     ]
 
 install_requires = [
-    "torch>=1.12.0",
+    "torch>=1.13.0",
     "numpy",
     "tabulate",
     "pyyaml",
@@ -43,7 +43,7 @@ install_requires = [
 
 setup(
     name="torchdynamo",
-    version="1.13.0.dev0",
+    version="1.13.0",
     url="https://github.com/pytorch/torchdynamo",
     description="A Python-level JIT compiler designed to make unmodified PyTorch programs faster.",
     long_description=long_description,
