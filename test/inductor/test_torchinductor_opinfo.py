@@ -293,8 +293,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "index_add": {f16, f32, f64},
-    "index_copy": {f16, f32, f64},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -435,6 +433,8 @@ inductor_all_samples = {
     "index_copy",
     "scatter_reduce.sum",
     "select_scatter",
+    "squeeze",
+    "unsqueeze",
 }
 
 
