@@ -417,9 +417,9 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            _step_logger()(logging.INFO, "calling compiler function")
+            _step_logger()(logging.INFO, f"calling compiler function {self.compiler_fn.__name__}")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            _step_logger()(logging.INFO, "done compiler function")
+            _step_logger()(logging.INFO, f"done compiler function {self.compiler_fn.__name__}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             log.warning("-" * 40 + "\n")
