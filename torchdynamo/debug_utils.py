@@ -777,7 +777,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
-                    run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+                    run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
                         "Compiled Fx GraphModule failed with following error. Setting up minifier."
@@ -817,7 +817,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
-        run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+        run_fwd_maybe_bwd(compiled_gm, example_inputs)
         raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
