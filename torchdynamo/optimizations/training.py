@@ -23,6 +23,8 @@ from .analysis import has_mutation
 from .backends import BACKENDS
 from .normalize import normalize_ir
 
+from typing import List
+
 log = logging.getLogger(__name__)
 
 
