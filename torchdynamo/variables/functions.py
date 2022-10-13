@@ -305,8 +305,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.defaults = defaults
         self.kwdefaults = kwdefaults
         self.annotations = annotations
-        # import pdb
-        # pdb.set_trace()
         self.closure = closure
         if closure is None:
             closure_scope = None
