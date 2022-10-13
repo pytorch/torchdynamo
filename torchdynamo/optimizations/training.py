@@ -12,6 +12,7 @@ from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
+from torch._deomp import register_decomposition
 
 from .. import config
 from ..debug_utils import wrap_compiler_debug
@@ -337,6 +338,43 @@ def prims_executor(gm, inputs, *, executor):
     # Then we return a callable that executes the "prim_gm" graph
     return partial(execute, prim_gm, executor=executor)
 
+@register_decomposition(torch.ops.aten.convolution)
+def convolution(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int,
+):
+    result =
+        # TODO: pass in extra flags
+        torch._convolution(
+            x,
+            weight,
+            None,  # bias handled below
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            True,
+            False,
+            True,
+            True,
+        )
+    )
+    if bias is not None:
+        #kernel_dims = len(weight.get_size()) - 2
+        #out_chan = result.get_size()[-1 - kernel_dims]
+        #bias = view(bias, [out_chan] + kernel_dims * [1])
+        result = add(result, bias)
+    return result
+
 
 def create_nvprims_backend(*, executor):
     class NvPrims(AotAutogradStrategy):
@@ -344,12 +382,19 @@ def create_nvprims_backend(*, executor):
             super(NvPrims, self).__init__(gm, example_inputs)
             self.executor = executor
 
+            aten = torch.ops.aten
+            default_decompositions = {
+                aten.convolution,
+            }
+            self.aten2aten_decompositions = get_decompositions(default_decompositions)
+
         def candidate(self):
             return BACKENDS["aot_autograd"](
                 self.gm,
                 self.example_inputs,
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
+                decompositions=self.aten2aten_decompositions,
             )
 
     return NvPrims
