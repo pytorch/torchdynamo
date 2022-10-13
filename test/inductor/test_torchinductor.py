@@ -3162,6 +3162,15 @@ class CommonTemplate:
             ],
         )
 
+    # issue #1150
+    def test_dense_mask_index(self):
+        def fn(x, y):
+            y = torch.ops.aten.select.int(y, 0, 2)
+            z = x * y
+            return z.sum()
+
+        self.common(fn, [torch.randn(102400), torch.randn(3)])
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
