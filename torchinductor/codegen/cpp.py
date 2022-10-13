@@ -9,11 +9,12 @@ import sympy
 import torch
 from torch._prims_common import is_float_dtype
 
-from .. import metrics
 from .. import codecache
 from .. import config
 from .. import ir
-from ..utils import sympy_product, sympy_subs
+from .. import metrics
+from ..utils import sympy_product
+from ..utils import sympy_subs
 from ..virtualized import V
 from ..virtualized import ops
 from .common import BracesBuffer
