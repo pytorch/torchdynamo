@@ -205,32 +205,159 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     return static_input_idxs
 
 
+@dataclasses.dataclass
+class SlabAllocation:
+    ten_storage: torch.Tensor
+    allocated_bytes: int
+
+    def available_memory(self):
+        return self.ten_storage.storage().nbytes() - self.allocated_bytes
+
+    def __lt__(self, other):
+        return self.available_memory() < other.available_memory()
+
+    def __repr__(self):
+        return f"(storage={self.ten_storage.storage().nbytes()}), allocated_bytes={self.allocated_bytes})"
+
+
+@dataclasses.dataclass
+class StorageIndex:
+    ten_storage: torch.Tensor
+    byte_offset: int
+
+
+class CudaGraphMemoryPool(object):
+    """
+    Pools memory for use in allocating inputs to cudagraphs across separate invocations.
+    To allocate memory for a new set of tensors, we search through our existing allocations,
+    trying to allocate the largest tensors to our smallest slab allocations.
+    When we do not have enough memory for new allocations, we allocate a new slab and
+    return byte offsets to that slab for each new tensor which could not be fit in existing memory.
+    """
+
+    def __init__(self, device):
+        self.device = device
+        self.storages: List[SlabAllocation] = []
+
+    def reset_storages(self):
+        for stor in self.storages:
+            stor.allocated_bytes = 0
+        # we try to use smallest memory pools first
+        self.storages.sort()
+
+    def allocate(self, inp_needed_bytes: List[int]) -> List[StorageIndex]:
+        self.reset_storages()
+
+        inp_needed_bytes = [
+            size if size % 16 == 0 else (size + (16 - (size % 16)))
+            for size in inp_needed_bytes
+        ]
+
+        # try to allocate largest tensors first
+        sorted_indices = [
+            b[0] for b in sorted(enumerate(inp_needed_bytes), key=lambda i: -i[1])
+        ]
+        outputs = [None for _ in range(len(inp_needed_bytes))]
+
+        new_allocated_size_needed = 0
+
+        for i in sorted_indices:
+            needed_bytes = inp_needed_bytes[i]
+            storage_and_offset = self.search_for_memory(needed_bytes)
+            if storage_and_offset is not None:
+                outputs[i] = storage_and_offset
+            else:
+                new_allocated_size_needed += needed_bytes
+
+        if new_allocated_size_needed == 0:
+            return outputs
+
+        ten_storage = torch.zeros(
+            (new_allocated_size_needed,), dtype=torch.int8, device=self.device
+        )
+        alloc_bytes = 0
+        for i in range(len(inp_needed_bytes)):
+            if outputs[i] is not None:
+                continue
+            outputs[i] = StorageIndex(ten_storage, alloc_bytes)
+            alloc_bytes += inp_needed_bytes[i]
+
+        self.storages.append(SlabAllocation(ten_storage, alloc_bytes))
+        return outputs
+
+    def search_for_memory(self, needed_bytes):
+        for i, allocated_storage in enumerate(self.storages):
+            if allocated_storage.available_memory() >= needed_bytes:
+                si = StorageIndex(
+                    allocated_storage.ten_storage,
+                    allocated_storage.allocated_bytes,
+                )
+                allocated_storage.allocated_bytes += needed_bytes
+                self.storages.sort()
+                return si
+        return None
+
+
+# TODO: this should be deallocated when all compile_fx references die
+# TODO - should also be thread local
+memory_pool_per_device = {}
+
+
+def get_memory_pool(device):
+    global memory_pool_per_device
+    if device not in memory_pool_per_device:
+        memory_pool_per_device[device] = CudaGraphMemoryPool(device)
+
+    return memory_pool_per_device[device]
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
-    def static_input(x):
+    def compute_needed_bytes(x):
+        return (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        ) * x.element_size()
+
+    def static_input(x, ten_storage, byte_offset):
         """
         Copy and input while preserving strides
         """
-        # TODO(jansel): figure out why this version doesn't work:
-        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-        needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        buffer = torch.empty((), dtype=x.dtype, device=x.device)
+        buffer.set_(
+            source=ten_storage.view(x.dtype).storage(),
+            storage_offset=byte_offset // x.element_size(),
+            size=x.size(),
+            stride=x.stride(),
         )
-        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
-        return torch.as_strided(buffer, x.size(), x.stride())
+        buffer.zero_()
+        return buffer
 
     assert isinstance(inputs, (list, tuple))
-    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
-    inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
+    inp_device = next(x.device for x in inputs if not is_unspec_input(x))
 
-    static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x
+    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
+    inputs = [x.to(inp_device) if is_unspec_input(x) else x for x in inputs]
+
+    needed_bytes = [
+        compute_needed_bytes(x)
         for idx, x in enumerate(inputs)
+        if idx not in static_input_idxs
     ]
+    storage_and_indices = get_memory_pool(inp_device).allocate(needed_bytes)
+
+    non_static_idx = 0
+    static_inputs = []
+    for idx, x in enumerate(inputs):
+        if idx not in static_input_idxs:
+            si = storage_and_indices[non_static_idx]
+            static_inputs.append(static_input(x, si.ten_storage, si.byte_offset))
+            non_static_idx += 1
+        else:
+            static_inputs.append(x)
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
