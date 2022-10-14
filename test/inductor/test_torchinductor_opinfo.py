@@ -1,5 +1,8 @@
+# Owner(s): ["module: inductor"]
 import atexit
 import os
+import sys
+import unittest
 from collections import defaultdict
 from enum import Enum
 from functools import partial
@@ -19,8 +22,20 @@ from torch.testing._internal.common_utils import suppress_warnings
 
 import torchdynamo
 
-from .test_torchinductor import check_model
-from .test_torchinductor import check_model_cuda
+try:
+    from torchinductor.utils import has_triton
+
+    try:
+        from .test_torchinductor import check_model
+        from .test_torchinductor import check_model_cuda
+    except ImportError:
+        from test_torchinductor import check_model
+        from test_torchinductor import check_model_cuda
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -596,4 +611,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torchdynamo.config.raise_on_assertion_error = True
-    run_tests()
+    if has_triton():
+        run_tests()

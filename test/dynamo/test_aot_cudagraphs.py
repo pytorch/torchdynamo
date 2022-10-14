@@ -1,4 +1,3 @@
-#!/usr/bin/env pytest
 # Owner(s): ["module: cuda graphs"]
 
 import functools
@@ -8,6 +7,7 @@ from unittest.mock import patch
 import torch
 
 import torchdynamo
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.testing import same
 
@@ -53,7 +53,7 @@ N_ITERS = 5
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
-class TestAotCudagraphs(torchdynamo.testing.TestCase):
+class TestAotCudagraphs(torchdynamo.test_case.TestCase):
     @patch_all()
     def test_basic(self):
         def model(x, y):
@@ -202,4 +202,6 @@ class TestAotCudagraphs(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

@@ -33,16 +33,11 @@ overhead: develop
 format:
 	isort $(PY_FILES)
 	black $(PY_FILES)
-	! which $(CLANG_FORMAT) >/dev/null 2>&1 || $(CLANG_FORMAT) -i $(C_FILES)
 
 lint:
 	black --check --diff $(PY_FILES)
 	isort --check --diff $(PY_FILES)
 	flake8 $(PY_FILES)
-	mypy
-	! which $(CLANG_TIDY) >/dev/null 2>&1 || $(CLANG_TIDY) $(C_FILES) -- \
-		-I`python -c 'from distutils.sysconfig import get_python_inc as X; print(X())'` \
-		`python -c 'from torch.utils.cpp_extension import include_paths; print(" ".join(map("-I{}".format, include_paths())))'`
 
 lint-deps:
 	grep -E '(black|flake8|isort|click|torch|mypy)' requirements.txt | xargs $(PIP) install

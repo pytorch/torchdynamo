@@ -25,7 +25,6 @@ from typing import Any
 from typing import Dict
 
 import numpy as np
-import tabulate
 import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -45,6 +44,17 @@ compilation_metrics = collections.OrderedDict()
 
 
 timer_counter = itertools.count()
+
+
+def tabulate(rows, headers):
+    try:
+        import tabulate
+
+        return tabulate.tabulate(rows, headers=headers)
+    except ImportError:
+        return "\n".join(
+            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+        )
 
 
 def dynamo_profiled(func):
@@ -106,7 +116,7 @@ def compile_times(repr="str", aggregate=False):
             for k in compilation_metrics
         ]
         out = "TorchDynamo compilation metrics:\n"
-        out += tabulate.tabulate(rows, headers=("Function", "Runtimes (s)"))
+        out += tabulate(rows, headers=("Function", "Runtimes (s)"))
         return out
     elif repr == "csv":
         values = [
@@ -178,11 +188,6 @@ def filter_stack(stack):
 
 
 def format_graph_tabular(graph):
-    try:
-        from tabulate import tabulate
-    except ImportError:
-        raise
-
     node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
     return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
 
@@ -894,7 +899,7 @@ class CompileProfiler:
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
-            rpt += tabulate.tabulate(
+            rpt += tabulate(
                 [[msg, graph_breaks[msg]] for msg in graph_breaks],
                 headers=["Graph Break Reason", "Count"],
             )
@@ -909,7 +914,7 @@ class CompileProfiler:
                 "Guard failures indicate some condition assumed to be static by the tracer changed, "
                 "making it unsafe to reuse the compiled program."
             )
-            rpt += tabulate.tabulate(
+            rpt += tabulate(
                 summarized_gf,
                 headers=["Function", "Num Recompiles", "Recompile Reasons"],
             )

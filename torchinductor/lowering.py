@@ -866,7 +866,7 @@ def make_fallback(kernel):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.cumsum:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
@@ -904,7 +904,7 @@ def bernoulli_(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    assert False
+    raise AssertionError()
 
 
 @functools.lru_cache(1)
@@ -2649,7 +2649,7 @@ def upsample_nearest2d_backward(
 def avg_pool2d(
     x,
     kernel_size,
-    stride=[],
+    stride=(),
     padding=0,
     ceil_mode=False,
     count_include_pad=True,

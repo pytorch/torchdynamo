@@ -1,13 +1,17 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 import torch
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.testing import same
 
-from . import test_global_declaration
+try:
+    from . import test_global_declaration
+except ImportError:
+    import test_global_declaration
 
 
-class Pair(object):
+class Pair(object):  # noqa: B903
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -40,7 +44,7 @@ def reset_name():
     _name = 0
 
 
-class TestGlobals(torchdynamo.testing.TestCase):
+class TestGlobals(torchdynamo.test_case.TestCase):
     def test_store_global_1(self):
         def fn(x):
             global g_counter
@@ -221,3 +225,9 @@ class TestGlobals(torchdynamo.testing.TestCase):
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

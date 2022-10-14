@@ -236,7 +236,12 @@ class OutputGraph(fx.Tracer):
                 return wrap_name(k)
 
         # create a new unique name
-        name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
+        name = "_".join(map(str, names))
+        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
@@ -246,7 +251,7 @@ class OutputGraph(fx.Tracer):
                 return wrap_name(name)
             name = f"{base}_{i}"
 
-        assert False
+        raise AssertionError("unreachable")
 
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
@@ -512,7 +517,7 @@ class OutputGraph(fx.Tracer):
         # append stack trace to fx node
         tx = current_tx if current_tx else self.root_tx
 
-        nn_module_stack = getattr(tx, "nn_module_stack")
+        nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 

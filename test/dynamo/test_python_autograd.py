@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 from typing import Callable
 from typing import Dict
 from typing import List
@@ -8,8 +8,9 @@ from typing import Optional
 import torch
 
 import torchdynamo
+from torchdynamo.test_case import TestCase
+from torchdynamo.test_case import run_tests
 from torchdynamo.testing import CompileCounter
-from torchdynamo.testing import TestCase
 from torchdynamo.testing import same
 
 """
@@ -286,3 +287,7 @@ class TestPythonAutograd(TestCase):
         self.assertTrue(same(grad1, grad2))
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 8)
+
+
+if __name__ == "__main__":
+    run_tests()

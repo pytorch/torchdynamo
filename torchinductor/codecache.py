@@ -17,7 +17,6 @@ from typing import Any
 from typing import Dict
 
 import torch
-from filelock import FileLock
 from torch.utils import cpp_extension
 
 from . import config
@@ -77,6 +76,8 @@ def cpp_compiler_search(search):
     for cxx in search:
         try:
             if cxx is None:
+                from filelock import FileLock
+
                 lock_dir = get_lock_dir()
                 lock = FileLock(
                     os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
@@ -85,7 +86,7 @@ def cpp_compiler_search(search):
                     cxx = install_gcc_via_conda()
             subprocess.check_output([cxx, "--version"])
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
     raise exc.InvalidCxxCompiler()
 
@@ -156,6 +157,8 @@ class CppCodeCache:
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
         if key not in cls.cache:
+            from filelock import FileLock
+
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import importlib
 import logging
 import os
@@ -30,9 +30,8 @@ finally:
     from timm.models import create_model
 
 TIMM_MODELS = dict()
-filename = "timm_models_list.txt"
-if os.path.exists("benchmarks"):
-    filename = "benchmarks/" + filename
+filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
+
 with open(filename, "r") as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]

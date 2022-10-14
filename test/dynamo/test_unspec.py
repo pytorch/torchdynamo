@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 import functools
 import random
 import unittest
@@ -7,11 +7,16 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.testing import same
 
-from . import test_modules
-from . import test_repros
+try:
+    from . import test_modules
+    from . import test_repros
+except ImportError:
+    import test_modules
+    import test_repros
 
 
 def make_unspec_fn(fn):
@@ -48,7 +53,7 @@ UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
 
 @patch.object(torchdynamo.config, "specialize_int_float", False)
-class UnspecTests(torchdynamo.testing.TestCase):
+class UnspecTests(torchdynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -215,3 +220,9 @@ class UnspecTests(torchdynamo.testing.TestCase):
         opt_fn = torchdynamo.optimize(cnts)(fn)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

@@ -163,11 +163,7 @@ def has_tensor_in_frame(frame):
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
             return seen_ids[obj_id]
-        elif (
-            not is_allowed(obj)
-            and hasattr(obj, "__dict__")
-            and len(getattr(obj, "__dict__"))
-        ):
+        elif not is_allowed(obj) and hasattr(obj, "__dict__") and len(obj.__dict__):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
@@ -312,7 +308,7 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torchdynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
+                f"{config.dynamo_import} hit config.cache_size_limit ({config.cache_size_limit})\n"
                 + f"   function: {format_func_info(code)}\n"
                 + f"   reasons:  {format_guard_failures(code)}\n"
                 + f"to diagnose recompilation issues, see {troubleshooting_url}."

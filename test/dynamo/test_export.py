@@ -1,14 +1,15 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 
+import torchdynamo.test_case
 import torchdynamo.testing
 
 
-class ExportTests(torchdynamo.testing.TestCase):
+class ExportTests(torchdynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
@@ -1255,7 +1256,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result = module(torch.tensor([2]))
 
         # X is positive, so .item() > 0, which means we return y * x
-        self.assertEqual(real_result, torch.tensor([1]))
+        self.assertEqual(real_result, torch.tensor([1.0]))
 
         graph, guards = torchdynamo.export(module, torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
@@ -1311,7 +1312,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result = module(torch.tensor([2]))
 
         # X is positive, so .item() > 0, which means we return y * x
-        self.assertEqual(real_result, torch.tensor([1]))
+        self.assertEqual(real_result, torch.tensor([1.0]))
 
         graph, guards = torchdynamo.export(module, torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
@@ -1339,7 +1340,7 @@ class ExportTests(torchdynamo.testing.TestCase):
         real_result = module(torch.tensor([2]))
 
         # X is positive, so .item() > 0, which means we return y * x
-        self.assertEqual(real_result, torch.tensor([1]))
+        self.assertEqual(real_result, torch.tensor([1.0]))
 
         graph, guards = torchdynamo.export(module, torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
@@ -1420,3 +1421,9 @@ class ExportTests(torchdynamo.testing.TestCase):
             graph, _ = torchdynamo.export(
                 f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
             )
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()
