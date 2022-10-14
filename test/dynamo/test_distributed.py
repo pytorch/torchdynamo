@@ -210,10 +210,6 @@ class TestDistributed(torchdynamo.test_case.TestCase):
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
 
-    @pytest.mark.skipif(
-        not hasattr(DDP, "_get_active_ddp_module"),
-        reason="requires pytorch landing in parallel",
-    )
     @patch.object(config, "optimize_ddp", True)
     def test_custom_layer(self):
         """
@@ -222,6 +218,9 @@ class TestDistributed(torchdynamo.test_case.TestCase):
         the user-provided compiler is called by the DDPOptimizer which is
         doing the graph splitting
         """
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        skip_if_no_active_ddp()
 
         class MyCustomLinear(torch.nn.Module):
             def __init__(self):
