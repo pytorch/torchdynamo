@@ -28,7 +28,6 @@ decompositions = get_decompositions(
         aten.col2im,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
-        aten.detach,
         aten.dot,
         aten.elu,
         aten.elu_backward,

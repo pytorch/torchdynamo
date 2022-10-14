@@ -25,6 +25,7 @@ from .ir import ExpandView
 from .ir import PermuteView
 from .ir import Pointwise
 from .ir import Reduction
+from .ir import ReinterpretView
 from .ir import SqueezeView
 from .ir import TensorBox
 from .ir import View
@@ -464,9 +465,16 @@ def broadcast_tensors(*inputs):
     return outputs
 
 
-@register_lowering([aten.alias, aten.detach, aten.detach_, aten.lift, prims.view_of])
+@register_lowering([aten.alias, aten.lift, prims.view_of])
 def nop(x):
     return x  # AOT autograd handles this for us
+
+
+@register_lowering([aten.detach, aten.detach_])
+def detach(x):
+    if isinstance(x, TensorBox) and isinstance(x.data, ReinterpretView):
+        x.data.detached = True
+    return x
 
 
 if hasattr(aten, "lift_fresh"):

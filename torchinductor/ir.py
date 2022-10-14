@@ -1323,6 +1323,7 @@ class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
     layout: "Layout"
+    detached = False
 
     def __str__(self):
         return self.str_helper(
@@ -1370,8 +1371,12 @@ class ReinterpretView(BaseView):
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
         if offset != "0":
-            return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
-        return f"as_strided({self.get_name()}, {size}, {stride})"
+            ref = f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
+        else:
+            ref = f"as_strided({self.get_name()}, {size}, {stride})"
+        if self.detached:
+            ref = f"{ref}.detach()"
+        return ref
 
 
 class SliceView(View):
