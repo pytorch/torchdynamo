@@ -16,21 +16,21 @@ from torchinductor.utils import gen_gm_and_inputs
 
 aten = torch.ops.aten
 
-
 def compute_speedups(
     operator, models, example_inputs, repeats, accuracy_checking=False
 ):
     expected = models[0](*example_inputs)
-    if accuracy_checking:
-        for model in models[1:]:
-            actual = model(*example_inputs)
-            # change to assert later
-            try:
-                same(actual, expected, cos_similarity=True, equal_nan=True)
-            except AssertionError as e:
-                print(e)
-                print(f"Accuracy check failed: {operator}")
-                print((expected[0] - actual[0]).abs().max())
+
+    for model in models[1:]:
+        actual = model(*example_inputs)
+        try:
+            assert same(actual, expected, strides_check=True), "strides not equal"
+            if accuracy_checking:
+                assert same(actual, expected, cos_similarity=True, equal_nan=True)
+        except AssertionError as e:
+            print(e)
+            print(f"Accuracy check failed: {operator}")
+            print((expected[0] - actual[0]).abs().max())
 
     timings = np.zeros((repeats, len(models)), np.float64)
     for rep in range(repeats):

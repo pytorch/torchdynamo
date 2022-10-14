@@ -698,6 +698,7 @@ def same(
     tol=1e-4,
     equal_nan=False,
     exact_dtype=True,
+    strides_check=False,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -734,6 +735,8 @@ def same(
             ref = ref.to_dense()
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
+        if strides_check:
+            return ref.stride() == res.stride()
         if exact_dtype:
             assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
             if ref.dtype == torch.bool:
