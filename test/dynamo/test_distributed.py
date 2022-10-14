@@ -181,7 +181,6 @@ class TestDistributed(torchdynamo.testing.TestCase):
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
 
-
     @pytest.mark.skipif(
         not hasattr(DDP, "_get_active_ddp_module"),
         reason="requires pytorch landing in parallel",
@@ -240,7 +239,6 @@ class TestDistributed(torchdynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-
     def test_empty_graph(self):
         def fn():
             get_world_size = torch.distributed.distributed_c10d.get_world_size()
@@ -253,4 +251,3 @@ class TestDistributed(torchdynamo.testing.TestCase):
         except Exception:
             pass
         self.assertEqual(res, 1)
-
