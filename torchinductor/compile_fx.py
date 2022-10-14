@@ -6,7 +6,7 @@ from typing import List
 
 import functorch
 import torch.fx
-from functorch.compile import make_boxed_compiler
+from functorch._src.aot_autograd import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
@@ -84,7 +84,7 @@ def compile_fx_inner(
     graph_id=None,
 ):
     if dynamo_utils.count_calls(gm.graph) == 0:
-        return gm
+        return make_boxed_func(gm.forward)
 
     _step_logger()(
         logging.INFO,
@@ -135,6 +135,9 @@ def compile_fx_inner(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
+
+    # aot autograd needs to know to pass in inputs as a list
+    result._boxed_call = True
     return result
 
 
@@ -157,14 +160,15 @@ def align_inputs(model, inputs, static_input_idxs=()):
     if len(check_inputs) == 0:
         return model
 
-    def run(*new_inputs):
+    def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
-                if isinstance(new_inputs, tuple):
-                    new_inputs = list(new_inputs)
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        new_inputs = [x.to("cuda") if is_unspec_input(x) else x for x in new_inputs]
-        return model(*new_inputs)
+        new_inputs_to_cuda = [
+            x.to("cuda") if is_unspec_input(x) else x for x in new_inputs
+        ]
+        new_inputs.clear()
+        return model(new_inputs_to_cuda)
 
     return run
 
@@ -177,13 +181,13 @@ def cudagraphify(model, inputs, static_input_idxs=()):
 
     compiled_fn = None
 
-    def run(*new_inputs):
+    def run(new_inputs):
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
 
-        return compiled_fn(*new_inputs)
+        return compiled_fn(new_inputs)
 
     return run
 
@@ -237,8 +241,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
+    # copy static_inputs because it will be cleared in model
     with torch.cuda.stream(stream):
-        model(*static_inputs)
+        model(list(static_inputs))
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()
@@ -246,13 +251,13 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     # record
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream):
-        static_outputs = model(*static_inputs)
+        static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
     if config.size_asserts:
 
-        def run(*new_inputs):
+        def run(new_inputs):
             assert len(static_inputs) == len(new_inputs)
             for idx, (dst, src, expanded_dims) in enumerate(
                 zip(static_inputs, new_inputs, inps_expanded_dims)
@@ -266,6 +271,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
                     dst = index_expanded_dims(dst, expanded_dims)
                     src = index_expanded_dims(src, expanded_dims)
                     dst.copy_(src)
+            new_inputs.clear()
             graph.replay()
             return static_outputs
 
@@ -274,11 +280,12 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             idx for idx in range(len(static_inputs)) if idx not in static_input_idxs
         ]
 
-        def run(*new_inputs):
+        def run(new_inputs):
             for idx in copy_indices:
                 src = index_expanded_dims(static_inputs[idx], inps_expanded_dims[idx])
                 dst = index_expanded_dims(new_inputs[idx], inps_expanded_dims[idx])
                 dst.copy_(src)
+            new_inputs.clear()
             graph.replay()
             return static_outputs
 
@@ -357,8 +364,8 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         return aot_autograd(
             model_,
             example_inputs_,
-            fw_compiler=make_boxed_compiler(fw_compiler),
-            bw_compiler=make_boxed_compiler(bw_compiler),
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
             decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"

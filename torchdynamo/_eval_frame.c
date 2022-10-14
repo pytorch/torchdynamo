@@ -2,6 +2,7 @@
 #include <Python.h>
 #include <frameobject.h>
 #include <pystate.h>
+#include <stdbool.h>
 
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
@@ -10,9 +11,6 @@
 #undef Py_BUILD_CORE
 #endif
 
-#define bool char
-#define false 0
-#define true 1
 #define unlikely(x) __builtin_expect((x), 0)
 
 #define NULL_CHECK(val)                                                        \
