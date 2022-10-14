@@ -261,3 +261,17 @@ def fresh_triton_cache(cache_entries=None):
                         if ".lock" not in f
                     }
                 )
+
+def bench_fn(f, name=None, iters=100):
+    for _ in range(5):
+        f()
+    torch.cuda.synchronize()
+    begin = time.time()
+    for _ in range(iters):
+        f()
+    torch.cuda.synchronize()
+    us_per_iter = (time.time()-begin)*1e6/iters
+    if name is None:
+        print(us_per_iter)
+    else:
+        print(f"{name}: {us_per_iter}us")
