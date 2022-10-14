@@ -1940,6 +1940,21 @@ class CommonTemplate:
             ),
         )
 
+    def test_masked_fill_promotion(self):
+        def fn(mask, value):
+            return aten.masked_fill(value, mask, torch.tensor(float("-inf")))
+
+        opt_fn = torchdynamo.optimize("inductor")(fn)
+        inputs = (
+            torch.randint(0, 1, [1, 16], dtype=torch.bool, device=self.device),
+            torch.randn(
+                [16, 16],
+                dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device=self.device,
+            ),
+        )
+        self.assertEqual(fn(*inputs), opt_fn(*inputs))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
