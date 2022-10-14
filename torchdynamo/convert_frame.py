@@ -49,11 +49,6 @@ from .utils import write_record_to_file
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
-
-
 class Tracker:
     def __init__(self):
         self.seen = []
@@ -361,9 +356,7 @@ def _compile(
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
-
         nonlocal output
-
         tracer = InstructionTranslator(
             instructions,
             code,
