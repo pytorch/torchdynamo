@@ -159,6 +159,7 @@ inductor_all_skips["cpu"] = {
     "nn.functional.pad.reflect": {b8, f16, f32, f64, i32, i64},  # segfault,
     "linalg.solve_triangular": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.svdvals": {b8, f16, f32, f64, i32, i64},  # segfault
+    "nn.functional.relu": {b8, f16, f32, f64, i32, i64},  # segfault
 }
 inductor_all_skips["cuda"] = {
     "inner": {b8, f16, f32, f64, i32, i64},  # segfault
