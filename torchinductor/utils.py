@@ -262,6 +262,7 @@ def fresh_triton_cache(cache_entries=None):
                     }
                 )
 
+
 def bench_fn(f, name=None, iters=100):
     for _ in range(5):
         f()
@@ -270,7 +271,7 @@ def bench_fn(f, name=None, iters=100):
     for _ in range(iters):
         f()
     torch.cuda.synchronize()
-    us_per_iter = (time.time()-begin)*1e6/iters
+    us_per_iter = (time.time() - begin) * 1e6 / iters
     if name is None:
         print(us_per_iter)
     else:

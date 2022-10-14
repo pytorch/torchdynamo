@@ -205,8 +205,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "max.reduction_no_dim": {f16},
-    "max.reduction_with_dim": {b8, f16},
     "min.reduction_no_dim": {f16},
     "min.reduction_with_dim": {b8, f16},
     "multinomial": {f32, f64},
