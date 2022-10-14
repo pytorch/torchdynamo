@@ -4,6 +4,7 @@ import functools
 import inspect
 import logging
 import os
+import sys
 import threading
 import traceback
 import types
@@ -18,7 +19,6 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from . import config
 from . import convert_frame
-from . import logging as torchdynamo_logging
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
@@ -32,15 +32,11 @@ from .utils import same
 log = logging.getLogger(__name__)
 
 try:
-    from . import _eval_frame
-except (ModuleNotFoundError, ImportError) as e:
-    raise RuntimeError("run `python setup.py develop` to compile C extensions") from e
-
-try:
     from torch.fx.experimental import proxy_tensor
-except (ModuleNotFoundError, ImportError):
+except ImportError:
     proxy_tensor = None
 
+_eval_frame = torch._C._dynamo.eval_frame
 set_eval_frame = _eval_frame.set_eval_frame
 reset_code = _eval_frame.reset_code
 unsupported = _eval_frame.unsupported
@@ -83,14 +79,9 @@ def innermost_fn(fn):
     """
     unaltered_fn = fn
     while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
-        unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
+        unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         assert callable(unaltered_fn)
     return unaltered_fn
-
-
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
 
 
 class _TorchDynamoContext:
@@ -164,9 +155,6 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if self.first_ctx:
-                _step_logger()(logging.INFO, "torchdynamo begin tracing")
-
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
@@ -176,8 +164,6 @@ class _TorchDynamoContext:
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
-                if self.first_ctx:
-                    _step_logger()(logging.INFO, "torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -369,6 +355,18 @@ def optimize(
     """
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
+    if sys.platform == "win32":
+        warnings.warn(
+            "Windows is not currently supported, "
+            + f"{config.dynamo_import}.optimize() will do nothing"
+        )
+        return _NullDecorator()
+    if sys.version_info >= (3, 11):
+        warnings.warn(
+            "Python 3.11+ not yet supported, "
+            f"{config.dynamo_import}.optimize() will do nothing"
+        )
+        return _NullDecorator()
 
     backend = get_compiler_fn(backend)
 
@@ -484,9 +482,9 @@ def export(
                         dict_of_source_args[id(arg.item())]
                     )
                 else:
-                    assert (
-                        False
-                    ), "Dynamo input/output is not consistent with traced input/output"
+                    raise AssertionError(
+                        "Dynamo input/output is not consistent with traced input/output"
+                    )
             else:
                 assert (
                     id(arg) in dict_of_source_args
@@ -588,7 +586,7 @@ def export(
 
 
 def assume_constant_result(fn):
-    setattr(fn, "_dynamo_marked_constant", True)
+    fn._dynamo_marked_constant = True
     assert (
         not config.fake_tensor_propagation
     ), "Constant result capture is not supported with fake tensors."
@@ -689,7 +687,7 @@ class TorchPatcher:
                     opt.step = unwrapped_step
 
             # disable future hooking
-            setattr(opt.step, "hooked", True)
+            opt.step.hooked = True
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

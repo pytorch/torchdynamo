@@ -157,6 +157,11 @@ def _register_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         args = list(args)
+        unpacked = False
+        # TODO maybe we need to use pytrees here
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            unpacked = True
+            args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
         # kwargs tensors not supported yet
@@ -173,14 +178,20 @@ def _register_lowering(
                 dtype = get_promoted_dtype(
                     *promoting_args, type_promotion_kind=type_promotion_kind
                 )
-            for i in indices:
-                args[i] = to_dtype(args[i], dtype)
+            # sometimes args are an immutable list so we can't mutate them
+            new_args = []
             for i in range(len(args)):
-                if isinstance(args[i], ir.Constant):
-                    args[i] = ir.Constant(
-                        args[i].value, dtype, args[indices[0]].get_device()
+                if i in indices:
+                    new_args.append(to_dtype(args[i], dtype))
+                elif isinstance(args[i], ir.Constant):
+                    new_args.append(
+                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
                     )
-
+                else:
+                    new_args.append(args[i])
+            args = new_args
+        if unpacked:
+            args = [args]
         if broadcast and indices:
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
@@ -430,7 +441,7 @@ def register_pointwise(
     return fn
 
 
-@register_lowering(aten.where, broadcast=True, type_promotion_kind=None)
+@register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
@@ -440,9 +451,18 @@ def where(cond, a, b):
     if isinstance(b, (float, int)):
         b = constant_like(b)(a)
 
-    dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
+    args = [cond, a, b]
+    dtype = get_promoted_dtype(
+        args[1], args[2], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+    for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
+        args[i] = x
+    for i in range(len(args)):
+        if isinstance(args[i], ir.Constant):
+            args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
     return make_pointwise(fn, override_return_dtype=dtype)(
-        cond, to_dtype(a, dtype), to_dtype(b, dtype)
+        args[0], to_dtype(args[1], dtype), to_dtype(args[2], dtype)
     )
 
 
@@ -748,7 +768,12 @@ def as_strided_(x, size, stride, storage_offset=None):
 def cat(inputs, dim=0):
     if len(inputs) == 1:
         return inputs[0]
+
     dim = _validate_dim(inputs[0], dim, 0)
+    dtype = get_promoted_dtype(
+        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    inputs = [to_dtype(inp, dtype) for inp in inputs]
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
@@ -855,7 +880,7 @@ def make_fallback(kernel):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]):
+    if get_decompositions([kernel]) and kernel is not aten.cumsum:
         log.warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
@@ -893,7 +918,7 @@ def bernoulli_(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    assert False
+    raise AssertionError()
 
 
 @functools.lru_cache(1)
@@ -2638,7 +2663,7 @@ def upsample_nearest2d_backward(
 def avg_pool2d(
     x,
     kernel_size,
-    stride=[],
+    stride=(),
     padding=0,
     ceil_mode=False,
     count_include_pad=True,

@@ -1,5 +1,8 @@
+# Owner(s): ["module: inductor"]
 import atexit
 import os
+import sys
+import unittest
 from collections import defaultdict
 from enum import Enum
 from functools import partial
@@ -19,8 +22,20 @@ from torch.testing._internal.common_utils import suppress_warnings
 
 import torchdynamo
 
-from .test_torchinductor import check_model
-from .test_torchinductor import check_model_cuda
+try:
+    from torchinductor.utils import has_triton
+
+    try:
+        from .test_torchinductor import check_model
+        from .test_torchinductor import check_model_cuda
+    except ImportError:
+        from test_torchinductor import check_model
+        from test_torchinductor import check_model_cuda
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -137,6 +152,9 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # Triton bug leads to segfault
+    "nn.functional.softplus": {f64},
+    "nn.functional.mish": {f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -418,6 +436,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
     "linalg.solve_triangular": {"check_gradient": False},
@@ -592,4 +611,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torchdynamo.config.raise_on_assertion_error = True
-    run_tests()
+    if has_triton():
+        run_tests()

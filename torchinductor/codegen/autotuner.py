@@ -1,7 +1,6 @@
 import builtins
 
 import torch
-import triton
 
 from .. import config
 from .. import triton_ops
@@ -32,14 +31,15 @@ def str2func(str):
 
 class Autotuner:
     def __init__(self):
-
         self.cache = dict()
 
     def _bench(self, kernel, *args, **kwargs):
         def kernel_call():
             kernel(*args, **kwargs)
 
-        return triton.testing.do_bench(kernel_call)
+        from triton.testing import do_bench
+
+        return do_bench(kernel_call)
 
 
 autotune = Autotuner()
@@ -89,7 +89,7 @@ def tuned_conv(
     use_cuda = x.is_cuda
 
     # gen_key
-    key = tuple([arg for arg in id_args])
+    key = tuple(id_args)
     key = ("conv",) + key
 
     # candidate kernels
@@ -173,7 +173,7 @@ def tuned_mm(
     use_cuda = a.is_cuda
 
     # gen_key
-    key = tuple([arg for arg in id_args])
+    key = tuple(id_args)
     key = ("mm",) + key
 
     # candidate kernels
@@ -246,7 +246,7 @@ def tuned_conv_layout(
     ]
 
     # gen_key
-    key = tuple([arg for arg in id_args])
+    key = tuple(id_args)
     key = ("conv_layout",) + key
     runnable_kernel = str2func(kernel)
 

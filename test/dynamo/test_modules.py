@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 
 from copy import deepcopy
 from unittest.mock import patch
@@ -9,12 +9,16 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter
 from torch.nn.parameter import UninitializedParameter
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
 from torchdynamo.mutation_guard import GenerationTracker
 from torchdynamo.testing import same
 
-from . import test_functions
+try:
+    from . import test_functions
+except ImportError:
+    import test_functions
 
 
 class BasicModule(torch.nn.Module):
@@ -485,7 +489,7 @@ class ComplicatedSuperParent(torch.nn.Module):
 
 class SuperChildCallsClassMethod(ComplicatedSuperParent):
     @classmethod
-    def child_func(self, x):
+    def child_func(cls, x):
         x = super().custom_add(x)
         return x
 
@@ -602,7 +606,7 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
-class NNModuleTests(torchdynamo.testing.TestCase):
+class NNModuleTests(torchdynamo.test_case.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
@@ -879,3 +883,9 @@ class NNModuleTests(torchdynamo.testing.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

@@ -44,6 +44,11 @@ from .variables.tensor import UnspecializedPythonVariable
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
+
+
 @dataclass
 class GraphCompileReason:
     """Stores why a given output graph was compiled; i.e. what caused the graph break."""
@@ -69,11 +74,6 @@ class FakeRootModule(torch.nn.Module):
 
     def __repr__(self):
         return "FakeRootModule(...)"
-
-
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
 
 
 class OutputGraph(fx.Tracer):
@@ -236,7 +236,12 @@ class OutputGraph(fx.Tracer):
                 return wrap_name(k)
 
         # create a new unique name
-        name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
+        name = "_".join(map(str, names))
+        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
@@ -246,7 +251,7 @@ class OutputGraph(fx.Tracer):
                 return wrap_name(name)
             name = f"{base}_{i}"
 
-        assert False
+        raise AssertionError("unreachable")
 
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
@@ -417,9 +422,14 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            _step_logger()(logging.INFO, "calling compiler function")
+            name = (
+                self.compiler_fn.__name__
+                if hasattr(self.compiler_fn, "__name__")
+                else ""
+            )
+            _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            _step_logger()(logging.INFO, "done compiler function")
+            _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             log.warning("-" * 40 + "\n")
@@ -512,7 +522,7 @@ class OutputGraph(fx.Tracer):
         # append stack trace to fx node
         tx = current_tx if current_tx else self.root_tx
 
-        nn_module_stack = getattr(tx, "nn_module_stack")
+        nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 

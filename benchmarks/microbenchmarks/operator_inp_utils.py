@@ -85,7 +85,7 @@ def serialize_sparse_tensor(e):
 
 
 def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
-    assert False, "NYI"
+    raise NotImplementedError()
 
 
 def deserialize_tensor(size, dtype, stride=None):
@@ -204,12 +204,22 @@ class OperatorInputsMode(TorchDispatchMode):
 
 
 def map_to_device(e, device):
-    return e.to(device) if isinstance(e, torch.Tensor) else e
+    if isinstance(e, torch.Tensor):
+        return e.to(device)
+    elif isinstance(e, torch.device):
+        return device
+    elif isinstance(e, str):
+        if e == "cuda" or e == "cpu":
+            return device.type
+    else:
+        return e
 
 
 def map_to_dtype(e, dtype):
     if isinstance(e, torch.Tensor) and e.is_floating_point():
         return e.to(dtype)
+    elif isinstance(e, torch.dtype):
+        return dtype
     else:
         return e
 
@@ -289,7 +299,12 @@ class OperatorInputsLoader:
 
     def get_all_ops(self):
         for key in self.operator_db.keys():
-            yield eval(key)
+            try:
+                op = eval(key)
+            except AttributeError as ae:
+                log.warning(f"Evaluating an op name into an OpOverload: {ae}")
+                continue
+            yield op
 
     def get_call_frequency(self, op):
         assert (

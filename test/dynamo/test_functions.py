@@ -1,4 +1,5 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
+# flake8: noqa
 import collections
 import functools
 import inspect
@@ -10,6 +11,7 @@ import torch
 from torch import sub
 from torch.nn import functional as F
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.testing import requires_static_shapes
 
@@ -52,7 +54,7 @@ def inline_unused(x):
     return x + 5.6
 
 
-class FunctionTests(torchdynamo.testing.TestCase):
+class FunctionTests(torchdynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -666,3 +668,9 @@ class FunctionTests(torchdynamo.testing.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

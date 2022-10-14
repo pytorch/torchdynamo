@@ -299,8 +299,10 @@ class IterationRangesRoot(IterationRanges):
         prefix: str,
         index: int,
         kernel: "Kernel",
-        pid_cache={},
+        pid_cache=None,
     ):
+        if pid_cache is None:
+            pid_cache = {}
         super(IterationRangesRoot, self).__init__(
             name=name,
             var_list=[],
@@ -454,7 +456,9 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}, reduction_hint=ReductionHint.DEFAULT):
+    def __init__(self, *groups, pid_cache=None, reduction_hint=ReductionHint.DEFAULT):
+        if pid_cache is None:
+            pid_cache = {}
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []
@@ -649,6 +653,7 @@ class TritonKernel(Kernel):
     def indexing(
         self,
         index: sympy.Expr,
+        *,
         copy_shape=None,
         dense_indexing=False,
     ):
@@ -681,9 +686,11 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or index == 0:
+        if (need_dense and not have_dense) or isinstance(
+            index, sympy.core.numbers.Integer
+        ):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if index == 0:
+            if isinstance(index, sympy.core.numbers.Integer):
                 return index_str, "None"
             else:
                 mask = dense_mask
@@ -774,7 +781,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value, dense_indexing=True)
+        index, mask = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -856,7 +863,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        index, mask = self.indexing(index, result_var)
+        index, mask = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)

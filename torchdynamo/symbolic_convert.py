@@ -23,6 +23,7 @@ import torch
 from . import allowed_functions
 from . import config
 from . import exc
+from . import logging as torchdynamo_logging
 from . import side_effects
 from . import skipfiles
 from . import variables
@@ -82,6 +83,11 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
+
+
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
 
 
 @dataclasses.dataclass
@@ -1427,6 +1433,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             if name in f_locals:
                 self._freevars_ids[name] = id(f_locals[name])
 
+    def run(self):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
+        super().run()
+
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
         value = cell.cell_contents
@@ -1486,6 +1496,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame()
         self.instruction_pointer = None
+        _step_logger()(logging.INFO, f"torchdynamo done tracing {self.f_code.co_name}")
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
