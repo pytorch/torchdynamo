@@ -377,7 +377,9 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 inductor_expected_failures_all_sample = defaultdict(dict)
 
-inductor_expected_failures_all_sample["cpu"] = {}
+inductor_expected_failures_all_sample["cpu"] = {
+    "nn.functional.relu": {b8, f16, f32, f64, i32, i64},
+}
 inductor_expected_failures_all_sample["cuda"] = {}
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
