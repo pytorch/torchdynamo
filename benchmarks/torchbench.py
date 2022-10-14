@@ -10,12 +10,11 @@ from os.path import abspath
 from os.path import exists
 
 import torch
-from torch.testing._internal.common_utils import IS_FBCODE
 
-if IS_FBCODE:
+try:
     from .common import BenchmarkRunner
     from .common import main
-else:
+except ImportError:
     from common import BenchmarkRunner
     from common import main
 
