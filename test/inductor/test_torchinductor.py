@@ -3787,7 +3787,7 @@ class CommonTemplate:
                 matmul_seen = False
 
                 class TestRefMode(TorchDispatchMode):
-                    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
 
                         nonlocal inps
