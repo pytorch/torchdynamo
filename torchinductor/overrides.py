@@ -302,6 +302,7 @@ def fuse_unary(gm: torch.fx.GraphModule, example_inputs):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
+                gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -352,7 +353,10 @@ def fuse_binary(gm: torch.fx.GraphModule):
                     replace_and_fuse_for_binary(
                         node, fuse_func, attr, modules, index_node, index_pointwise
                     )
+                    # Make sure the fused node is post node of node's inputs nodes.
+                    node.append(node.args[index_node])
                     gm.graph.erase_node(node)
+                    gm.graph.lint()
                     break
 
     gm.recompile()
