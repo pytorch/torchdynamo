@@ -73,6 +73,25 @@ jobs:
       - store_test_results:
           path: test-results
 
+  opinfo_all_samples_unit_test:
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.large
+    steps:
+      - checkout
+      - install_deps
+      - run:
+          name: Tests
+          command: |
+            source .circleci/setup_env.sh
+            make develop
+            mkdir test-results
+            python tools/verify_install.py
+            PYTORCH_COLLECT_EXPECT=1 PYTORCH_ALL_SAMPLES=1 << parameters.pytorch_test_range >> pytest  -v --junitxml=test-results/junit.xml test/inductor/test_torchinductor_opinfo.py -k "not TestInductorOpInfoCPU" -s
+      - store_test_results:
+          path: test-results
+
   coverage:
     machine:
       image: ubuntu-2004-cuda-11.4:202110-01
@@ -627,9 +646,22 @@ jobs:
             python .circleci/check_csv.py -f inductor_timm_training_5.csv
 
 workflows:
+  opinfo:
+    jobs:
+      - opinfo_all_samples_unit_test:
+          matrix:
+            parameters:
+              pytorch_test_range: ["PYTORCH_TEST_RANGE_START=0 PYTORCH_TEST_RANGE_END=100", 
+                    "PYTORCH_TEST_RANGE_START=100 PYTORCH_TEST_RANGE_END=200",
+                    "PYTORCH_TEST_RANGE_START=200 PYTORCH_TEST_RANGE_END=300",
+                    "PYTORCH_TEST_RANGE_START=300 PYTORCH_TEST_RANGE_END=400",
+                    "PYTORCH_TEST_RANGE_START=400 PYTORCH_TEST_RANGE_END=500",
+                    "PYTORCH_TEST_RANGE_START=500 PYTORCH_TEST_RANGE_END=600",
+                    "PYTORCH_TEST_RANGE_START=600 PYTORCH_TEST_RANGE_END=700"]
   gpu:
     jobs:
       - unit_test
+      - opinfo_all_samples_unit_test
       - coverage
       - aot_eager_hf_inference
       - aot_eager_hf_training
