@@ -10,8 +10,13 @@ from os.path import abspath
 from os.path import exists
 
 import torch
-from common import BenchmarkRunner
-from common import main
+
+try:
+    from .common import BenchmarkRunner
+    from .common import main
+except ImportError:
+    from common import BenchmarkRunner
+    from common import main
 
 from torchdynamo.testing import collect_results
 from torchdynamo.testing import reduce_to_scalar_loss
@@ -19,6 +24,7 @@ from torchdynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
+original_dir = abspath(os.getcwd())
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 for torchbench_dir in (
@@ -33,12 +39,10 @@ for torchbench_dir in (
     if exists(torchbench_dir):
         break
 
-assert exists(torchbench_dir), "../../torchbenchmark does not exist"
-original_dir = abspath(os.getcwd())
-torchbench_dir = abspath(torchbench_dir)
-
-os.chdir(torchbench_dir)
-sys.path.append(torchbench_dir)
+if exists(torchbench_dir):
+    torchbench_dir = abspath(torchbench_dir)
+    os.chdir(torchbench_dir)
+    sys.path.append(torchbench_dir)
 
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
