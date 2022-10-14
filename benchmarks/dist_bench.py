@@ -24,6 +24,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.profiler import ProfilerActivity
 from torch.profiler import profile
 from torch.profiler import record_function
+from traitlets.config.loader import ArgumentError
 
 import torchdynamo
 from torchdynamo.optimizations import BACKENDS
@@ -105,8 +106,8 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
 
     if args.dynamo:
         if args.disable_fake_tensor:
-            torchdynamo.config.fake_tensor_propagation = True
-            # functorch.compile.config.use_fake_tensor = False
+            torchdynamo.config.aot_use_fake_tensor = False
+            functorch.compile.config.use_fake_tensor = False
         if args.verbose:
             torchdynamo.config.verbose = True
         dynamo_ctx = torchdynamo.optimize(args.dynamo)
@@ -114,35 +115,30 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
 
     # warmup
     for i in range(3):
-        # TODO(whc) i changed inputs to tuple and didn't test this
         outputs = model(*inputs)
         outputs.sum().backward()
 
-    if rank == 0:
-        result_q.put([0])
-        result_q.put("-")
+    # timing
+    times = []
+    for i in range(args.repeat):
+        t0 = time.time()
+        outputs = model(*inputs)
+        outputs.sum().backward()
+        t1 = time.time()
+        times.append(t1 - t0)
 
-    # trace_file = f"{key}_{rank}.json"
-    # times = []
-    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-    #     for i in range(10):
-    #         t0 = time.time()
-    #         with record_function("Forward"):
-    #             outputs = model(inputs)
-    #         with record_function("Backward"):
-    #             loss_fn(outputs, labels).backward()
-    #         with record_function("Optimizer"):
-    #             optimizer.step()
-    #         t1 = time.time()
-    #         times.append(t1 - t0)
-    # if rank == 0:
-    #     prof.export_chrome_trace(trace_file)
-    #     result_q.put(times)
-    #     if ddp_bucket > 0 and optimize_ddp:
-    #         result_q.put(model.ddp_optimizer_num_splits)
-    #     else:
-    #         result_q.put("-")
-    #         assert not hasattr(model, "ddp_optimizer_num_splits")
+    if rank == 0:
+        result_q.put(times)
+
+    if args.profile:
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            for i in range(3):
+                with record_function("Forward"):
+                    outputs = model(*inputs)
+                with record_function("Backward"):
+                    outputs.sum().backward()
+        if rank == 0:
+            prof.export_chrome_trace(args.trace_file)
 
     cleanup()
 
@@ -161,10 +157,9 @@ def experiment(fn, key, world_size, results):
         join=True,
     )
     times = result_q.get()
-    num_graph_splits = result_q.get()
 
-    results.append((key, np.median(times), num_graph_splits))
-    print(key, times, np.median(times))
+    results.append((key, np.median(times)))
+    # print(key, times, np.median(times))
 
 
 def print_ddp_buckets(args, model, inputs):
@@ -202,10 +197,7 @@ def print_ddp_buckets(args, model, inputs):
         dynamo_model(*inputs).sum().backward()
     opt_buckets = list(reversed(ddp_opt.bucket_actual_sizes))
     # opt_names = "\n".join(map(str, ddp_opt.bucket_param_names))
-    opt_names = "todo"
-    # print(f"Dynamo Buckets: {opt_buckets}")
-    # if not ddp_buckets == ddp_opt.bucket_actual_sizes:
-    # print("bucket mismatch")
+    opt_names = ""  # todo
     headers = ("index", "DDP sz", "DDP-Opt sz", "Status", "DDP-Opt params")
     rows = []
     n_buckets = len(ddp_buckets)
@@ -262,6 +254,9 @@ if __name__ == "__main__":
     parser.add_argument("--disable_fake_tensor", action="store_true")
     parser.add_argument("--batch_size", default=None)
     parser.add_argument("--print_ddp_buckets", action="store_true")
+    parser.add_argument("--profile", action="store_true", help="Run the profiler")
+    parser.add_argument("--trace_file", default="profile.json", help="Run the profiler")
+    parser.add_argument("--repeat", default=10, help="Repeats for timing run")
     parser.add_argument(
         "--torchbench_dir",
         default="../torchbenchmark",
@@ -281,6 +276,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    if args.disable_fake_tensor and (args.ddp or args.print_ddp_buckets):
+        raise ArgumentError(
+            args.disable_fake_tensor, "can't disable fake tensor with DDP, it crashes"
+        )
+
+    model_name = "ToyModel" if args.toy_model else args.torchbench_model
     model, inputs = get_model(args)
 
     fn = partial(run_model, args, model, inputs)
@@ -290,6 +291,6 @@ if __name__ == "__main__":
         exit(0)
 
     times = []
-    experiment(fn, "", 2, times)
-    # experiment(demo_basic, 8, times)
-    # print(tabulate.tabulate(times, headers=("key", "time", "num_graph_splits")))
+    experiment(fn, model_name, 2, times)
+    print("\nExperiment Results:")
+    print(tabulate.tabulate(times, headers=("key", "time")))
