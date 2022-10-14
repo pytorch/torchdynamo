@@ -404,17 +404,18 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
+                cloned_real_inputs = [x.clone() for x in real_inputs]
                 compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        cloned_real_inputs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        cloned_real_inputs,
                         f"{compiler_name}_accuracy",
                     )
                     raise ValueError("Bad accuracy detected")
@@ -422,6 +423,8 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     # Call the compiled function with real inputs
                     return compiled_fn(real_inputs)
             else:
+                # Inductor clears the list in its codegen, so lets copy the examples
+                cloned_real_inputs = [x.clone() for x in real_inputs]
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
@@ -431,11 +434,15 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            cloned_real_inputs,
+                            compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            cloned_real_inputs,
+                            compiler_name,
                         )
                     raise e
 
