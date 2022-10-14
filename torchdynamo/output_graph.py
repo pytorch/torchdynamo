@@ -198,6 +198,10 @@ class OutputGraph(fx.Tracer):
     def register_attr_or_module(
         self, mod: torch.nn.Module, *names, current_tx=None, **options
     ):
+        from .symbolic_convert import InstructionTranslatorBase
+        if not isinstance(current_tx, InstructionTranslatorBase):
+            current_tx = None
+
         if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
@@ -230,6 +234,8 @@ class OutputGraph(fx.Tracer):
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
                 self.root_globals[module_key] = mod
+                # FIXME we lose track of current_tx here, so stack traces produced by
+                # OutputGraph.create_proxy through this variable won't be correct.
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
                     mod
                 )

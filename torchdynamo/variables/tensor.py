@@ -392,21 +392,21 @@ class TensorVariable(VariableTracker):
 
         return result
 
-    def _getitem_wrapped(self, tx, i, options):
-        return variables.BuiltinVariable(operator.getitem, **options).call_function(
-            tx, [self, variables.ConstantVariable(i)], {}
-        )
+    def unpack_var_sequence_range(self, tx, range):
+        options = VariableTracker.propagate(self)
+        return [
+            variables.BuiltinVariable(operator.getitem, **options).call_function(
+                tx, [self, variables.ConstantVariable(i)], {}
+            ) for i in range
+        ]
 
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate(self)
         if self.size:
-            return [self._getitem_wrapped(tx, i, options) for i in range(self.size[0])]
+            return self.unpack_var_sequence_range(tx, range(self.size[0]))
 
         return super(TensorVariable, self).unpack_var_sequence(tx)
 
-    def unpack_var_sequence_range(self, tx, range):
-        options = VariableTracker.propagate(self)
-        return [self._getitem_wrapped(tx, i, options) for i in range]
 
     def call_method(
         self,
