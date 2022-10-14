@@ -27,6 +27,7 @@ from sympy import Expr
 from sympy import Integer
 from torch._prims_common import is_boolean_dtype
 from torch._prims_common import is_float_dtype
+from torch._subclasses.fake_utils import output_alias_each_other
 
 from . import config
 from . import dependencies
@@ -2877,16 +2878,6 @@ class FallbackKernel(ExternKernelAlloc):
             )
             for x in tensor_args
         ]
-
-        # Se the right memory layout for example_args
-        for idx, x in enumerate(tensor_args):
-            if (
-                len(x.get_size()) == 4
-                and x.get_layout().is_channels_last_stride_ordered()
-            ):
-                example_args[idx] = example_args[idx].to(
-                    memory_format=torch.channels_last
-                )
         example_output = kernel(
             *unflatten_args(example_args, non_tensor_args), **kwargs
         )
@@ -2954,6 +2945,146 @@ class MultiOutput(ExternKernel):
 
     def should_allocate(self):
         return False
+
+
+class ConvolutionBackward(ExternKernelAlloc):
+    kernel = "aten.convolution_backward"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        preferred_stride_order=None,
+        kernel="aten.convolution_backward",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+        self.preferred_stride_order = preferred_stride_order
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        grad_output: "TensorBox",
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias_sizes: List[int],
+        stride_: List[int],
+        padding_: List[int],
+        dilation_: List[int],
+        transposed: bool,
+        output_padding_: List[int],
+        groups: int,
+        output_mask: List[bool],
+    ):
+        grad_output = cls.require_stride1(cls.realize_input(grad_output))
+        x = cls.require_stride1(cls.realize_input(x))
+        weight = cls.require_stride1(cls.realize_input(weight))
+        stride = tuple(stride_)
+        padding = tuple(padding_)
+        dilation = tuple(dilation_)
+        assert isinstance(transposed, bool)
+        output_padding = tuple(output_padding_)
+        assert isinstance(groups, int)
+        output_mask = tuple(output_mask)
+
+        # TODO (fix before merging the PR) - Do I need this?
+        x_shape = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s)) for s in x.get_size()
+        ]
+        weight_shape = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in weight.get_size()
+        ]
+
+        out_channels, in_channels1, *kernel_size = weight_shape
+        in_channels1 = in_channels1 * groups
+        if transposed:
+            out_channels, in_channels1 = in_channels1, out_channels
+        bias_shape = [out_channels]
+
+        # Find the memory layout
+        output_layout_str = "torch.contiguous_format"
+        # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
+        # which align with aten.convolutuion path(cpu only support 2d case now).
+        # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
+        # TODO: the gpu channels_last path depend on cudnn version, see
+        # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
+        if len(x.get_size()) == 4 and (
+            x.get_layout().is_channels_last_stride_ordered()
+            or weight.get_layout().is_channels_last_stride_ordered()
+        ):
+            output_layout_str = "torch.channels_last"
+
+        if output_layout_str == "torch.channels_last":
+            stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+            if len(stride_order) < len(x_shape):
+                # add batch dim if it exists
+                stride_order = [len(stride_order)] + stride_order
+        else:
+            stride_order = list(reversed(range(len(x_shape))))
+
+        # convolution_backward has three outputs - grad_input, grad_weight, grad_bias
+        device = x.get_device()
+        dtype = x.get_dtype()
+        x_stride_order = stride_order
+        weight_stride_order = stride_order
+        bias_stride_order = [0]
+
+        output_layouts = []
+        for size, order in zip(
+            [x_shape, weight_shape, bias_shape],
+            [
+                x_stride_order,
+                weight_stride_order,
+                bias_stride_order,
+            ],
+        ):
+            output_layouts.append(
+                FlexibleLayout(
+                    device,
+                    dtype,
+                    size,
+                    order,
+                )
+            )
+
+        kernel = "aten.convolution_backward"
+        packed = ConvolutionBackward(
+            MultiOutputLayout(x.get_device()),
+            (grad_output, x, weight),
+            (
+                bias_sizes,
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+                output_mask,
+            ),
+            stride_order,
+            kernel,
+        )
+        # TODO (fix before merging the PR) - How to implement output_mask?
+        return [
+            MultiOutput(layout, packed, idx)
+            for idx, layout in enumerate(output_layouts)
+        ]
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
 class Convolution(ExternKernelAlloc):
