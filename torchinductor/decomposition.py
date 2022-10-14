@@ -197,6 +197,8 @@ def masked_fill(value, mask, other):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
     if other.device != value.device and other.numel() == 1:
         other = other.to(value.device)
+    if other.dtype != value.dtype:
+        other = other.to(value.dtype)
     value, mask, other = torch.broadcast_tensors(value, mask, other)
     return torch.where(mask, other, value)
 

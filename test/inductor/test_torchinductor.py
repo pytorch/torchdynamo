@@ -1927,7 +1927,7 @@ class CommonTemplate:
         )
 
     def test_masked_fill(self):
-        def fn(mask, value):
+        def fn(value, mask):
             return aten.masked_fill(value, mask, -10000.0) + 2, aten.masked_fill(
                 value / 2.0, torch.logical_not(mask), 667
             )
@@ -1935,9 +1935,27 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randint(0, 1, [1, 16], dtype=torch.bool),
                 torch.randn([16, 16]),
+                torch.randint(0, 1, [1, 16], dtype=torch.bool),
             ),
+        )
+
+    def test_masked_fill_float16(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("mismatch between half and float dtype in cpp")
+
+        def fn(value, mask, other):
+            return aten.masked_fill(value, mask, other)
+
+        # Check that masked_fill return same output dtype
+        self.common(
+            fn,
+            (
+                torch.randn([16, 16], dtype=torch.float16),
+                torch.randint(0, 1, [1, 16], dtype=torch.bool),
+                torch.tensor(-1.0, dtype=torch.float32),
+            ),
+            reference_in_float=False,
         )
 
     def test_fill1(self):
