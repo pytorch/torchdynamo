@@ -7,6 +7,7 @@ import torch
 import torch.testing
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.common_utils import TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 
@@ -22,6 +23,7 @@ def run_tests(needs=()):
         TEST_WITH_TORCHDYNAMO
         or IS_WINDOWS
         or TEST_WITH_CROSSREF
+        or TEST_WITH_ROCM
         or sys.version_info >= (3, 11)
     ):
         return  # skip testing
