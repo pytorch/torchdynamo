@@ -3369,7 +3369,7 @@ class ConvolutionUnary(ExternKernelAlloc):
                 device=x.get_device(),
                 dtype=x.get_dtype(),
                 size=output_size,
-                stride_order=stride_order,
+                # stride_order=stride_order,
             ),
             inputs=inputs,
             constant_args=constant_args,
@@ -3381,6 +3381,145 @@ class ConvolutionUnary(ExternKernelAlloc):
         # FixedLayout of input
         x = self.require_stride_order(x, self.layout.preferred_stride_order)
         self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
+class ConvolutionBinary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        other: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        attr,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
+        x = cls.require_stride1(cls.realize_input(x))
+        other = cls.require_stride1(cls.realize_input(other))
+        weight = cls.require_stride1(cls.realize_input(weight))
+        assert (
+            x.get_device().type == "cpu"
+            and other.get_device().type == "cpu"
+            and weight.get_device().type == "cpu"
+        )
+        inputs = [x, other, weight]
+        stride = tuple(stride_)
+        padding = tuple(padding_)
+        dilation = tuple(dilation_)
+        assert isinstance(groups, int)
+
+        weight_shape = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in weight.get_size()
+        ]
+
+        out_channels, in_channels1, *kernel_size = weight_shape
+        in_channels1 = in_channels1 * groups
+        if bias is not None:
+            bias = cls.require_stride1(cls.realize_input(bias))
+            (bias_shape,) = [
+                sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+                for s in bias.get_size()
+            ]
+            assert bias_shape == out_channels, f"{bias_shape} == {out_channels}"
+
+        assert len(x.get_size()) == 2 + len(kernel_size)
+        batch, in_channels2, *input_size = x.get_size()
+        output_size = [batch]
+        V.graph.sizevars.guard_equals(in_channels1, in_channels2)
+
+        output_size.append(out_channels)
+        assert (
+            len(stride)
+            == len(padding)
+            == len(dilation)
+            == len(kernel_size)
+            == len(input_size)
+        )
+        for i in range(len(stride)):
+            output_size.append(
+                IndexingDiv(
+                    input_size[i]
+                    + 2 * padding[i]
+                    - dilation[i] * (kernel_size[i] - 1)
+                    - 1
+                    + stride[i],
+                    stride[i],
+                )
+            )
+            output_size[-1] = sympy.Integer(
+                V.graph.sizevars.guard_static_shape(output_size[-1])
+            )
+
+        output_layout_str = "torch.contiguous_format"
+        # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
+        # which align with aten.convolutuion path(cpu only support 2d case now).
+        # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
+        if len(x.get_size()) == 4 and (
+            x.get_layout().is_channels_last_stride_ordered()
+            or weight.get_layout().is_channels_last_stride_ordered()
+        ):
+            output_layout_str = "torch.channels_last"
+
+        if output_layout_str == "torch.channels_last":
+            stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+            if len(stride_order) < len(output_size):
+                # add batch dim if it exists
+                stride_order = [len(stride_order)] + stride_order
+        else:
+            stride_order = list(reversed(range(len(output_size))))
+        output_layout = FlexibleLayout(
+            x.get_device(),
+            x.get_dtype(),
+            output_size,
+            stride_order,
+        )
+        constant_args = [padding, stride, dilation, groups, attr]
+
+        if bias is not None:
+            inputs.append(bias)
+        else:
+            constant_args.insert(0, bias)
+        return ConvolutionBinary(
+            layout=output_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        other = self.inputs[1]
+        # FixedLayout of other
+        other = self.require_stride_order(other, self.layout.preferred_stride_order)
+        self.inputs[1] = other
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 

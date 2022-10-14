@@ -157,11 +157,6 @@ def _register_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         args = list(args)
-        unpacked = False
-        # TODO maybe we need to use pytrees here
-        if len(args) == 1 and isinstance(args[0], (list, tuple)):
-            unpacked = True
-            args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
         # kwargs tensors not supported yet
@@ -178,20 +173,14 @@ def _register_lowering(
                 dtype = get_promoted_dtype(
                     *promoting_args, type_promotion_kind=type_promotion_kind
                 )
-            # sometimes args are an immutable list so we can't mutate them
-            new_args = []
+            for i in indices:
+                args[i] = to_dtype(args[i], dtype)
             for i in range(len(args)):
-                if i in indices:
-                    new_args.append(to_dtype(args[i], dtype))
-                elif isinstance(args[i], ir.Constant):
-                    new_args.append(
-                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
+                if isinstance(args[i], ir.Constant):
+                    args[i] = ir.Constant(
+                        args[i].value, dtype, args[indices[0]].get_device()
                     )
-                else:
-                    new_args.append(args[i])
-            args = new_args
-        if unpacked:
-            args = [args]
+
         if broadcast and indices:
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
@@ -489,13 +478,12 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
-    offset = len(x.get_size()) == 0
-    dim = _validate_dim(x, dim, offset)
+
+    dim = _validate_dim(x, dim, 0)
     new_shape = list(x.get_size())
-    if len(new_shape) > 0:
-        removed = new_shape.pop(dim)
-        if V.graph.sizevars.maybe_guard_equals(removed, 1):
-            return view(x, new_shape)
+    removed = new_shape.pop(dim)
+    if V.graph.sizevars.maybe_guard_equals(removed, 1):
+        return view(x, new_shape)
 
     # squeeze does nothing if the size isn't 1
     return x
@@ -865,6 +853,25 @@ def convolution_unary(
     return TensorBox.create(
         ir.ConvolutionUnary.create(
             x, weight, bias, padding, stride, dilation, groups, attr, scalars, algorithm
+        )
+    )
+
+
+@register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
+def convolution_binary(
+    x: TensorBox,
+    other: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
+    padding,
+    stride,
+    dilation,
+    groups,
+    attr,
+):
+    return TensorBox.create(
+        ir.ConvolutionBinary.create(
+            x, other, weight, bias, padding, stride, dilation, groups, attr
         )
     )
 

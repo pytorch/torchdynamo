@@ -9,6 +9,7 @@ import torch.fx
 from functorch._src.aot_autograd import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._mode_utils import no_dispatch
 
 from . import config
@@ -328,6 +329,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
+        ShapeProp(model_).propagate(*example_inputs_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)

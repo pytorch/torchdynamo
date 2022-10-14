@@ -1,6 +1,7 @@
 import copy
 import itertools
 import logging
+import operator
 import random
 import weakref
 
@@ -132,6 +133,73 @@ class ConvUnary2d(nn.Conv2d):
         return self._conv_forward(input, self.weight, self.bias)
 
 
+class ConvBinary2d(nn.Conv2d):
+    def __init__(
+        self,
+        conv,
+        op_name,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        groups,
+        bias,
+        padding_mode,
+        device,
+        dtype,
+    ):
+        super(ConvBinary2d, self).__init__(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            padding_mode,
+            device,
+            dtype,
+        )
+        self._update_module_params(conv, op_name)
+
+    def _update_module_params(self, conv, op_name):
+        self.__dict__ = copy.deepcopy(conv.__dict__)
+        self.attr = op_name
+
+    def _conv_forward(self, input, other, weight, bias):
+        if self.padding_mode != "zeros":
+            return torch.ops.mkldnn._convolution_pointwise(
+                F.pad(
+                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
+                ),
+                other,
+                weight,
+                bias,
+                _pair(0),
+                self.stride,
+                self.dilation,
+                self.groups,
+                self.attr,
+            )
+        return torch.ops.mkldnn._convolution_pointwise(
+            input,
+            other,
+            weight,
+            bias,
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups,
+            self.attr,
+        )
+
+    def forward(self, input, other):
+        return self._conv_forward(input, other, self.weight, self.bias)
+
+
 def fuse_conv_unary_eval(conv, unary, op_name, op_info):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
@@ -153,7 +221,60 @@ def fuse_conv_unary_eval(conv, unary, op_name, op_info):
     )
 
 
+def fuse_conv_binary_eval(conv, op_name):
+    assert not (conv.training), "Fusion only for eval!"
+    return ConvBinary2d(
+        conv,
+        op_name,
+        conv.in_channels,
+        conv.out_channels,
+        conv.kernel_size,
+        conv.stride,
+        conv.padding,
+        conv.dilation,
+        conv.groups,
+        conv.bias is not None,
+        conv.padding_mode,
+        conv.weight.device,
+        conv.weight.dtype,
+    )
+
+
+def check_node_kind(current_node, modules, node_kind):
+    if not isinstance(current_node, torch.fx.Node):
+        return False
+    if current_node.op != "call_module":
+        return False
+    if not isinstance(current_node.target, str):
+        return False
+    if current_node.target not in modules:
+        return False
+    if type(modules[current_node.target]) is not node_kind:
+        return False
+    return True
+
+
+def check_node_is_binary(node):
+    if (
+        (node.op == "call_function" and node.target in [torch.add, torch.sub])
+        or (node.op == "call_function" and node.target in [operator.add, operator.sub])
+        or (
+            node.op == "call_method"
+            and node.target in [torch.Tensor.add, torch.Tensor.sub]
+        )
+    ):
+        return True
+    return False
+
+
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    gm = fuse_unary(gm, example_inputs)
+    gm = fuse_binary(gm)
+
+    return gm
+
+
+def fuse_unary(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )
@@ -181,6 +302,59 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
+    gm.recompile()
+    return gm
+
+
+def replace_and_fuse_for_binary(
+    node, fuse_func, attr, modules, index_node, index_pointwise
+):
+    conv = modules[node.args[index_node].target]
+    fused_conv = fuse_func(conv, attr)
+    replace_node_module(node.args[index_node], modules, fused_conv)
+    node.args[index_node].args = node.args[index_node].args + (
+        node.args[index_pointwise],
+    )
+    node.replace_all_uses_with(node.args[index_node])
+
+
+def fuse_binary(gm: torch.fx.GraphModule):
+    modules = dict(gm.named_modules())
+    for node in gm.graph.nodes:
+        if check_node_is_binary(node) and (
+            len(node.kwargs) != 2 or node.kwargs["alpha"] == 1.0
+        ):
+            node_kind = torch.nn.Conv2d
+            fuse_func = fuse_conv_binary_eval
+
+            if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
+                node.args[1], torch.fx.Node
+            ):
+                continue
+            tensor0_meta = node.args[0].meta.get("tensor_meta")
+            tensor1_meta = node.args[1].meta.get("tensor_meta")
+            if not tensor0_meta or not tensor1_meta:
+                continue
+            if (
+                tensor0_meta.shape != tensor1_meta.shape
+                or tensor0_meta.stride != tensor1_meta.stride
+                or tensor0_meta.dtype != tensor1_meta.dtype
+            ):
+                continue
+            attr = binary_attr[node.target]
+            index_list = supported_index_list[attr]
+            for index_dict in index_list:
+                index_node = index_dict["index_computation"]
+                index_pointwise = index_dict["index_pointwise"]
+                if check_node_kind(node.args[index_node], modules, node_kind):
+                    if len(node.args[index_node].users) > 1:
+                        continue
+                    replace_and_fuse_for_binary(
+                        node, fuse_func, attr, modules, index_node, index_pointwise
+                    )
+                    gm.graph.erase_node(node)
+                    break
+
     gm.recompile()
     return gm
 
@@ -312,7 +486,9 @@ def rand_like(x, **kwargs):
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
+
 computation_op_map = {nn.Conv2d: fuse_conv_unary_eval}
+
 
 pointwise_op_map = {
     "relu": UnaryFusionOp(nn.ReLU),
@@ -322,4 +498,25 @@ pointwise_op_map = {
     "leaky_relu": UnaryFusionOp(nn.LeakyReLU, scalars=["negative_slope"]),
     "hardtanh": UnaryFusionOp(nn.Hardtanh, scalars=["min_val", "max_val"]),
     "gelu": UnaryFusionOp(nn.GELU, algorithm="approximate"),
+}
+
+
+binary_attr = {
+    torch.add: "add",
+    torch.Tensor.add: "add",
+    operator.add: "add",
+    torch.sub: "sub",
+    torch.Tensor.sub: "sub",
+    operator.sub: "sub",
+}
+
+
+# For add: we support conv + other and other + conv
+# For sub, we only support conv - sub
+supported_index_list = {
+    "add": [
+        {"index_computation": 0, "index_pointwise": 1},
+        {"index_computation": 1, "index_pointwise": 0},
+    ],
+    "sub": [{"index_computation": 0, "index_pointwise": 1}],
 }
