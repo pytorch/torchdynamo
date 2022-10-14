@@ -661,7 +661,6 @@ workflows:
   gpu:
     jobs:
       - unit_test
-      - opinfo_all_samples_unit_test
       - coverage
       - aot_eager_hf_inference
       - aot_eager_hf_training
