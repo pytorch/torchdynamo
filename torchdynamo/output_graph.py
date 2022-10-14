@@ -422,11 +422,6 @@ class OutputGraph(fx.Tracer):
                 if hasattr(self.compiler_fn, "__name__")
                 else ""
             )
-            name = (
-                self.compiler_fn.__name__
-                if hasattr(self.compiler_fn, "__name__")
-                else ""
-            )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
