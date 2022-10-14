@@ -37,12 +37,16 @@ def compute_speedups(
         for m, model in enumerate(models):
             if device == "cuda":
                 import triton
+
                 # do_bench() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
-                median_ms, _, _ = triton.testing.do_bench(lambda: model(*example_inputs))
+                median_ms, _, _ = triton.testing.do_bench(
+                    lambda: model(*example_inputs)
+                )
                 timings[rep, m] = median_ms
             else:
                 from torchinductor.utils import timed
+
                 timings[rep, m] = timed(model, example_inputs)
     return np.median(timings, axis=0)
 
@@ -89,7 +93,9 @@ def microbenchmark(
     if accuracy_checking:
         repeats = 1
 
-    medians = compute_speedups(operator, compiled, gm_args, repeats, accuracy_checking, device)
+    medians = compute_speedups(
+        operator, compiled, gm_args, repeats, accuracy_checking, device
+    )
     return medians
 
 
@@ -156,9 +162,7 @@ def skip_operator(operator):
 @click.option(
     "--measure-nvfuser", help="default we only measure inductor", default=False
 )
-@click.option(
-    "--device", help="cpu or cuda", default="cuda"
-)
+@click.option("--device", help="cpu or cuda", default="cuda")
 def benchmark(
     suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser, device
 ):

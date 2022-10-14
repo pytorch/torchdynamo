@@ -209,10 +209,11 @@ def map_to_device(e, device):
     elif isinstance(e, torch.device):
         return device
     elif isinstance(e, str):
-        if e == 'cuda' or e == 'cpu':
+        if e == "cuda" or e == "cpu":
             return device.type
     else:
         return e
+
 
 def map_to_dtype(e, dtype):
     if isinstance(e, torch.Tensor) and e.is_floating_point():
