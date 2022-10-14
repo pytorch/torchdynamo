@@ -2877,6 +2877,16 @@ class FallbackKernel(ExternKernelAlloc):
             )
             for x in tensor_args
         ]
+
+        # Se the right memory layout for example_args
+        for idx, x in enumerate(tensor_args):
+            if (
+                len(x.get_size()) == 4
+                and x.get_layout().is_channels_last_stride_ordered()
+            ):
+                example_args[idx] = example_args[idx].to(
+                    memory_format=torch.channels_last
+                )
         example_output = kernel(
             *unflatten_args(example_args, non_tensor_args), **kwargs
         )
@@ -3118,13 +3128,9 @@ class Convolution(ExternKernelAlloc):
             # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
             # TODO: the gpu channels_last path depend on cudnn version, see
             # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
-            if (
-                x.get_device().type == "cpu"
-                and len(x.get_size()) == 4
-                and (
-                    x.get_layout().is_channels_last_stride_ordered()
-                    or weight.get_layout().is_channels_last_stride_ordered()
-                )
+            if len(x.get_size()) == 4 and (
+                x.get_layout().is_channels_last_stride_ordered()
+                or weight.get_layout().is_channels_last_stride_ordered()
             ):
                 output_layout_str = "torch.channels_last"
 

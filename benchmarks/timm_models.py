@@ -192,7 +192,8 @@ class TimmRunnner(BenchmarkRunner):
         use_eval_mode = self.args.use_eval_mode
 
         # _, model_dtype, data_dtype = self.resolve_precision()
-        channels_last = self._args.channels_last
+        # channels_last = self._args.channels_last
+        channels_last = True
 
         retries = 1
         success = False
