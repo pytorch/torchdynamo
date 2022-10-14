@@ -68,6 +68,7 @@ jobs:
             source .circleci/setup_env.sh
             make develop
             mkdir test-results
+            python tools/verify_install.py
             pytest -v --junitxml=test-results/junit.xml -k "cuda and not TestInductorOpInfoCPU"
       - store_test_results:
           path: test-results
@@ -340,7 +341,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 3 --partition-id 0 --output=inductor_hf_training_0.csv
       - store_artifacts:
           path: inductor_hf_training_0.csv
@@ -362,7 +363,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 3 --partition-id 1 --output=inductor_hf_training_1.csv
       - store_artifacts:
           path: inductor_hf_training_1.csv
@@ -384,7 +385,7 @@ jobs:
           command: |
             source .circleci/setup_env.sh
             make develop
-            python benchmarks/huggingface.py --accuracy --ci --skip-accuracy-check -d cuda --inductor --float32 --training \
+            python benchmarks/huggingface.py --accuracy --ci -d cuda --inductor --float32 --training \
               --total-partitions 3 --partition-id 2 --output=inductor_hf_training_2.csv
       - store_artifacts:
           path: inductor_hf_training_2.csv

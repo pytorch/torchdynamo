@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+import torch.onnx.operators
 from torch.testing._internal.jit_utils import JitTestCase
 
 import torchdynamo.testing
@@ -2164,6 +2165,28 @@ class MiscTests(torchdynamo.testing.TestCase):
         result = f(torch.ones(6), 3)
         self.assertEqual(result, 3)
 
+    @patch.object(torchdynamo.config, "dynamic_shapes", True)
+    def test_onnx_shape_as_tensor(self):
+        @torchdynamo.optimize("eager", nopython=True)
+        def f(x):
+            return 1 + torch._shape_as_tensor(x)[0]
+
+        gm, _ = torchdynamo.export(f, torch.ones(6))
+
+        input_one_dim = torch.ones(6)
+        input_two_dims = torch.ones(7, 4)
+        self.assertEqual(f(input_one_dim), 7)
+        self.assertEqual(f(input_two_dims), 8)
+        self.assertEqual(f(input_two_dims), 8)
+
+        @torchdynamo.optimize("eager", nopython=True)
+        def f_onnx(x):
+            return 1 + torch.onnx.operators.shape_as_tensor(x)[0]
+
+        self.assertEqual(f_onnx(input_one_dim), 7)
+        self.assertEqual(f_onnx(input_two_dims), 8)
+        self.assertEqual(f_onnx(input_two_dims), 8)
+
     def test_cond(self):
         from functorch.experimental.cond import cond
 
@@ -2631,28 +2654,6 @@ class MiscTests(torchdynamo.testing.TestCase):
 
         m = Mod()
         graph, _ = torchdynamo.export(m, torch.randn(3, 3))
-
-    def test_empty_graph(self):
-        import torch.distributed as dist
-
-        with patch.dict(os.environ, {"MASTER_ADDR": "localhost"}):
-            with patch.dict(os.environ, {"MASTER_PORT": "12355"}):
-                # initialize the process group
-                dist.init_process_group("gloo", rank=0, world_size=1)
-
-                def fn():
-                    get_world_size = torch.distributed.distributed_c10d.get_world_size()
-                    return (get_world_size,)
-
-                opt_fn = torchdynamo.optimize("inductor")(fn)
-                res = None
-                try:
-                    res = opt_fn()[0]
-                except Exception:
-                    pass
-                finally:
-                    dist.destroy_process_group()
-                self.assertEqual(res, 1)
 
 
 class CustomFunc(torch.autograd.Function):

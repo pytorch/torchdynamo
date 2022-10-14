@@ -43,22 +43,39 @@ Make sure to have a development version of python installed locally as well.
 
 TorchDynamo is evolving very quickly and so we only provide binaries based
 on a nightly version of PyTorch.
+
+#### GPU/CUDA version
+
 To use GPU back ends (and in particular Triton), please make sure that the cuda
 that you have installed locally matches the PyTorch version you are running. For
 the command below, you will need CUDA 11.7.
 
 ```shell
-pip3 install --pre torch==1.13.0.dev20221006+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
-pip install -U "git+https://github.com/openai/triton@998fd5f9afe166247f441999c605dfe624ca9331#subdirectory=python"
+pip install --pre torch==1.14.0.dev20221013+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"
+pip install -U "git+https://github.com/pytorch/torchdynamo"
+```
+
+#### CPU version
+
+```shell
+pip install --pre torch==1.13.0.dev20221006 --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 pip install -U "git+https://github.com/pytorch/torchdynamo"
 ```
 
 ### Install from local source
 
+#### GPU/CUDA version
+
 You can also install PyTorch, Triton and or Dynamo from source at the same
 commits as the ones listed above. The Makefile target `make setup_nightly_gpu`
 contain the commands used by our CI to setup dependencies.
 Note that only CUDA 11.6+ is officially supported.
+
+#### CPU version
+Use the Makefile target `setup_nightly` to build and install TorchDynamo with CPU support only.
+
+<br />
 
 Other development requirements can be installed with:
 ```shell
@@ -70,12 +87,21 @@ Install TorchDynamo with:
 python setup.py develop
 ```
 
+### Verify installation
+
+Run
+```shell
+python tools/verify_install.py
+```
+to verify that TorchDynamo is correctly installed (only checks for minimum requirements -- does not check for development requirements).
+
 ## Usage Example
 
 Here is a basic example of how to use TorchDynamo. One can decorate a function
 or a method using `torchdynamo.optimize` to enable TorchDynamo optimization.
 
 ```py
+from typing import List
 import torch
 import torchdynamo
 
@@ -213,14 +239,13 @@ Inference-only backends:
 ### Training and AotAutograd
 
 Torchdynamo supports training, using AotAutograd to capture backwards:
-* only the .forward() graph is captured by torchdynamo's python evalframe frontend
+* the .forward() graph and optimizer.step() is captured by torchdynamo's python evalframe frontend
 * for each segment of .forward() that torchdynamo captures, it uses AotAutograd to generate a backward graph segment
 * each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backward
 * the forward, backward pairs are wrapped in autograd.function modules
 * usercode calling .backward() still triggers eager's autograd engine, which runs each 'compiled backward' graph as if it were one op, also running any non-compiled eager ops' .backward() functions
 
 Current limitations:
-* optimizer ops are currently not captured at all, and thus not compiled (under investigation to add support)
 * DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
 
 Example
@@ -229,14 +254,19 @@ model = ...
 optimizer = ...
 
 @torchdynamo.optimize("inductor")
-def training_iteration(...):
-    return model(...)
-
-for _ in range(100):
-    loss = training_iteration(...)
+def training_iter_fn(...):
+    outputs = model(...)
+    loss = outputs.loss
     loss.backward()
     optimizer.step()
+    optimizer.zero_grad()
+    return loss
+
+for _ in range(100):
+    loss = training_iter_fn(...)
 ```
+For more details, you can follow our [E2E model training benchmark](./benchmarks/training_loss.py) to onboard your own model training and evaluation. It's running the popular [hugging face Bert model](https://huggingface.co/docs/transformers/training) on [Yelp Reviews datasets](https://huggingface.co/datasets/yelp_review_full). It also prints our if the loss converged and performance speedup comparing to native PyTorch at the end.
+
 
 ## Troubleshooting
 See [Troubleshooting](./documentation/TROUBLESHOOTING.md).

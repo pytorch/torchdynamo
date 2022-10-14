@@ -33,6 +33,7 @@ from torchdynamo.testing import dummy_fx_compile
 from torchdynamo.testing import format_speedup
 from torchdynamo.testing import same
 from torchdynamo.utils import clone_inputs
+from torchinductor.utils import fresh_triton_cache
 
 try:
     from functorch._src.aot_autograd import set_model_name
@@ -55,7 +56,6 @@ output_filename = None
 CI_SKIP_AOT_EAGER_INFERENCE = [
     # TorchBench
     "demucs",  # OOM
-    "speech_transformer",
     # Huggingface
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
@@ -65,15 +65,12 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
-    "pytorch_struct",
-    "speech_transformer",
-    "vision_maskrcnn",
     "moco",
+    "pytorch_struct",
+    "vision_maskrcnn",
     # Huggingface
     "AlbertForMaskedLM",  # OOM
     "AlbertForQuestionAnswering",  # OOM
-    "AllenaiLongformerBase",
-    "BartForConditionalGeneration",
     "BigBird",
     "M2M100ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
@@ -85,7 +82,6 @@ CI_SKIP_AOT_EAGER_TRAINING = [
     "convit_base",  # fp64_OOM
     "mobilevit_s",  # Accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
-    "tacotron2",
 ]
 
 CI_SKIP_INDCUTOR_INFERENCE = [
@@ -93,13 +89,13 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     # TorchBench
     "detectron2",
     "hf_Reformer",
+    "moco",  # accuracy
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
+    "vision_maskrcnn",  # accuracy
     "yolov3",  # Accuracy
     # Huggingface
-    "AllenaiLongformerBase",  # OOM
-    "BartForConditionalGeneration",  # OOM
     "BigBird",
     "YituTechConvBert",
     # TIMM
@@ -120,6 +116,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "hf_GPT2",
     "hf_Reformer",
     "mobilenet_v3_large",
+    "moco",
     "pytorch_struct",
     "vgg16",
     "speech_transformer",  # from functionalization
@@ -138,23 +135,14 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "resnet50_quantized_qat",
     "timm_regnet",
     # Huggingface
-    "AlbertForMaskedLM",
     "AllenaiLongformerBase",
-    "BartForCausalLM",
-    "BartForConditionalGeneration",
-    "DebertaForMaskedLM",
-    "DebertaForQuestionAnswering",
-    "DebertaV2ForMaskedLM",
-    "GPTNeoForCausalLM",
-    "M2M100ForConditionalGeneration",
-    "MobileBertForMaskedLM",
-    "PegasusForConditionalGeneration",
-    "T5ForConditionalGeneration",
-    "T5Small",
-    "XGLMForCausalLM",
-    "XLNetLMHeadModel",
-    "PegasusForCausalLM",
-    "YituTechConvBert",
+    "AlbertForMaskedLM",  # OOM
+    "BartForConditionalGeneration",  # OOM
+    "M2M100ForConditionalGeneration",  # OOM
+    "MBartForConditionalGeneration",  # OOM
+    "MT5ForConditionalGeneration",  # OOM
+    "PegasusForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # fp64_OOM
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
@@ -166,7 +154,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
-    "volo_d1_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -931,6 +918,14 @@ class BenchmarkRunner:
             self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
+    def init_optimizer(self, device, params):
+        param_list = list(params)
+        if device == "cuda" and len(param_list) != 0:
+            # capturable is only supported on cuda at the moment
+            self.optimizer = torch.optim.Adam(param_list, capturable=True)
+        else:
+            self.optimizer = None
+
     @property
     def args(self):
         return self._args
@@ -1049,6 +1044,10 @@ class BenchmarkRunner:
                     break
             batch_size = self.decay_batch_exp(batch_size)
         return 1
+
+    def optimizer_step(self):
+        if self.optimizer is not None:
+            self.optimizer.step()
 
     def get_benchmark_indices(self, length):
         start = self._args.partition_id * (length // self._args.total_partitions)
@@ -1286,6 +1285,33 @@ class BenchmarkRunner:
                 "--diff_main called on main branch, what are you diffing?"
             )
 
+    def maybe_fresh_cache(fn):
+        def inner(self, *args, **kwargs):
+            cache_minder = NullContext()
+            if self.args.cold_start_latency:
+                cache_entries = {}
+                cache_minder = fresh_triton_cache(cache_entries)
+
+            try:
+                with cache_minder:
+                    return fn(self, *args, **kwargs)
+            finally:
+                dump_cache = False
+                if dump_cache and self.args.cold_start_latency:
+                    output_csv(
+                        output_filename[:-4] + "_triton_cache.csv",
+                        ["dev", "name", "batch_size", "triton_cache"],
+                        [
+                            current_device,
+                            current_name,
+                            current_batch_size,
+                            cache_entries,
+                        ],
+                    )
+
+        return inner
+
+    @maybe_fresh_cache
     def run_one_model(
         self,
         name,
@@ -1454,6 +1480,12 @@ def parse_args():
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--cold_start_latency",
+        action="store_true",
+        help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
