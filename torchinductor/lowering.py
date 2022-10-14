@@ -759,7 +759,12 @@ def as_strided_(x, size, stride, storage_offset=None):
 def cat(inputs, dim=0):
     if len(inputs) == 1:
         return inputs[0]
+
     dim = _validate_dim(inputs[0], dim, 0)
+    dtype = get_promoted_dtype(
+        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    inputs = [to_dtype(inp, dtype) for inp in inputs]
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
