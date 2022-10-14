@@ -212,7 +212,10 @@ class DeferredLine:
         self.line = line
 
     def __call__(self):
-        if self.name not in V.graph.removed_buffers and self.name not in V.graph.inplaced_to_remove:
+        if (
+            self.name not in V.graph.removed_buffers
+            and self.name not in V.graph.inplaced_to_remove
+        ):
             return self.line
         return None
 
@@ -279,7 +282,7 @@ class KernelArgs:
         assert isinstance(name, (str, sympy.Symbol))
         name = str(name)
         if name not in odict:
-                odict[name] = f"{prefix}{len(odict)}"
+            odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
 
     def __init__(self, sizevars=None):
@@ -402,12 +405,6 @@ class KernelArgs:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
-
-    def inplaced_buffer_names(self):
-        buffers = set()
-        for inplaced in unique(self.inplace_buffers.values()):
-            buffers.update(inplaced.other_names)
-        return buffers
 
 
 class CSE:
@@ -603,4 +600,3 @@ class Kernel(CodeGen):
             x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
         }
         return sympy_subs(index, replacements)
-
