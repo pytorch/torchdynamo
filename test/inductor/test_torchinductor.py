@@ -75,6 +75,21 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 torchinductor.config.triton.autotune = False  # too slow
 
 
+# Ported from pytorch/test/test_mkldnn.py
+# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
+# avx512vl, and avx512dq at least. So we will skip the test case if one processor
+# is not meet the requirement.
+@functools.lru_cache(maxsize=None)
+def has_bf16_support():
+    import sys
+
+    if sys.platform != "linux":
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
+
+
 def requires_decomp(fn):
     """Decorator to disable test if a decomp is missing"""
 
@@ -1282,6 +1297,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(HAS_CUDA, "only support bf16 linear unary fusion on cpu")
     def test_linear_unary(self):
         def _eltwise_list():
             eltwise_list = [
@@ -1300,19 +1316,20 @@ class CommonTemplate:
             _eltwise_list(), [[2, 3, 10], [2, 10]], [True, False]
         )
         dtype = torch.bfloat16
-        for eltwise_fn, input_shape, bias in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], 30, bias=bias), eltwise_fn
-            ).eval()
+        if has_bf16_support():
+            for eltwise_fn, input_shape, bias in options:
+                mod = torch.nn.Sequential(
+                    torch.nn.Linear(input_shape[-1], 30, bias=bias), eltwise_fn
+                ).eval()
 
-            # only fuse for linear when the dtype is bf16
-            mod = mod.to(dtype)
-            v = torch.randn(input_shape).to(dtype)
+                # only fuse for linear when the dtype is bf16
+                mod = mod.to(dtype)
+                v = torch.randn(input_shape).to(dtype)
 
-            self.common(
-                mod,
-                (v,),
-            )
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_gather1(self):
         def fn(a, b):
