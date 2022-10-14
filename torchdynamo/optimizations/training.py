@@ -95,7 +95,7 @@ class AotAutogradStrategy(object):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
-        functorch.compile.config.use_fake_tensor = False
+        functorch.compile.config.use_fake_tensor = config.aot_use_fake_tensor
 
         super(AotAutogradStrategy, self).__init__()
         counters["aot_autograd"]["total"] += 1
