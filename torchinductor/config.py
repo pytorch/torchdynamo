@@ -19,7 +19,7 @@ size_asserts = True
 pick_loop_orders = True
 
 # generate inplace computations
-inplace_buffers = True
+inplace_buffers = False
 
 # codegen benchmark harness
 benchmark_harness = True
