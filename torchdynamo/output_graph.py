@@ -104,6 +104,7 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
+        self._current_tx = []
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
@@ -117,6 +118,16 @@ class OutputGraph(fx.Tracer):
     @property
     def fake_mode(self):
         return self.root_tx.fake_mode
+
+    def push_tx(self, tx):
+        self._current_tx.append(tx)
+
+    def pop_tx(self):
+        self._current_tx.pop()
+
+    @property
+    def current_tx(self):
+        return self.root_tx if not self._current_tx else self._current_tx[-1]
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
@@ -526,7 +537,7 @@ class OutputGraph(fx.Tracer):
         )
 
         # append stack trace to fx node
-        tx = current_tx if current_tx else self.root_tx
+        tx = self.current_tx
 
         nn_module_stack = getattr(tx, "nn_module_stack")
         if nn_module_stack:

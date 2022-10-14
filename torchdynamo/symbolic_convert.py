@@ -330,6 +330,7 @@ class InstructionTranslatorBase(object):
 
     def run(self):
         try:
+            self.output.push_tx(self)
             while (
                 self.instruction_pointer is not None
                 and not self.output.should_exit
@@ -342,6 +343,7 @@ class InstructionTranslatorBase(object):
 
             raise
         finally:
+            self.output.pop_tx()
             # Cleanup the outputGraph to delete the held tensors. We perform the
             # cleanup only for InstructionTranslator and not
             # InliningInstructionTranslator. The InliningInstructionTranslator
