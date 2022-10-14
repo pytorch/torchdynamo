@@ -89,7 +89,7 @@ def print_seen():
         nl = "\n"
         print(
             f"""
-{name}}[\"{device_type}\"] = {{
+{{{name}}}[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
 """
