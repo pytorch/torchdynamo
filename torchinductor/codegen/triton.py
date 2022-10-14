@@ -216,6 +216,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def sigmoid(x):
+        return f"tl.sigmoid({x})"
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        return f"1/(1 + tl.libdevice.exp(-({x})))"
+
+    @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"

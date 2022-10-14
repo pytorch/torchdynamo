@@ -3229,7 +3229,9 @@ exp = register_pointwise(
 )
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
-    aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 sqrt = register_pointwise(
     aten.sqrt,
@@ -3249,7 +3251,7 @@ register_pointwise(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     use_libdevice_for_f64=True,
 )
-register_pointwise(aten.abs, use_libdevice_for_f64=True)
+register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
@@ -3271,9 +3273,6 @@ register_pointwise(
 )
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
-register_pointwise(
-    aten.silu, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
