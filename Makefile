@@ -55,7 +55,6 @@ setup_nightly:
 setup_nightly_gpu:
 	conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
 	$(PIP) install --pre torch==1.14.0.$(PYTORCH_VERSION) \
-                      torchvision==0.15.0.$(PYTORCH_VERSION) \
                       torchtext==0.14.0.$(PYTORCH_VERSION) \
                       --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 	$(PIP) install ninja

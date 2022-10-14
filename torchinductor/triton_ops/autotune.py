@@ -63,9 +63,7 @@ class CachingAutotuner(KernelInterface):
             ]
             self.configs = None
 
-    def _precompile_config(
-        self, cfg: Config, warm_cache_only_with_cc: int
-    ):
+    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: int):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.meta)
         for k, v in cfg.kwargs.items():
