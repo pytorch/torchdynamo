@@ -11,3 +11,4 @@ pytest
 pyyaml
 sympy
 torch>=1.12.0
+filelock
