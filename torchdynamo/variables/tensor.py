@@ -278,11 +278,17 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
-        elif proxy.node.target == torch._C._DisableFuncTorch:
+        elif (
+            proxy.node.target == torch._C._DisableFuncTorch
+            or proxy.node.target == torch._C._cuda_isInBadFork
+        ):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
         else:
+            import pdb
+
+            pdb.set_trace()
             raise AssertionError(
                 "torch.* op returned non-Tensor "
                 + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
