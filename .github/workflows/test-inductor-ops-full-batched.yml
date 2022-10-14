@@ -27,7 +27,7 @@ jobs:
         cache: 'pip'
     - run: make setup_nightly
     - run: make develop
-    - run: PYTORCH_ALL_SAMPLES=1 ${{ matrix.pytorch_test_range }} pytest test/inductor/test_torchinductor_opinfo.py -s
+    - run: COLLECT_EXPECT=1 PYTORCH_ALL_SAMPLES=1 ${{ matrix.pytorch_test_range }} pytest test/inductor/test_torchinductor_opinfo.py -s
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}

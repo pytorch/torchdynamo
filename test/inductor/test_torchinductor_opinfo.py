@@ -84,11 +84,12 @@ def print_seen():
                     f'   "{op}": {fmt_dtypes(expected_failures_dtypes)},{reasons}'
                 )
 
+        name = "inductor_expected_failures_all_sample" if ALL_SAMPLES else "inductor_expected_failures_single_sample"
         expected_failures[device_type].sort()
         nl = "\n"
         print(
             f"""
-inductor_expected_failures_single_sample[\"{device_type}\"] = {{
+{name}}[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
 """
