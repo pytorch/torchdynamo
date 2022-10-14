@@ -987,28 +987,20 @@ class InstructionTranslatorBase(object):
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
         if isinstance(seq, BaseListVariable):
-            assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
-            for i in reversed(seq.unpack_var_sequence(self)):
-                self.push(i)
+            val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
             val = seq.unpack_var_sequence(self)
-            assert len(val) == inst.argval
-            for i in reversed(val):
-                self.push(i)
         elif isinstance(seq, TensorVariable):
             val = seq.unpack_var_sequence_range(self, range(inst.argval))
-            assert len(val) == inst.argval
-            for i in reversed(val):
-                self.push(i)
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             val = seq.obj.unpack_var_sequence_range(self, range(inst.argval))
-            assert len(val) == inst.argval
-            for i in reversed(val):
-                self.push(i)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
+        assert len(val) == inst.argval
+        for i in reversed(val):
+            self.push(i)
 
     def UNPACK_EX(self, inst):
         assert 0 <= inst.argval <= 0xFFFF
