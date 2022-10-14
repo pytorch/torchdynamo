@@ -5,17 +5,18 @@ from unittest.mock import patch
 
 import torch
 import torch.testing
-
-from . import config, reset, utils
-
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.common_utils import TEST_WITH_CROSSREF
 from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TestCase as TorchTestCase
+
+from . import config
+from . import reset
+from . import utils
 
 
 def run_tests(needs=()):
+    from torch.testing._internal.common_utils import run_tests
 
     if (
         TEST_WITH_TORCHDYNAMO

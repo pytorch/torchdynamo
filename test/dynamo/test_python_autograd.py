@@ -8,9 +8,10 @@ from typing import Optional
 import torch
 
 import torchdynamo
+from torchdynamo.test_case import TestCase
+from torchdynamo.test_case import run_tests
 from torchdynamo.testing import CompileCounter
 from torchdynamo.testing import same
-from torchdynamo.test_case import run_tests, TestCase
 
 """
 This is an example of a pure-python version of autograd implemented by
