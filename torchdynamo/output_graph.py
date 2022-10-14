@@ -199,6 +199,7 @@ class OutputGraph(fx.Tracer):
         self, mod: torch.nn.Module, *names, current_tx=None, **options
     ):
         from .symbolic_convert import InstructionTranslatorBase
+
         if not isinstance(current_tx, InstructionTranslatorBase):
             current_tx = None
 
