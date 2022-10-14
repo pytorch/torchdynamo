@@ -44,7 +44,6 @@ def skip_if_no_active_ddp():
         raise unittest.SkipTest("requires pytorch landing in parallel")
 
 
-@pytest.mark.skip("Module hangs in PyTorch CI")
 class TestDistributed(torchdynamo.test_case.TestCase):
     """
     Test harness initializes dist process group
