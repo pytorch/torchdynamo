@@ -1017,6 +1017,12 @@ class Scheduler:
                 and name not in self.mutation_renames
                 and name not in self.mutation_real_name
             ):
+                # For inplace buffers subject to remove, we don't actually
+                # remove them but put them in a dedicated set. This simplifies
+                # the life cycle management of inplace buffers.
+                # This set is used to
+                # 1) avoid unnecessary store in DeferredLine.
+                # 2) avoid alias var definitions in kernel.
                 if name in V.kernel.args.inplace_buffers:
                     V.graph.inplaced_to_remove.add(name)
                 else:
