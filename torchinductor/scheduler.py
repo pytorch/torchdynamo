@@ -325,6 +325,7 @@ class SchedulerNode(BaseSchedulerNode):
         if config.inplace_buffers:
             from .codegen.triton_template import should_use_template
             from .codegen.wrapper import buffer_reuse_key
+
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
