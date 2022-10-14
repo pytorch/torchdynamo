@@ -142,9 +142,7 @@ class ReuseLine(MemoryPlanningLine):
 
     def plan(self, state: MemoryPlanningState):
         assert self.node.get_name() not in V.graph.removed_buffers
-        if self.reused_as.get_name() in V.graph.removed_buffers:
-            # we hit this case only for inplace buffers
-            return NullLine()
+        assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
     def codegen(self, code: IndentedBuffer):
