@@ -876,6 +876,11 @@ def convolution_binary(
     )
 
 
+@register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+    return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 
