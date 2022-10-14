@@ -1,13 +1,14 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 from unittest.mock import patch
 
 import torch
 
 import torchdynamo
+import torchdynamo.test_case
 from torchdynamo.testing import CompileCounter
 
 
-class SkipNonTensorTests(torchdynamo.testing.TestCase):
+class SkipNonTensorTests(torchdynamo.test_case.TestCase):
     def test_add_tensor1(self):
         def fn(a, b):
             return a + b
@@ -104,3 +105,9 @@ class SkipNonTensorTests(torchdynamo.testing.TestCase):
             fn(x)
 
         assert counter.op_count == 0
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 import collections
 import copy
 import inspect
@@ -16,6 +16,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+import torchdynamo.test_case
 import torchdynamo.testing
 import torchdynamo.utils
 from torchdynamo.debug_utils import same_two_models
@@ -43,7 +44,7 @@ def has_detectron2():
         from detectron2.layers.mask_ops import _paste_masks_tensor_shape
 
         return _paste_masks_tensor_shape is not None
-    except (ImportError, ModuleNotFoundError):
+    except ImportError:
         return False
 
 
@@ -751,7 +752,7 @@ class TestModule(torch.nn.Module):
         return self.inner_fn(tensor.shape, (1, 2, 3))
 
 
-class ReproTests(torchdynamo.testing.TestCase):
+class ReproTests(torchdynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
         opt__do_paste_mask = torchdynamo.optimize(torchdynamo.testing.CompileCounter())(
@@ -1584,10 +1585,20 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_relative_import(self):
-        def fn(x):
-            from .test_functions import tensor_for_import_testing
+        try:
+            from . import test_functions as _  # noqa: F401
 
-            return x * 2 * tensor_for_import_testing
+            def fn(x):
+                from .test_functions import tensor_for_import_testing
+
+                return x * 2 * tensor_for_import_testing
+
+        except ImportError:
+
+            def fn(x):
+                from test_functions import tensor_for_import_testing
+
+                return x * 2 * tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -1597,10 +1608,20 @@ class ReproTests(torchdynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_relative_import_no_modulename(self):
-        def fn(x):
-            from . import test_functions
+        try:
+            from . import test_functions as _  # noqa: F401
 
-            return x * 2 * test_functions.tensor_for_import_testing
+            def fn(x):
+                from . import test_functions
+
+                return x * 2 * test_functions.tensor_for_import_testing
+
+        except ImportError:
+
+            def fn(x):
+                import test_functions
+
+                return x * 2 * test_functions.tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -1692,4 +1713,6 @@ class ReproTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

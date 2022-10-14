@@ -2,9 +2,6 @@ import logging
 import os
 
 import sympy
-from jinja2 import Environment
-from jinja2 import FileSystemLoader
-from jinja2 import StrictUndefined
 
 from .. import config
 from .. import ir
@@ -18,6 +15,10 @@ template_dict = {ir.Convolution: "triton_conv", ir.MatrixMultiply: "triton_mm"}
 
 class TritonTemplateKernel(TritonKernel):
     def __init__(self, node: ir.ExternKernel, *groups):
+        from jinja2 import Environment
+        from jinja2 import FileSystemLoader
+        from jinja2 import StrictUndefined
+
         self.node = node
         self.template_name = template_dict[type(node)]
         env = Environment(

@@ -23,9 +23,6 @@ import torch
 from . import config
 from . import convert_frame
 from . import mutation_guard
-from ._guards import TensorGuards
-from ._guards import check_obj_id
-from ._guards import check_type_id
 from .eval_frame import set_guard_error_hook
 from .eval_frame import set_guard_fail_hook
 from .exc import unimplemented
@@ -39,6 +36,9 @@ from .utils import tuple_iterator_getitem
 from .utils import tuple_iterator_len
 
 log = logging.getLogger(__name__)
+TensorGuards = torch._C._dynamo.guards.TensorGuards
+check_obj_id = torch._C._dynamo.guards.check_obj_id
+check_type_id = torch._C._dynamo.guards.check_type_id
 
 
 CLOSURE_VARS = collections.OrderedDict(

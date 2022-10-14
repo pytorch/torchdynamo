@@ -14,6 +14,7 @@ from typing import Set
 
 import numpy
 import torch
+from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .utils import is_safe_constant
@@ -93,6 +94,7 @@ def _disallowed_function_ids():
         torch.set_rng_state,
         torch.autograd.profiler.profile,
         warnings.warn,
+        torch._C._dynamo.eval_frame.unsupported,
     ]
     # extract all dtypes from torch
     dtypes = [
@@ -123,7 +125,15 @@ def _allowed_function_ids():
         # Tensor.set_ with a Storage, and Storages cannot be traced with
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
-        disallowed_modules = ("torch.optim.", "torch.nn.modules.rnn.")
+        disallowed_modules = (
+            "torch.optim.",
+            "torch.nn.modules.rnn.",
+            "torch._dynamo.",
+            "torch._C._dynamo.",
+            "torch._inductor.",
+            "torch._C.inductor.",
+            "torch.fx.",
+        )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
         if module is None:
@@ -146,7 +156,9 @@ def _allowed_function_ids():
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
                 if isinstance(obj, types.ModuleType):
-                    if obj.__name__.startswith("torch."):
+                    if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
+                        obj
+                    ):
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
@@ -160,6 +172,9 @@ def _allowed_function_ids():
     for idx in _disallowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]
+
+    for extra in (is_fx_tracing,):
+        torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
 

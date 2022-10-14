@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 import unittest
 import weakref
 
@@ -6,10 +6,11 @@ import torch
 
 import torchdynamo
 import torchdynamo.config
+import torchdynamo.test_case
 import torchdynamo.testing
 
 
-class RecompileUxTests(torchdynamo.testing.TestCase):
+class RecompileUxTests(torchdynamo.test_case.TestCase):
     # TODO(whc) dynamo actualy recompiles one more time than the cache limit
     cache_limit = 1
 
@@ -198,5 +199,7 @@ class RecompileUxTests(torchdynamo.testing.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
+# TODO(jansel): these pass with pytest, but not with pytorch CI
+# if __name__ == "__main__":
+#     from torchdynamo.testing import run_tests
+#     run_tests()

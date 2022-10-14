@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 
 import inspect
 import unittest
@@ -6,6 +6,7 @@ import unittest
 import torch
 
 import torchdynamo
+import torchdynamo.test_case
 import torchdynamo.testing
 
 input = torch.ones([10, 10])
@@ -37,7 +38,7 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     return test_fn
 
 
-class OptimizerTests(torchdynamo.testing.TestCase):
+class OptimizerTests(torchdynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -95,3 +96,8 @@ optimizers = [
 
 for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

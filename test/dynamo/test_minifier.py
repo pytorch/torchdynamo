@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 import os
 import shutil
 from unittest.mock import patch
@@ -6,6 +6,7 @@ from unittest.mock import patch
 import torch
 
 import torchdynamo
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.optimizations.backends import create_backend
 
@@ -23,7 +24,7 @@ class MockModule(torch.nn.Module):
         return x
 
 
-class MinfierTests(torchdynamo.testing.TestCase):
+class MinfierTests(torchdynamo.test_case.TestCase):
     def test_after_dynamo(self):
         @create_backend
         def bad_dynamo_backend(subgraph):
@@ -89,3 +90,9 @@ class MinfierTests(torchdynamo.testing.TestCase):
 
     def test_after_aot(self):
         self._test_around_aot(False)
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()

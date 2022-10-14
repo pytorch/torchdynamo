@@ -1,9 +1,10 @@
-#!/usr/bin/env pytest
+# Owner(s): ["module: dynamo"]
 import unittest
 from unittest.mock import patch
 
 import torch
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo import config
 from torchdynamo.testing import unsupported
@@ -17,7 +18,7 @@ def indirectly_unsupported(a, b):
     return unsupported(a, c)
 
 
-class SubGraphTests(torchdynamo.testing.TestCase):
+class SubGraphTests(torchdynamo.test_case.TestCase):
     def _common(self, fn, frame_count, op_count):
         torchdynamo.reset()
         v1 = torch.ones(10)
@@ -525,3 +526,9 @@ class SubGraphTests(torchdynamo.testing.TestCase):
             return b
 
         self._common(fn, 1, 2)
+
+
+if __name__ == "__main__":
+    from torchdynamo.test_case import run_tests
+
+    run_tests()
