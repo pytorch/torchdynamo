@@ -10,6 +10,7 @@ from typing import Tuple
 import sympy
 import torch
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._prims_common import Number
 from torch._prims_common import elementwise_dtypes
@@ -157,13 +158,12 @@ def _register_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         args = list(args)
-        unpacked = False
-        # TODO maybe we need to use pytrees here
-        if len(args) == 1 and isinstance(args[0], (list, tuple)):
-            unpacked = True
-            args = args[0]
+
+        # flatten the args
+        args_flat, args_spec = pytree.tree_flatten(args)
+
         # Only look at args that are Tensors
-        indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+        indices = [i for i, x in enumerate(args_flat) if isinstance(x, TensorBox)]
         # kwargs tensors not supported yet
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
@@ -171,27 +171,35 @@ def _register_lowering(
             if convert_input_to_bool:
                 dtype = torch.bool
             else:
-                # FIXME that's a crude approximation for promoting args
+                # FIXME that's a crude approximation for promoting args_flat
                 promoting_args = [
-                    a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                    a
+                    for a in args_flat
+                    if isinstance(a, Number) or hasattr(a, "get_dtype")
                 ]
                 dtype = get_promoted_dtype(
                     *promoting_args, type_promotion_kind=type_promotion_kind
                 )
-            # sometimes args are an immutable list so we can't mutate them
+            # sometimes args_flat are an immutable list so we can't mutate them
             new_args = []
-            for i in range(len(args)):
+            for i in range(len(args_flat)):
                 if i in indices:
-                    new_args.append(to_dtype(args[i], dtype))
-                elif isinstance(args[i], ir.Constant):
+                    new_args.append(to_dtype(args_flat[i], dtype))
+                elif isinstance(args_flat[i], ir.Constant):
                     new_args.append(
-                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
+                        ir.Constant(
+                            args_flat[i].value,
+                            dtype,
+                            args_flat[indices[0]].get_device(),
+                        )
                     )
                 else:
-                    new_args.append(args[i])
-            args = new_args
-        if unpacked:
-            args = [args]
+                    new_args.append(args_flat[i])
+            args_flat = new_args
+
+        # Unflaten the args
+        args = pytree.tree_unflatten(args_flat, args_spec)
+
         if broadcast and indices:
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x

@@ -2006,6 +2006,19 @@ class CommonTemplate:
             (torch.randn([8, 16]),),
         )
 
+    def test_cat_upcasting(self):
+        def fn(arg4_1, slice_7):
+            cat_1 = aten.cat.default([arg4_1, slice_7], 1)
+            return (cat_1,)
+
+        self.common(
+            fn,
+            (
+                torch.randn([8, 16], dtype=torch.float32),
+                torch.randn([8, 20], dtype=torch.float16),
+            ),
+        )
+
     def test_cat_extern_kernel(self):
         def fn(x1, x2, x3, x4):
             x = torch.mm(x2, x3)
