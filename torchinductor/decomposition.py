@@ -5,7 +5,6 @@ import numbers
 
 import torch
 import torch._decomp as decomp
-from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch import Tensor
 from torch._decomp import get_decompositions
 from torch._prims_common import is_boolean_dtype
@@ -98,9 +97,10 @@ decompositions = get_decompositions(
         aten.tril.default,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
+        aten.softplus,
+        aten.softplus_backward,
     ]
 )
-decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):

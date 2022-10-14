@@ -649,6 +649,7 @@ class TritonKernel(Kernel):
     def indexing(
         self,
         index: sympy.Expr,
+        *,
         copy_shape=None,
         dense_indexing=False,
     ):
@@ -681,9 +682,11 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or index == 0:
+        if (need_dense and not have_dense) or isinstance(
+            index, sympy.core.numbers.Integer
+        ):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if index == 0:
+            if isinstance(index, sympy.core.numbers.Integer):
                 return index_str, "None"
             else:
                 mask = dense_mask
@@ -755,14 +758,6 @@ class TritonKernel(Kernel):
         line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
-        """
-        elif V.graph.get_dtype(name) == torch.bool:
-            # This is a fix for https://github.com/pytorch/torchdynamo/issues/1450
-            # The root cause of the problem is a one-element bool tensor was stored as
-            # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
-            # which confuses the backward pass when it calls sum on the bool tensor.
-            line = f"({line} != 0)"
-        """
 
         if (
             self.inside_reduction
@@ -782,7 +777,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value, dense_indexing=True)
+        index, mask = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -864,7 +859,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        index, mask = self.indexing(index, result_var)
+        index, mask = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)

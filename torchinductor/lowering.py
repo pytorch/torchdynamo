@@ -157,6 +157,11 @@ def _register_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         args = list(args)
+        unpacked = False
+        # TODO maybe we need to use pytrees here
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            unpacked = True
+            args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
         # kwargs tensors not supported yet
@@ -173,14 +178,20 @@ def _register_lowering(
                 dtype = get_promoted_dtype(
                     *promoting_args, type_promotion_kind=type_promotion_kind
                 )
-            for i in indices:
-                args[i] = to_dtype(args[i], dtype)
+            # sometimes args are an immutable list so we can't mutate them
+            new_args = []
             for i in range(len(args)):
-                if isinstance(args[i], ir.Constant):
-                    args[i] = ir.Constant(
-                        args[i].value, dtype, args[indices[0]].get_device()
+                if i in indices:
+                    new_args.append(to_dtype(args[i], dtype))
+                elif isinstance(args[i], ir.Constant):
+                    new_args.append(
+                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
                     )
-
+                else:
+                    new_args.append(args[i])
+            args = new_args
+        if unpacked:
+            args = [args]
         if broadcast and indices:
             for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
                 args[i] = x
@@ -250,9 +261,14 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs):
+def promote_constants(inputs, override_return_dtype=None):
     if not any(isinstance(x, (int, float)) for x in inputs):
         return inputs
+    if all(isinstance(x, (int, float)) for x in inputs):
+        dtype = override_return_dtype or get_promoted_dtype(
+            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
+        return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, TensorBox))
     return [
         (
@@ -274,7 +290,7 @@ def make_pointwise(
     allow_alpha=False,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
-        inputs = promote_constants(inputs)
+        inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
                 inputs = list(inputs)
@@ -473,12 +489,13 @@ def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
-
-    dim = _validate_dim(x, dim, 0)
+    offset = len(x.get_size()) == 0
+    dim = _validate_dim(x, dim, offset)
     new_shape = list(x.get_size())
-    removed = new_shape.pop(dim)
-    if V.graph.sizevars.maybe_guard_equals(removed, 1):
-        return view(x, new_shape)
+    if len(new_shape) > 0:
+        removed = new_shape.pop(dim)
+        if V.graph.sizevars.maybe_guard_equals(removed, 1):
+            return view(x, new_shape)
 
     # squeeze does nothing if the size isn't 1
     return x
@@ -3182,16 +3199,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     ) and dtype is None:
         dtype = torch.int64
-
-    # This is a temp fix for https://github.com/pytorch/torchdynamo/issues/1450
-    # The root cause of the problem is a one-element bool tensor was stored as
-    # tensor([255], device='cuda:0', dtype=torch.uint8) in the forward pass output,
-    # which confuses the backward pass when it calls sum on the bool tensor.
-    # A better place to fix is in triton.py (see the comment there), but it is
-    # blocked by a trition issue on bool comparison, causing opinfo tests like
-    # test_comprehensive_gt_cuda_bool to fail.
-    if is_boolean_dtype(x.get_dtype()):
-        x = to_dtype(to_dtype(x, dtype), torch.bool)
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
