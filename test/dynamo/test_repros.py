@@ -16,6 +16,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+import torchdynamo.test_case
 import torchdynamo.testing
 import torchdynamo.utils
 from torchdynamo.debug_utils import same_two_models
@@ -751,7 +752,7 @@ class TestModule(torch.nn.Module):
         return self.inner_fn(tensor.shape, (1, 2, 3))
 
 
-class ReproTests(torchdynamo.testing.TestCase):
+class ReproTests(torchdynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torchdynamo.utils.counters.clear()
         opt__do_paste_mask = torchdynamo.optimize(torchdynamo.testing.CompileCounter())(
@@ -1712,6 +1713,6 @@ class ReproTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()

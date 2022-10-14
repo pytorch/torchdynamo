@@ -6,6 +6,7 @@ import unittest
 
 import torch
 
+import torchdynamo.test_case
 import torchdynamo.testing
 
 try:
@@ -16,7 +17,7 @@ except ImportError:
 requires_dill = unittest.skipIf(dill is None, "requires dill")
 
 
-class ReplayRecordTests(torchdynamo.testing.TestCase):
+class ReplayRecordTests(torchdynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -179,6 +180,6 @@ class ReplayRecordTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()

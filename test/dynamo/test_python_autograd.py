@@ -9,8 +9,8 @@ import torch
 
 import torchdynamo
 from torchdynamo.testing import CompileCounter
-from torchdynamo.testing import TestCase
 from torchdynamo.testing import same
+from torchdynamo.test_case import run_tests, TestCase
 
 """
 This is an example of a pure-python version of autograd implemented by
@@ -289,6 +289,4 @@ class TestPythonAutograd(TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
-
     run_tests()

@@ -5,10 +5,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 
+import torchdynamo.test_case
 import torchdynamo.testing
 
 
-class ExportTests(torchdynamo.testing.TestCase):
+class ExportTests(torchdynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
@@ -1423,6 +1424,6 @@ class ExportTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()

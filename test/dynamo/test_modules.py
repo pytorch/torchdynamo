@@ -9,6 +9,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter
 from torch.nn.parameter import UninitializedParameter
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo.eval_frame import unsupported
 from torchdynamo.mutation_guard import GenerationTracker
@@ -605,7 +606,7 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
-class NNModuleTests(torchdynamo.testing.TestCase):
+class NNModuleTests(torchdynamo.test_case.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
@@ -885,6 +886,6 @@ class NNModuleTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()

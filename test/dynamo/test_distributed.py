@@ -9,6 +9,7 @@ import torch.distributed as dist
 from torch import nn
 
 import torchdynamo
+import torchdynamo.test_case
 from torchdynamo import config
 from torchdynamo.testing import same
 
@@ -43,7 +44,7 @@ def skip_if_no_active_ddp():
 
 
 @pytest.mark.skip("Module hangs in PyTorch CI")
-class TestDistributed(torchdynamo.testing.TestCase):
+class TestDistributed(torchdynamo.test_case.TestCase):
     """
     Test harness initializes dist process group
     """

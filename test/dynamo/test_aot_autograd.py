@@ -4,6 +4,7 @@ import functools
 import torch
 
 import torchdynamo
+import torchdynamo.test_case
 from torchdynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torchdynamo.testing import rand_strided
 
@@ -13,7 +14,7 @@ def compiler_safe_fn(gm, example_inputs, is_safe):
     return gm.forward
 
 
-class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
+class AotAutogradFallbackTests(torchdynamo.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -133,6 +134,6 @@ class AotAutogradFallbackTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()

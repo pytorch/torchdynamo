@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import torch
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo import eval_frame
 
@@ -35,7 +36,7 @@ with_debug_nops = eval_frame._optimize_catch_errors(
 )
 
 
-class NopTests(torchdynamo.testing.TestCase):
+class NopTests(torchdynamo.test_case.TestCase):
     @with_debug_nops
     def test1(self):
         self.assertEqual(fn1(1, 2), -7)
@@ -66,6 +67,6 @@ class NopTests(torchdynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()

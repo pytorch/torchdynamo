@@ -18,6 +18,7 @@ import torch
 import torch.onnx.operators
 from torch.testing._internal.jit_utils import JitTestCase
 
+import torchdynamo.test_case
 import torchdynamo.testing
 from torchdynamo import bytecode_transformation
 from torchdynamo.testing import CompileCounter
@@ -32,7 +33,7 @@ def my_custom_function(x):
     return x + 1
 
 
-class MiscTests(torchdynamo.testing.TestCase):
+class MiscTests(torchdynamo.test_case.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -2713,6 +2714,6 @@ class TestTracer(JitTestCase):
 
 
 if __name__ == "__main__":
-    from torchdynamo.testing import run_tests
+    from torchdynamo.test_case import run_tests
 
     run_tests()
