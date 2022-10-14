@@ -181,6 +181,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
+                gm.graph.lint()
     gm.recompile()
     return gm
 
