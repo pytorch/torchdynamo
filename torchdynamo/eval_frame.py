@@ -18,7 +18,6 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from . import config
 from . import convert_frame
-from . import logging as torchdynamo_logging
 from . import skipfiles
 from . import utils
 from .exc import ResetRequired
@@ -86,7 +85,6 @@ def innermost_fn(fn):
         unaltered_fn = getattr(unaltered_fn, "_torchdynamo_orig_callable")
         assert callable(unaltered_fn)
     return unaltered_fn
-
 
 
 class _TorchDynamoContext:

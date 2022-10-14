@@ -44,6 +44,11 @@ from .variables.tensor import UnspecializedPythonVariable
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
+
+
 @dataclass
 class GraphCompileReason:
     """Stores why a given output graph was compiled; i.e. what caused the graph break."""
@@ -69,11 +74,6 @@ class FakeRootModule(torch.nn.Module):
 
     def __repr__(self):
         return "FakeRootModule(...)"
-
-
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
 
 
 class OutputGraph(fx.Tracer):
@@ -417,9 +417,19 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            _step_logger()(logging.INFO, f"calling compiler function {self.compiler_fn.__name__}")
+            name = (
+                self.compiler_fn.__name__
+                if hasattr(self.compiler_fn, "__name__")
+                else ""
+            )
+            name = (
+                self.compiler_fn.__name__
+                if hasattr(self.compiler_fn, "__name__")
+                else ""
+            )
+            _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            _step_logger()(logging.INFO, f"done compiler function {self.compiler_fn.__name__}")
+            _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             log.warning("-" * 40 + "\n")

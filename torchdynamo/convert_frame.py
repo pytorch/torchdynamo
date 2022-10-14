@@ -48,6 +48,7 @@ from .utils import write_record_to_file
 
 log = logging.getLogger(__name__)
 
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -382,7 +383,6 @@ def _compile(
 
         if config.dead_code_elimination:
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
-
 
     try:
         for attempt in itertools.count():

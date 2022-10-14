@@ -83,6 +83,7 @@ from .variables.user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -1435,7 +1436,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
-        
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
         value = cell.cell_contents
