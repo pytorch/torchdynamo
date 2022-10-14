@@ -158,6 +158,22 @@ class CppSimdVecOverrides(OpOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
     @staticmethod
+    def add(a, b):
+        return f"{a} + {b}"
+
+    @staticmethod
+    def sub(a, b):
+        return f"{a} - {b}"
+
+    @staticmethod
+    def mul(a, b):
+        return f"{a} * {b}"
+
+    @staticmethod
+    def div(a, b):
+        return f"{a} / {b}"
+
+    @staticmethod
     def abs(x):
         return f"{x}.abs()"
 
@@ -586,11 +602,13 @@ class CppSimdVecKernel(CppKernel):
     def __init__(self, args, num_threads):
         super(CppSimdVecKernel, self).__init__(args, num_threads)
         self.simd_len = config.cpp.simdlen
+        metrics.generated_simd_vec_kernel_count += 1
 
-    # Suppose the most inner var is "i0". Only support the case as follows:
-    #     index = i0
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
-        return var == index
+        replacement = {var: var + 1}
+        new_index = sympy_subs(index, replacement)
+        delta = sympy.simplify(new_index - index)
+        return delta == 1
 
     def is_var_irrevelant(self, var: sympy.Symbol, index: sympy.Expr):
         expanded_index = sympy.expand(index)
@@ -635,7 +653,12 @@ class CppSimdVecKernel(CppKernel):
 class CppSimdVecKernelChecker(CppSimdVecKernel):
     def __init__(self, args, num_threads):
         super(CppSimdVecKernelChecker, self).__init__(args, num_threads)
+
+        # Since this kernel is only for checker but does not genreate any
+        # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
+        metrics.generated_simd_vec_kernel_count -= 1
+
         self.simd_vec = True
         self.fast_vec_list = []
         for dict_obj in CppSimdVecOverrides.__dict__:
@@ -762,9 +785,9 @@ class CppKernelProxy(CppKernel):
         itervars = self.simd_vec_kernel.itervars
         rangs = self.simd_vec_kernel.ranges
         loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
-        loops_nest_non_reduc, _ = LoopNest(
-            loops[: self.reduction_depth]
-        ), LoopNest(loops[self.reduction_depth :])
+        loops_nest_non_reduc, _ = LoopNest(loops[: self.reduction_depth]), LoopNest(
+            loops[self.reduction_depth :]
+        )
 
         # TODO: Support reductions
         # assert reductions is None or len(reductions.loops) == 0
@@ -830,7 +853,8 @@ class CppScheduling:
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
     def check_simd_vec(self, nodes):
-        if config.cpp.simdlen is None:
+        # TODO: Query cpu arch and vec length from aten
+        if config.cpp.simdlen is None or config.cpp.simdlen != 8:
             return False
 
         _, (group, reduction_group) = max(
