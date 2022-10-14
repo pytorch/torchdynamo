@@ -469,7 +469,10 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
+                        "call_method",
+                        "item",
+                        (self.as_proxy(),),
+                        {},
                     ),
                     **options,
                 )
@@ -483,7 +486,10 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
+                        "call_function",
+                        len,
+                        (self.as_proxy(),),
+                        {},
                     ),
                     **options,
                 )
@@ -493,7 +499,6 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + args, kwargs),
-                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         else:
@@ -513,7 +518,6 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )

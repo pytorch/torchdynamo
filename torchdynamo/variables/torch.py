@@ -299,7 +299,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     get_state_from_generator,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=self.value(),
                 **options,
@@ -329,7 +328,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 example_value=example_value,
                 **options,
@@ -353,7 +351,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -423,7 +420,6 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -487,7 +483,6 @@ class TorchVariable(VariableTracker):
                         ],
                         {},
                     ),
-                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
@@ -586,7 +581,7 @@ class TorchPyOperator(VariableTracker):
             gm.__name__ = next_name
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
-            tx.output.register_attr_or_module(gm, next_name, current_tx=tx, source=src)
+            tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name, gm, guards
 
         # Get args as proxies
@@ -641,7 +636,6 @@ class TorchPyOperator(VariableTracker):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
-                current_tx=tx,
             ),
             example_value=self.value(*u_args),
         )

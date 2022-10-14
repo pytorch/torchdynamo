@@ -712,7 +712,6 @@ class InstructionTranslatorBase(object):
                         "call_function",
                         supported_tensors[op],
                         *proxy_args_kwargs([left, right], {}),
-                        current_tx=self,
                     ),
                     **options,
                 )

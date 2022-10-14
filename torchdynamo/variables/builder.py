@@ -281,7 +281,6 @@ class VariableBuilder:
                 return self.tx.output.register_attr_or_module(
                     value,
                     self.name,
-                    current_tx=self.tx,
                     source=self.get_source(),
                     # Guards are added inside register_attr_or_module
                 )
@@ -459,7 +458,6 @@ class VariableBuilder:
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
-                current_tx=self.tx,
                 source=self.get_source(),
                 # Guards are done inside register_attr_or_module
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
@@ -476,7 +474,6 @@ class VariableBuilder:
                     return self.tx.output.register_attr_or_module(
                         value,
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                        current_tx=self.tx,
                         source=None,
                         # Guards are added inside register_attr_or_module
                     )

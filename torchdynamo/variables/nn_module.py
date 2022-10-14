@@ -61,7 +61,6 @@ class NNModuleVariable(VariableTracker):
                     submod,
                     self.module_key,
                     idx,
-                    current_tx=tx,
                     source=NNModuleSource(GetItemSource(self.source, idx)),
                     **options,
                 )
@@ -184,7 +183,6 @@ class NNModuleVariable(VariableTracker):
                             submod,
                             self.module_key,
                             idx,
-                            current_tx=tx,
                             source=NNModuleSource(GetItemSource(self.source, idx)),
                             **options,
                         ),
@@ -204,7 +202,6 @@ class NNModuleVariable(VariableTracker):
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
                     ),
                     nnmodule=mod,
                     **options,
@@ -258,7 +255,6 @@ class NNModuleVariable(VariableTracker):
                 submod,
                 key,
                 key,
-                current_tx=tx,
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
@@ -294,7 +290,6 @@ class NNModuleVariable(VariableTracker):
                         submod,
                         key,
                         name,
-                        current_tx=tx,
                         source=src,
                         **options,
                     )
@@ -309,7 +304,6 @@ class NNModuleVariable(VariableTracker):
                         obj,
                         key,
                         name,
-                        current_tx=tx,
                         source=NNModuleSource(GetItemSource(self.source, name)),
                         **options,
                     ),
@@ -379,7 +373,6 @@ class NNModuleVariable(VariableTracker):
                         tx.output.register_attr_or_module(
                             submod,
                             key,
-                            current_tx=tx,
                             source=src,
                             **options,
                         )
@@ -392,7 +385,6 @@ class NNModuleVariable(VariableTracker):
                 submod,
                 key,
                 args[0].as_python_constant(),
-                current_tx=tx,
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
