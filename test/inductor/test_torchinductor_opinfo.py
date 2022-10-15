@@ -614,5 +614,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torchdynamo.config.raise_on_assertion_error = True
-    if has_triton() and torch.cuda.get_device_capability() >= (8, 0):
+    if has_triton():
         run_tests()

@@ -71,7 +71,7 @@ except (
 
 aten = torch.ops.aten
 
-HAS_CUDA = has_triton() and torch.cuda.get_device_capability() >= (8, 0)
+HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torchinductor.config.triton.autotune = False  # too slow

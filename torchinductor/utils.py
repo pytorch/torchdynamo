@@ -37,7 +37,7 @@ def has_triton():
     try:
         import triton
 
-        return triton is not None
+        return triton is not None and torch.cuda.get_device_capability() >= (7, 0)
     except ImportError:
         return False
 
