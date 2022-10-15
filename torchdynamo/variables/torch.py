@@ -603,7 +603,7 @@ class TorchPyOperator(VariableTracker):
                         source=NNModuleSource(
                             GetItemSource(self.source, arg.module_key)
                         ),
-                        # **options,
+                        **options,
                     )
                     return make_attr(name)
                 if arg.has_unpack_var_sequence(tx):
