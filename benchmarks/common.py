@@ -1776,20 +1776,20 @@ def main(runner, original_dir=None):
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
-        import torchinductor.config
+        from torchinductor import config as inductor_config
 
-        torchinductor.config.debug = args.verbose
+        inductor_config.debug = args.verbose
         if args.threads:
-            torchinductor.config.cpp.threads = args.threads
+            inductor_config.cpp.threads = args.threads
 
         if args.inductor_dynamic:
-            torchinductor.config.triton.cudagraphs = False
-            torchinductor.config.dynamic_shapes = True
+            inductor_config.triton.cudagraphs = False
+            inductor_config.dynamic_shapes = True
         else:
-            torchinductor.config.dynamic_shapes = False
+            inductor_config.dynamic_shapes = False
             if args.export_profiler_trace:
                 print("Profiling requested, setting cudagraphs to False")
-                torchinductor.config.triton.cudagraphs = False
+                inductor_config.triton.cudagraphs = False
 
         optimize_ctx = torchdynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
