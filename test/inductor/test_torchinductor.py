@@ -39,6 +39,7 @@ try:
     from torchinductor.ir import ModularIndexing
     from torchinductor.sizevars import SizeVarAllocator
     from torchinductor.utils import has_torchvision_roi_align
+    from torchinductor.utils import has_triton
     from torchinductor.utils import timed
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
@@ -70,14 +71,7 @@ except (
 
 aten = torch.ops.aten
 
-HAS_CUDA = False
-if torch.cuda.is_available():
-    try:
-        importlib.import_module("triton")
-        HAS_CUDA = True
-    except ImportError:
-        pass
-
+HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torchinductor.config.triton.autotune = False  # too slow
