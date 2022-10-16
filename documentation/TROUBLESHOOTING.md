@@ -31,8 +31,8 @@ We're also actively developing debug tools, profilers, and improving our errors/
 | `torch._dynamo.explain`               | Find graph breaks and display reasoning for them                                                                             | `torch._dynamo.explain(fn, *inputs)`                                           |
 | Record/Replay         | Record and replay frames which to reproduce errors during graph capture                                                      | `torch._dynamo.config.replay_record_enabled = True`                            |
 | TorchDynamo function name filtering | only compile functions with the given name to reduce noise when debugging an issue                                           | set environment variable TORCHDYNAMO_DEBUG_FUNCTION=\<name\>                 |
-| TorchInductor Debug logging | Print general TorchInductor debug info and generated Triton/C++ code | `torchinductor.config.debug = True` |
-| TorchInductor Tracing               | Show time taken in each TorchInductor stage + output code and graph visualization                                            | set the environment variable TORCHINDUCTOR_TRACE=1 or `torchinductor.config.trace.enabled = True`                           | s |
+| TorchInductor Debug logging | Print general TorchInductor debug info and generated Triton/C++ code | `torch._inductor.config.debug = True` |
+| TorchInductor Tracing               | Show time taken in each TorchInductor stage + output code and graph visualization                                            | set the environment variable TORCHINDUCTOR_TRACE=1 or `torch._inductor.config.trace.enabled = True`                           | s |
 
 # Guide to Diagnosing Runtime Errors
 Below is the TorchDynamo compiler stack. 
@@ -205,7 +205,7 @@ args = [((200, 200), (200, 1), torch.float32, 'cpu')]
 args = [rand_strided(shape, stride, dtype, device) for shape, stride, dtype, device in args]
 mod = make_fx(Repro())(*args)
 
-from torchinductor.compile_fx import compile_fx_inner
+from torch._inductor.compile_fx import compile_fx_inner
 
 compiled = compile_fx_inner(mod, args)
 compiled(*args)
@@ -296,7 +296,7 @@ TorchInductor has a builtin stats and trace function for displaying time spent i
 Setting the environment variable `TORCHINDUCTOR_TRACE=1` will cause a debug trace directory to be created and printed:
 ```
 $ env TORCHINDUCTOR_TRACE=1 python repro.py
-torchinductor.debug: [WARNING] model_forward_0 debug trace: /tmp/torchinductor_jansel/rh/crhwqgmbqtchqt3v3wdeeszjb352m4vbjbvdovaaeqpzi7tdjxqr.debug
+torch._inductor.debug: [WARNING] model_forward_0 debug trace: /tmp/torchinductor_jansel/rh/crhwqgmbqtchqt3v3wdeeszjb352m4vbjbvdovaaeqpzi7tdjxqr.debug
 ```
 
 Here is an [example debug directory output](https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396) for the test program:
@@ -308,7 +308,7 @@ torch.nn.Sequential(
     )
 ```
 
-Note each file in that debug trace can be enabled/disabled via `torchinductor.config.trace.*`.  The profile and the diagram are both disabled by default since they are expensive to generate.
+Note each file in that debug trace can be enabled/disabled via `torch._inductor.config.trace.*`.  The profile and the diagram are both disabled by default since they are expensive to generate.
 
 A single node in this new debug format looks like:
 ```
