@@ -630,10 +630,10 @@ class CppSimdVecKernel(CppKernel):
         expanded_index = sympy.expand(index)
         new_index = self.transform_index(index)
 
-        if expanded_index != new_index:
-            line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
-        else:
+        if self.is_var_irrevelant(var, index):
             line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
+        else:
+            line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
 
         return self.cse.generate(self.loads, line)
 
