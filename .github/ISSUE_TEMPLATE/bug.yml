@@ -1,0 +1,79 @@
+name: 🐛 Bug Report
+description: Create a report to help us reproduce and fix the bug
+title: "[Bug]: "
+labels: ["bug"]
+
+body:
+  - type: markdown
+    attributes:
+      value: >
+        #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
+        existing and past issues](https://github.com/pytorch/torchdynamo/issues)
+        The below template should close the vast majority issues you're seeing but if it doesn't please check out our advanced troubleshoothing guide https://github.com/pytorch/torchdynamo/blob/main/documentation/TROUBLESHOOTING.md
+  - type: textarea
+    attributes:
+      label: 🐛 Describe the bug
+      description: |
+        Please provide a clear and concise description of what the bug is.
+      placeholder: |
+        A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Error logs
+      description: |
+        Please provide the error you're seeing
+      placeholder: |
+        Error...
+    validations:
+      required: true
+  
+  - type: checkboxes
+    id: dynamo
+    attributes:
+      label: Did Dynamo succeed?
+      options:
+        - label: Does dynamo.optimize("eager") succeed?
+          required: false
+
+  
+  - type: checkboxes
+    id: aot
+    attributes:
+      label: Did AOT succeed?
+      options:
+        - label: Did dynamo.optimize("aot_eager") succeed?
+          required: false
+  
+
+  - type: checkboxes
+    id: inductor
+    attributes:
+      label: Did Inductor succeed?
+      options:
+        - label: Does dynamo.optimize("inductor") succeed?
+          required: false
+
+
+  - type: textarea
+    attributes:
+      label: Minified repro
+      description: |
+        Please run the minifier on your example and paste the minified code below 
+        Learn more here https://github.com/pytorch/torchdynamo/blob/main/documentation/TROUBLESHOOTING.md
+      placeholder: |
+        env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
+        or
+        env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
+
+        import torch
+        ... 
+
+        # torch version: 1.13.....
+
+        class Repro(torch.nn.Module)
+    validations:
+      required: true
+  
