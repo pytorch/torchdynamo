@@ -117,19 +117,19 @@ to verify that TorchDynamo is correctly installed (only checks for minimum requi
 ## Usage Example
 
 Here is a basic example of how to use TorchDynamo. One can decorate a function
-or a method using `torchdynamo.optimize` to enable TorchDynamo optimization.
+or a method using `torch._dynamo.optimize` to enable TorchDynamo optimization.
 
 ```py
 from typing import List
 import torch
-import torchdynamo
+import torch._dynamo as dynamo
 
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     print("my_compiler() called with FX graph:")
     gm.graph.print_tabular()
     return gm.forward  # return a python callable
 
-@torchdynamo.optimize(my_compiler)
+@dynamo.optimize(my_compiler)
 def fn(x, y):
     a = torch.cos(x)
     b = torch.sin(y)
@@ -156,7 +156,7 @@ This works for `torch.nn.Module` as well as shown below
 
 ```py
 import torch
-import torchdynamo
+import torch._dynamo as dynamo
 
 class MockModule(torch.nn.Module):
     def __init__(self):
@@ -167,7 +167,7 @@ class MockModule(torch.nn.Module):
         return self.relu(torch.cos(x))
 
 mod = MockModule()
-optimized_mod = torchdynamo.optimize(my_compiler)(mod)
+optimized_mod = dynamo.optimize(my_compiler)(mod)
 optimized_mod(torch.randn(10))
 ```
 
@@ -180,14 +180,14 @@ Let's take a look at one more example with control flow.
 ```py
 from typing import List
 import torch
-import torchdynamo
+import torch._dynamo as dynamo
 
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     print("my_compiler() called with FX graph:")
     gm.graph.print_tabular()
     return gm.forward  # return a python callable
 
-@torchdynamo.optimize(my_compiler)
+@dynamo.optimize(my_compiler)
 def toy_example(a, b):
     x = a / (torch.abs(a) + 1)
     if b.sum() < 0:
@@ -240,20 +240,20 @@ or `torchdynamo.list_backends()`. Note many backends require installing
 additional packages. Some of the most commonly used backends are
 
 Debugging backends:
-* `torchdynamo.optimize("eager")` - Uses PyTorch to run the extracted GraphModule. This is quite useful in debugging TorchDynamo issues.
-* `torchdynamo.optimize("aot_eager")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
+* `dynamo.optimize("eager")` - Uses PyTorch to run the extracted GraphModule. This is quite useful in debugging TorchDynamo issues.
+* `dynamo.optimize("aot_eager")` - Uses AotAutograd with no compiler, i.e, just using PyTorch eager for the AotAutograd's extracted forward and backward graphs. This is useful for debugging, and unlikely to give speedups.
 
 Training & inference backends:
-* `torchdynamo.optimize("inductor")` - Uses TorchInductor backend with AotAutograd and cudagraphs.  [Read more](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)
-* `torchdynamo.optimize("nvfuser")` -  nvFuser with TorchScript. [Read more](https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593)
-* `torchdynamo.optimize("aot_nvfuser")` -  nvFuser with AotAutograd. [Read more](https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593)
-* `torchdynamo.optimize("aot_cudagraphs")` - cudagraphs with AotAutograd. [Read more](https://github.com/pytorch/torchdynamo/pull/757)
+* `dynamo.optimize("inductor")` - Uses TorchInductor backend with AotAutograd and cudagraphs.  [Read more](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)
+* `dynamo.optimize("nvfuser")` -  nvFuser with TorchScript. [Read more](https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593)
+* `dynamo.optimize("aot_nvfuser")` -  nvFuser with AotAutograd. [Read more](https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593)
+* `dynamo.optimize("aot_cudagraphs")` - cudagraphs with AotAutograd. [Read more](https://github.com/pytorch/torchdynamo/pull/757)
 
 Inference-only backends:
-* `torchdynamo.optimize("ofi")` -  Uses Torchscript optimize_for_inference.  [Read more](https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html)
-* `torchdynamo.optimize("fx2trt")` -  Uses Nvidia TensorRT for inference optimizations.  [Read more](https://github.com/pytorch/TensorRT/blob/master/docsrc/tutorials/getting_started_with_fx_path.rst)
-* `torchdynamo.optimize("onnxrt")` -  Uses ONNXRT for inference on CPU/GPU.  [Read more](https://onnxruntime.ai/)
-* `torchdynamo.optimize("ipex")` -  Uses IPEX for inference on CPU.  [Read more](https://github.com/intel/intel-extension-for-pytorch)
+* `dynamo.optimize("ofi")` -  Uses Torchscript optimize_for_inference.  [Read more](https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html)
+* `dynamo.optimize("fx2trt")` -  Uses Nvidia TensorRT for inference optimizations.  [Read more](https://github.com/pytorch/TensorRT/blob/master/docsrc/tutorials/getting_started_with_fx_path.rst)
+* `dynamo.optimize("onnxrt")` -  Uses ONNXRT for inference on CPU/GPU.  [Read more](https://onnxruntime.ai/)
+* `dynamo.optimize("ipex")` -  Uses IPEX for inference on CPU.  [Read more](https://github.com/intel/intel-extension-for-pytorch)
 
 ### Training and AotAutograd
 
@@ -272,7 +272,7 @@ Example
 model = ...
 optimizer = ...
 
-@torchdynamo.optimize("inductor")
+@dynamo.optimize("inductor")
 def training_iter_fn(...):
     outputs = model(...)
     loss = outputs.loss
@@ -305,7 +305,7 @@ TorchDynamo also includes many backends, which can be found in
 require installing additional packages.  You can combine these backends
 together with code like:
 ```py
-from torchdynamo.optimizations import BACKENDS
+from torch._dynamo.optimizations import BACKENDS
 
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     trt_compiled = BACKENDS["tensorrt"](gm, example_inputs)
@@ -348,7 +348,7 @@ following torch.Tensor properties:
 
 *For sizes/strides you can disable this specialization by setting:
 ```py
-torchdynamo.config.dynamic_shapes = True
+torch._dynamo.config.dynamic_shapes = True
 ```
 
 The full specialization mode allows the backend compiler to assume
@@ -363,7 +363,7 @@ has warmed up.  For example, if you are serving production traffic in a
 latency critical application.  For this, TorchDynamo provides an alternate
 mode where prior compiled graphs are used, but no new ones are generated:
 ```py
-frozen_toy_example = torchdynamo.run(toy_example)
+frozen_toy_example = dynamo.run(toy_example)
 frozen_toy_example(torch.randn(10), torch.randn(10))
 ```
 
@@ -374,7 +374,7 @@ program to debug performance issues.  You can turn graph breaks into
 errors by setting
 `nopython=True`:
 ```py
-@torchdynamo.optimize(my_compiler, nopython=True)
+@dynamo.optimize(my_compiler, nopython=True)
 def toy_example(a, b):
 ```
 
@@ -382,7 +382,7 @@ Which will trigger the following error in the example program above:
 ```py
 Traceback (most recent call last):
   ...
-torchdynamo.exc.Unsupported: generic_jump TensorVariable()
+torch._dynamo.exc.Unsupported: generic_jump TensorVariable()
 Processing original code:
   File "example.py", line 7, in toy_example
     if b.sum() < 0:
