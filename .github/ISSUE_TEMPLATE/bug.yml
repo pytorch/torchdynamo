@@ -64,3 +64,32 @@ body:
         - Inductor
     validations:
       required: true
+
+  - type: checkboxes
+    id: dynamo
+    attributes:
+      label: Did Dynamo succeed?
+      description: Does dynamo.optimize("eager") succeed?
+      options:
+        - label: Yes?
+          required: true
+
+  
+  - type: checkboxes
+    id: dynamo
+    attributes:
+      label: Did AOT succeed?
+      description: Does dynamo.optimize("aot_eager") succeed?
+      options:
+        - label: Yes?
+          required: true
+  
+
+  - type: checkboxes
+    id: dynamo
+    attributes:
+      label: Did Inductor succeed?
+      description: Does dynamo.optimize("inductor") succeed?
+      options:
+        - label: Yes?
+          required: true
