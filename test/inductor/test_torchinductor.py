@@ -6,12 +6,16 @@ import importlib
 import os
 import random
 import sys
+import typing
 import unittest
 import weakref
 from unittest.mock import patch
 
 import torch
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
@@ -22,6 +26,7 @@ from torch.utils._pytree import tree_unflatten
 
 import torchdynamo
 from torchdynamo.debug_utils import same_two_models
+from torchdynamo.eval_frame import OptimizeContext
 from torchdynamo.testing import rand_strided
 from torchdynamo.testing import same
 
@@ -4052,6 +4057,72 @@ if HAS_CUDA:
             ]
             with torch.cuda.amp.autocast(enabled=False):
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+
+    class TritonCodeGenTests(TestCase):
+        from torchinductor.triton_ops.autotune import CachingAutotuner
+
+        class SaveGraph:
+            def __init__(self):
+                self.example_args = None
+                self.model = None
+
+            def fx_extractor(self, model_: torch.fx.GraphModule, example_inputs_: typing.List[torch.Tensor]):
+                from functorch._src.aot_autograd import Interpreter
+                from torchinductor.decomposition import select_decomp_table
+                fake_mode = FakeTensorMode()
+
+                def interpret(*args, **kwargs):
+                    return Interpreter(model_).run(*args[0:], **kwargs)
+
+                fake_flat_tensor_args = []
+                for x in example_inputs_:
+                    fake_flat_tensor_args.append(fake_mode.from_tensor(x, shape_env=None))
+
+                fw_module = make_fx(interpret, select_decomp_table())(*fake_flat_tensor_args)
+                self.model = fw_module
+                self.example_args = fake_flat_tensor_args
+                return lambda x: example_inputs_
+
+        def get_kernel_modules(self, fn, args) -> typing.List[CachingAutotuner]:
+            from torchinductor.debug import DebugContext
+            from torchinductor.graph import GraphLowering
+            from torchinductor.virtualized import V
+
+            cxt = TritonTests.SaveGraph()
+            torchdynamo.optimize(cxt.fx_extractor)(fn)(*args)
+            fx_graph = cxt.model
+            graph = GraphLowering(fx_graph)
+            args = cxt.example_args
+            kernels = []
+            with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
+                graph.run(*args)
+                mod = graph.compile_to_module()
+                i = 0
+                while True:
+                    attribute = f"kernel{i}"
+                    if not hasattr(mod, attribute):
+                        break
+                    else:
+                        kernels.append(getattr(mod, attribute))
+                        i = i + 1
+            return kernels
+
+        def test_divisibile_by_16_covers_numel_args(self):
+            def fn(a: torch.Tensor) -> torch.Tensor:
+                return torch.sum(a)
+
+            kernels = self.get_kernel_modules(fn, [torch.randn([256, 256], device="cuda")])
+            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+
+            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+            # at slot 3 should be in the divisible by 16 descriptor
+            arguments_that_are_divisible_by_16_in_kernel0 = kernels[0].meta['configs'][0].divisible_by_16
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+
+            # kernel1 reduces from 8 elements to a single scalar.
+            arguments_that_are_divisible_by_16_in_kernel1 = kernels[1].meta['configs'][0].divisible_by_16
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
 
 
 if __name__ == "__main__":
