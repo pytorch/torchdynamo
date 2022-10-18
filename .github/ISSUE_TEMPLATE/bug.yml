@@ -76,7 +76,7 @@ body:
 
   
   - type: checkboxes
-    id: dynamo
+    id: aot
     attributes:
       label: Did AOT succeed?
       description: Does dynamo.optimize("aot_eager") succeed?
@@ -86,7 +86,7 @@ body:
   
 
   - type: checkboxes
-    id: dynamo
+    id: inductor
     attributes:
       label: Did Inductor succeed?
       description: Does dynamo.optimize("inductor") succeed?
