@@ -122,12 +122,12 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
             functorch.compile.config.use_fake_tensor = False
         if args.verbose:
             torchdynamo.config.verbose = True
-        def print_compile(gm, ex):
-            print("-----------------")
-            print(str(gm.graph))
-            print("-----------------")
-            return gm
-        dynamo_ctx = torchdynamo.optimize(print_compile)
+        # def print_compile(gm, ex):
+        #     print("-----------------")
+        #     print(str(gm.graph))
+        #     print("-----------------")
+        #     return gm
+        dynamo_ctx = torchdynamo.optimize(args.dynamo)
         model = dynamo_ctx(model)
 
     # warmup
