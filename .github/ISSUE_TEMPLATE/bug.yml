@@ -35,7 +35,8 @@ body:
         Learn more here https://github.com/pytorch/torchdynamo/blob/main/documentation/TROUBLESHOOTING.md
       placeholder: |
         >> torch._dynamo.config.repro_after="aot" python your_model.py
-        >> torch._dynamo.config.repro_after="dynamo" python your_model.py
+        or
+        env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
 
         import torch
         ... 
