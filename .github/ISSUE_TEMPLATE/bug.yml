@@ -1,5 +1,7 @@
 name: 🐛 Bug Report
 description: Create a report to help us reproduce and fix the bug
+title: "[Bug]: "
+labels: ["bug"]
 
 body:
   - type: markdown
@@ -44,5 +46,22 @@ body:
         # torch version: 1.13.....
 
         class Repro(torch.nn.Module)
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: version
+    attributes:
+      label: Version
+      description: | 
+        Which component is not working for you?
+        Try the below in order
+        If dynamo.optimize("eager") fails then select dynamo 
+        If dynamo.optimize("aot_eager") fails then select aot_eager
+        If dynamo.optimize("inductor") fails then select inductor
+      options:
+        - Dynamo
+        - AOT 
+        - Inductor
     validations:
       required: true
