@@ -180,6 +180,17 @@ inline static const char *name(PyFrameObject *frame) {
 }
 #endif
 
+inline static CacheEntry *get_extra(PyCodeObject *code) {
+  CacheEntry *extra = NULL;
+  _PyCode_GetExtra((PyObject *)code, extra_index, (void *)&extra);
+  return extra;
+}
+
+inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
+  // TODO(jansel): would it be faster to bypass this?
+  _PyCode_SetExtra((PyObject *)code, extra_index, extra);
+}
+
 static void call_guard_fail_hook(PyObject *hook, CacheEntry *e,
                                  PyObject *f_locals) {
   // call debugging logic when a guard fails
@@ -192,10 +203,11 @@ static void call_guard_fail_hook(PyObject *hook, CacheEntry *e,
   Py_DECREF(args);
 }
 
-static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
+static PyCodeObject *lookup(CacheEntry *e, PyFrameObject *frame) {
   if (e == NULL) {
     return NULL;
   }
+  PyObject *f_locals = frame->f_locals;
   PyObject *dotzero = PyDict_GetItem(f_locals, dotzerokey);
   PyObject *valid = NULL;
   if (unlikely(dotzero != NULL)) {
@@ -216,12 +228,36 @@ static PyCodeObject *lookup(CacheEntry *e, PyObject *f_locals) {
   }
   Py_DECREF(valid);
   if (valid == Py_True) {
-    return e->code;
+    CacheEntry *extra = get_extra(frame->f_code), *next = e->next, *head = extra;
+    if (extra != e) {
+      if (next) {
+        PyObject *check_fn_tmp = e->check_fn;
+        PyCodeObject *code_tmp = e->code;
+        memcpy(e, next, sizeof(CacheEntry));
+        next->check_fn = check_fn_tmp;
+        next->code = code_tmp;
+        next->next = extra;
+        head = next;
+      } else {
+        CacheEntry *cur = extra;
+        while (cur) {
+          if (cur->next == e) {
+            cur->next = NULL;
+            e->next = extra;
+            head = e;
+            break;
+          }
+          cur = cur->next;
+        }
+      }
+      set_extra(frame->f_code, head);
+    }
+    return head->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
     call_guard_fail_hook(guard_fail_hook, e, f_locals);
   }
-  return lookup(e->next, f_locals);
+  return lookup(e->next, frame);
 }
 
 static long cache_size(CacheEntry *e) {
@@ -229,17 +265,6 @@ static long cache_size(CacheEntry *e) {
     return 0;
   }
   return 1 + cache_size(e->next);
-}
-
-inline static CacheEntry *get_extra(PyCodeObject *code) {
-  CacheEntry *extra = NULL;
-  _PyCode_GetExtra((PyObject *)code, extra_index, (void *)&extra);
-  return extra;
-}
-
-inline static void set_extra(PyCodeObject *code, CacheEntry *extra) {
-  // TODO(jansel): would it be faster to bypass this?
-  _PyCode_SetExtra((PyObject *)code, extra_index, extra);
 }
 
 inline static PyObject *eval_custom_code(PyThreadState *tstate,
@@ -322,7 +347,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
-    PyCodeObject *cached_code = lookup(extra, frame->f_locals);
+    PyCodeObject *cached_code = lookup(extra, frame);
     if (cached_code != NULL) {
       // used cached version
       DEBUG_TRACE("cache hit %s", name(frame));
@@ -341,7 +366,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate, PyFrameObject *frame,
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyCodeObject *cached_code = lookup(extra, frame->f_locals);
+  PyCodeObject *cached_code = lookup(extra, frame);
   if (cached_code != NULL) {
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
