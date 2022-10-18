@@ -29,6 +29,33 @@ body:
     validations:
       required: true
   
+  - type: checkboxes
+    id: dynamo
+    attributes:
+      label: Did Dynamo succeed?
+      options:
+        - label: Does dynamo.optimize("eager") succeed?
+          required: false
+
+  
+  - type: checkboxes
+    id: aot
+    attributes:
+      label: Did AOT succeed?
+      options:
+        - label: Did dynamo.optimize("aot_eager") succeed?
+          required: false
+  
+
+  - type: checkboxes
+    id: inductor
+    attributes:
+      label: Did Inductor succeed?
+      options:
+        - label: Does dynamo.optimize("inductor") succeed?
+          required: false
+
+
   - type: textarea
     attributes:
       label: Minified repro
@@ -49,47 +76,3 @@ body:
     validations:
       required: true
   
-  - type: dropdown
-    id: version
-    attributes:
-      label: Which component is failing for you?
-      description: | 
-        Try the below in order
-        If dynamo.optimize("eager") fails then select dynamo 
-        If dynamo.optimize("aot_eager") fails then select aot_eager
-        If dynamo.optimize("inductor") fails then select inductor
-      options:
-        - Dynamo
-        - AOT 
-        - Inductor
-    validations:
-      required: true
-
-  - type: checkboxes
-    id: dynamo
-    attributes:
-      label: Did Dynamo succeed?
-      description: Does dynamo.optimize("eager") succeed?
-      options:
-        - label: Yes?
-          required: true
-
-  
-  - type: checkboxes
-    id: aot
-    attributes:
-      label: Did AOT succeed?
-      description: Does dynamo.optimize("aot_eager") succeed?
-      options:
-        - label: Yes?
-          required: true
-  
-
-  - type: checkboxes
-    id: inductor
-    attributes:
-      label: Did Inductor succeed?
-      description: Does dynamo.optimize("inductor") succeed?
-      options:
-        - label: Yes?
-          required: true
