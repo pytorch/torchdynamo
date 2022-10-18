@@ -14,6 +14,8 @@ import numpy as np
 import tabulate
 import torch
 import torch.distributed as dist
+from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.wrap import always_wrap_policy, size_based_auto_wrap_policy
 import torch.fx as fx
 import torch.multiprocessing as mp
 import torch.nn as nn
@@ -29,7 +31,7 @@ from traitlets.config.loader import ArgumentError
 import torchdynamo
 from torchdynamo.optimizations import BACKENDS
 from torchdynamo.optimizations.distributed import DDPOptimizer
-
+import transformers
 
 def setup_torchbench(args):
     if not os.path.exists(args.torchbench_dir):
@@ -82,6 +84,14 @@ class ToyModel(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+unpack_logits_types = (
+    transformers.modeling_outputs.MaskedLMOutput,
+    transformers.modeling_outputs.Seq2SeqLMOutput,
+)
+def unpack_outputs(outputs):
+    if isinstance(outputs, unpack_logits_types):
+        return outputs.logits
+    return outputs
 
 def run_model(args, model, inputs, rank, world_size, key, result_q):
     setup(rank, world_size)
@@ -100,7 +110,9 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
     inputs = pytree.tree_map(move_tensor, inputs)
 
     if args.fsdp:
-        model = FSDP(model)
+        # model = FSDP(model, auto_wrap_policy=always_wrap_policy)
+        model = FSDP(model,  auto_wrap_policy=size_based_auto_wrap_policy)
+        print(model)
     elif args.ddp:
         model = DDP(model)
 
@@ -110,12 +122,18 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
             functorch.compile.config.use_fake_tensor = False
         if args.verbose:
             torchdynamo.config.verbose = True
-        dynamo_ctx = torchdynamo.optimize(args.dynamo)
+        def print_compile(gm, ex):
+            print("-----------------")
+            print(str(gm.graph))
+            print("-----------------")
+            return gm
+        dynamo_ctx = torchdynamo.optimize(print_compile)
         model = dynamo_ctx(model)
 
     # warmup
     for i in range(3):
         outputs = model(*inputs)
+        outputs = unpack_outputs(outputs)
         outputs.sum().backward()
 
     # timing
@@ -123,6 +141,7 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
     for i in range(args.repeat):
         t0 = time.time()
         outputs = model(*inputs)
+        outputs = unpack_outputs(outputs)
         outputs.sum().backward()
         t1 = time.time()
         times.append(t1 - t0)
@@ -135,6 +154,7 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
             for i in range(3):
                 with record_function("Forward"):
                     outputs = model(*inputs)
+                    outputs = unpack_outputs(outputs)
                 with record_function("Backward"):
                     outputs.sum().backward()
         if rank == 0:
@@ -175,7 +195,9 @@ def print_ddp_buckets(args, model, inputs):
     ddp_model = DDP(copy.deepcopy(model))
     for _ in range(3):
         # warmup
-        ddp_model(*inputs).sum().backward()
+        outputs = ddp_model(*inputs)
+        outputs = unpack_outputs(outputs)
+        outputs.sum().backward()
     buckets = ddp_model.reducer._get_zeros_like_grad_buckets()
     assert all([b.buffer().dim() == 1 for b in buckets])
     ddp_buckets = [int(b.buffer().storage().nbytes()) for b in buckets]
@@ -194,7 +216,9 @@ def print_ddp_buckets(args, model, inputs):
     dynamo_model = dynamo_ctx(DDP(copy.deepcopy(model)))
     for _ in range(1):
         # warmup
-        dynamo_model(*inputs).sum().backward()
+        outputs = ddp_model(*inputs)
+        outputs = unpack_outputs(outputs)
+        outputs.sum().backward()
     opt_buckets = list(reversed(ddp_opt.bucket_actual_sizes))
     # opt_names = "\n".join(map(str, ddp_opt.bucket_param_names))
     opt_names = ""  # todo
