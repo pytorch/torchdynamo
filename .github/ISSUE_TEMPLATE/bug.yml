@@ -34,7 +34,7 @@ body:
         Please run the minifier on your example and paste the minified code below 
         Learn more here https://github.com/pytorch/torchdynamo/blob/main/documentation/TROUBLESHOOTING.md
       placeholder: |
-        >> torch._dynamo.config.repro_after="aot" python your_model.py
+        env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
         or
         env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
 
