@@ -9,6 +9,7 @@ body:
       value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/torchdynamo/issues)
+        The below template should close the vast majority issues you're seeing but if it doesn't please check out our advanced troubleshoothing guide https://github.com/pytorch/torchdynamo/blob/main/documentation/TROUBLESHOOTING.md
   - type: textarea
     attributes:
       label: 🐛 Describe the bug
