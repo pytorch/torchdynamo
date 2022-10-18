@@ -52,9 +52,8 @@ body:
   - type: dropdown
     id: version
     attributes:
-      label: Version
+      label: Which component is failing for you?
       description: | 
-        Which component is not working for you?
         Try the below in order
         If dynamo.optimize("eager") fails then select dynamo 
         If dynamo.optimize("aot_eager") fails then select aot_eager
