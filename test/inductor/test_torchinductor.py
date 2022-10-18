@@ -4088,7 +4088,7 @@ if HAS_CUDA:
             from torchinductor.graph import GraphLowering
             from torchinductor.virtualized import V
 
-            cxt = TritonTests.SaveGraph()
+            cxt = TritonCodeGenTests.SaveGraph()
             torchdynamo.optimize(cxt.fx_extractor)(fn)(*args)
             fx_graph = cxt.model
             graph = GraphLowering(fx_graph)
