@@ -32,6 +32,7 @@ body:
       label: Minified repro
       description: |
         Please run the minifier on your example and paste the minified code below 
+        Learn more here https://github.com/pytorch/torchdynamo/blob/main/documentation/TROUBLESHOOTING.md
       placeholder: |
         >> torch._dynamo.config.repro_after="aot" python your_model.py
         >> torch._dynamo.config.repro_after="dynamo" python your_model.py
