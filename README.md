@@ -52,7 +52,27 @@ performance of different training backends.  You can read more in the
 You are welcome to try it out and contribute, but should expect to find
 bugs and rough edges.
 
-## Requirements and Setup
+## Requirements and Setup (post PyTorch move)
+
+Python 3.8 is recommended.
+Python 3.7 through 3.10 are supported and tested.
+Make sure to have a development version of python installed locally as well.
+
+TorchDynamo is included in the nightly binaries of PyTorch, for reference, https://pytorch.org/get-started/locally/
+
+### Install GPU/CUDA version requirements
+
+To use GPU back ends (and in particular Triton), please make sure that the cuda
+that you have installed locally matches the PyTorch version you are running. For
+the command below, you will need CUDA 11.7.
+
+`pip3 install --pre torchtriton --extra-index-url https://download.pytorch.org/whl/nightly/cu117` 
+
+### Install from local source
+
+Build PyTorch from source: https://github.com/pytorch/pytorch#from-source, which has TorchDynamo included.
+
+## Requirements and Setup (old)
 
 Python 3.8 is recommended.
 Python 3.7 through 3.10 are supported and tested.
@@ -69,11 +89,18 @@ To use GPU back ends (and in particular Triton), please make sure that the cuda
 that you have installed locally matches the PyTorch version you are running. For
 the command below, you will need CUDA 11.7.
 
-`pip3 install --pre pytorch_triton --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
+```shell
+pip install --pre torch==1.14.0.dev20221014+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"
+pip install -U "git+https://github.com/pytorch/torchdynamo"
+```
 
 #### CPU version
 
-`pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu`
+```shell
+pip install --pre torch==1.13.0.dev20221006 --extra-index-url https://download.pytorch.org/whl/nightly/cpu
+pip install -U "git+https://github.com/pytorch/torchdynamo"
+```
 
 ### Install from local source
 
