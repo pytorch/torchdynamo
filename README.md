@@ -52,7 +52,7 @@ performance of different training backends.  You can read more in the
 You are welcome to try it out and contribute, but should expect to find
 bugs and rough edges.
 
-## Requirements and Setup (post PyTorch move)
+## Requirements and Setup
 
 Python 3.8 is recommended.
 Python 3.7 through 3.10 are supported and tested.
