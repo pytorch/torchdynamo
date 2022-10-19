@@ -69,14 +69,11 @@ To use GPU back ends (and in particular Triton), please make sure that the cuda
 that you have installed locally matches the PyTorch version you are running. For
 the command below, you will need CUDA 11.7.
 
-```shell
-pip3 install --pre pytorch_triton --extra-index-url https://download.pytorch.org/whl/nightly/cu117
-```
+`pip3 install --pre pytorch_triton --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
 
 #### CPU version
 
-```
-pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu```
+`pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu`
 
 ### Install from local source
 
