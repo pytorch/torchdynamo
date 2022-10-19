@@ -58,61 +58,25 @@ Python 3.8 is recommended.
 Python 3.7 through 3.10 are supported and tested.
 Make sure to have a development version of python installed locally as well.
 
-### Install nightly binaries
+TorchDynamo is included in the nightly binaries of PyTorch, for reference, https://pytorch.org/get-started/locally/
 
-TorchDynamo is evolving very quickly and so we only provide binaries based
-on a nightly version of PyTorch.
-
-#### GPU/CUDA version
+### Install GPU/CUDA version requirements
 
 To use GPU back ends (and in particular Triton), please make sure that the cuda
 that you have installed locally matches the PyTorch version you are running. For
 the command below, you will need CUDA 11.7.
 
-```shell
-pip install --pre torch==1.14.0.dev20221014+cu117 --extra-index-url https://download.pytorch.org/whl/nightly/cu117
-pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"
-pip install -U "git+https://github.com/pytorch/torchdynamo"
-```
+`pip3 install --pre torchtriton --extra-index-url https://download.pytorch.org/whl/nightly/cu117` 
 
-#### CPU version
+### CPU requirements
 
-```shell
-pip install --pre torch==1.13.0.dev20221006 --extra-index-url https://download.pytorch.org/whl/nightly/cpu
-pip install -U "git+https://github.com/pytorch/torchdynamo"
-```
+There are no additional requirements for CPU TorchDynamo. CPU TorchDynamo is included in PyTorch, which, for reference, can be installed with
+
+`pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu`
 
 ### Install from local source
 
-#### GPU/CUDA version
-
-You can also install PyTorch, Triton and or Dynamo from source at the same
-commits as the ones listed above. The Makefile target `make setup_nightly_gpu`
-contain the commands used by our CI to setup dependencies.
-Note that only CUDA 11.6+ is officially supported.
-
-#### CPU version
-Use the Makefile target `setup_nightly` to build and install TorchDynamo with CPU support only.
-
-<br />
-
-Other development requirements can be installed with:
-```shell
-pip install -r requirements.txt
-```
-
-Install TorchDynamo with:
-```shell
-python setup.py develop
-```
-
-### Verify installation
-
-Run
-```shell
-python tools/verify_install.py
-```
-to verify that TorchDynamo is correctly installed (only checks for minimum requirements -- does not check for development requirements).
+Build PyTorch from source: https://github.com/pytorch/pytorch#from-source, which has TorchDynamo included.
 
 ## Usage Example
 
@@ -387,68 +351,6 @@ Processing original code:
   File "example.py", line 7, in toy_example
     if b.sum() < 0:
 ```
-
-## Developer Setup
-
-As background reading, I'd suggest looking at the
-[PyTorch](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md),
-[functorch](https://github.com/pytorch/functorch), and
-[TorchBench](https://github.com/pytorch/benchmark#installation)
-setup docs.  Since these projects work together in different ways.
-
-The following instructions use [Miniconda](https://docs.conda.io/en/latest/miniconda.html).
-
-```
-conda create --name=torchdynamo python=3.8
-conda activate torchdynamo
-
-# install pytorch nightlies
-# for CUDA version, replace `cpuonly` with `pytorch-cuda=11.6`
-conda install pytorch torchvision torchaudio torchtext cpuonly -c pytorch-nightly
-pip install -v "git+https://github.com/pytorch/pytorch.git@`python -c "import torch.version; print(torch.version.git_version)"`#subdirectory=functorch"
-
-git clone https://github.com/pytorch/torchdynamo
-cd torchdynamo
-pip install -r requirements.txt
-
-# check if everything works
-make test
-```
-
-If see errors about missing symbols from `guards.so`, that may mean your
-C++ compiler is incompatible CUDA and/or with the one used to compile
-PyTorch.  You may need to change your compiler version or build PyTorch
-from source.
-
-## Tests
-
-Run tests with
-```shell
-pytest test
-```
-
-To debug a specific test (with more debug prints) do:
-```shell
-pytest -vsk <test name>
-```
-
-Test on torchbenchmark models with:
-```shell
-python benchmarks/torchbench.py
-```
-
-## Linting and Automatic Code Formatting
-
-[![Lint](https://github.com/pytorch/torchdynamo/actions/workflows/lint.yml/badge.svg)](https://github.com/pytorch/torchdynamo/actions/workflows/lint.yml)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
-
-Install format/linter deps with `pip install -r requirements.txt`, then:
-```shell
-make format  # reformat all files (in-place)
-make lint    # run the linters
-```
-
 ## License
 
 TorchDynamo has a BSD-style license, as found in the LICENSE file.
