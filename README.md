@@ -68,11 +68,17 @@ the command below, you will need CUDA 11.7.
 
 `pip3 install --pre torchtriton --extra-index-url https://download.pytorch.org/whl/nightly/cu117` 
 
+### CPU requirements
+
+There are no additional requirements for CPU TorchDynamo. CPU TorchDynamo is included in PyTorch, which, for reference, can be installed with
+
+`pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu`
+
 ### Install from local source
 
 Build PyTorch from source: https://github.com/pytorch/pytorch#from-source, which has TorchDynamo included.
 
-## Requirements and Setup (old)
+## Requirements and Setup (old - DEPRECATED)
 
 Python 3.8 is recommended.
 Python 3.7 through 3.10 are supported and tested.
