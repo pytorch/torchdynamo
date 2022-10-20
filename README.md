@@ -63,14 +63,17 @@ TorchDynamo is included in the nightly binaries of PyTorch, for reference, https
 ### Install GPU/CUDA version requirements
 
 To use GPU back ends (and in particular Triton), please make sure that the cuda
-that you have installed locally matches the PyTorch version you are running. For
-the command below, you will need CUDA 11.7.
+that you have installed locally matches the PyTorch version you are running.
 
-`pip3 install --pre torchtriton --extra-index-url https://download.pytorch.org/whl/nightly/cu117` 
+`pip3 install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`
+
+For reference, the nightly version of GPU PyTorch, which includes GPU TorchDynamo, can be installed with (the command below requires CUDA 11.7)
+
+`pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
 
 ### CPU requirements
 
-There are no additional requirements for CPU TorchDynamo. CPU TorchDynamo is included in PyTorch, which, for reference, can be installed with
+There are no additional requirements for CPU TorchDynamo. CPU TorchDynamo is included in the nightly versions of PyTorch, which, for reference, can be installed with
 
 `pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu`
 
