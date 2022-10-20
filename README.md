@@ -78,6 +78,15 @@ There are no additional requirements for CPU TorchDynamo. CPU TorchDynamo is inc
 
 Build PyTorch from source: https://github.com/pytorch/pytorch#from-source, which has TorchDynamo included.
 
+### Verify Installation
+
+You can run the following commands (from the PyTorch repo root directory) that run minimal examples to check that TorchDynamo is installed correctly:
+
+```shell
+cd tools/dynamo
+python verify_dynamo.py
+```
+
 ## Usage Example
 
 Here is a basic example of how to use TorchDynamo. One can decorate a function
