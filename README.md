@@ -21,6 +21,8 @@ This repository still contains:
 
 > TorchDynamo makes it easy to experiment with different compiler backends to make PyTorch code faster with a single line decorator `torch._dynamo.optimize()`
 
+TorchDynamo supports arbitrary PyTorch code, does not require you to change your code, supports control flow, mutation and dynamic shapes.
+
 You can follow our nightly benchmarks [here](https://github.com/pytorch/torchdynamo/issues/681)
 
 
