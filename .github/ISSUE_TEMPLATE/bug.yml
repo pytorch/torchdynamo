@@ -8,7 +8,7 @@ body:
       value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/torchdynamo/issues)
-        You may also have your questions resolved by checking out our [documentation](https://github.com/pytorch/torchdynamo/blob/main/documentation)
+        It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://github.com/pytorch/torchdynamo/blob/main/documentation)
   - type: textarea
     attributes:
       label: 🐛 Describe the bug
