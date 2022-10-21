@@ -100,7 +100,7 @@ python verify_dynamo.py
 ## Getting started
 
 Here is a basic example of how to use TorchDynamo. You can decorate a function
-or a method using `torch._dynamo.optimize()` and pass in the name of a compiler and your code will run faster.
+or a method using `torch._dynamo.optimize()` and pass in the name of a compiler e.g: inductor and your code will run faster.
 
 ```py
 @dynamo.optimize("inductor")
