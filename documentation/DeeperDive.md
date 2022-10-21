@@ -1,4 +1,39 @@
-## TorchDynamo Deeper Dive
+# TorchDynamo Deeper Dive
+
+## What is a guard?
+
+TorchDynamo operates just-in-time and specializes graphs based on dynamic
+properties.  For example, the first graph above has the following guards:
+```
+GUARDS:
+ - local 'a' TENSOR_MATCH
+ - local 'b' TENSOR_MATCH
+ - global 'torch' FUNCTION_MATCH
+```
+
+If any of those guards fail, the graph will be recaptured and recompiled.
+The interesting guard type there is `TENSOR_MATCH`, which checks the
+following torch.Tensor properties:
+- Python class of the tensor (tensor subclassing, etc)
+- dtype
+- device
+- requires_grad
+- dispatch_key (with thread-local includes/excludes applied)
+- ndim
+- sizes* (optional)
+- strides* (optional)
+
+*For sizes/strides you can disable this specialization by setting:
+```py
+torch._dynamo.config.dynamic_shapes = True
+```
+
+The full specialization mode allows the backend compiler to assume
+an entirely static graph.  Unfortunately, most backends require this.
+Operators which return dynamic shapes will trigger a graph break when
+not in dynamic shape mode.
+
+## What is dynamo doing?
 
 If you want to understand better what TorchDynamo is doing, you can set:
 ```py
