@@ -5,6 +5,15 @@ Below is the TorchDynamo compiler stack.
 
 At a high level, the TorchDynamo stack consists of a graph capture from Python code using dynamo and a backend compiler. In this example the backend compiler consists of backward graph tracing using AOTAutograd and graph lowering using TorchInductor. There are of course many more compilers available here https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backend but for this document we will focus on inductor as a motivating example
 
+Torchdynamo supports training, using AotAutograd to capture backwards:
+1. the `.forward()` graph and `optimizer.step()` is captured by torchdynamo's python evalframe frontend
+2. for each segment of `.forward()` that torchdynamo captures, it uses AotAutograd to generate a backward graph segment
+3. each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backward
+4. the forward, backward pairs are wrapped in autograd.function modules
+5. usercode calling` .backward()` still triggers eager's autograd engine, which runs each 'compiled backward' graph as if it were one op, also running any non-compiled eager ops' .backward() functions
+
+Current limitations:
+* DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
 
 ## Why is my code crashing?
 
@@ -68,6 +77,17 @@ print(prof.report())
 ```
 
 Many of the reasons for graph breaks and excessive recompilation will be fixed with upcoming support for [tracing dynamic tensor shapes](https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing), more careful choices for guards and better tuned heuristics.
+
+### Why are you recompiling in production?
+
+In some cases, you may not want unexpected compiles after a program
+has warmed up.  For example, if you are serving production traffic in a
+latency critical application.  For this, TorchDynamo provides an alternate
+mode where prior compiled graphs are used, but no new ones are generated:
+```py
+frozen_toy_example = dynamo.run(toy_example)
+frozen_toy_example(torch.randn(10), torch.randn(10))
+```
 
 ## Why am I not seeing speedups?
 
