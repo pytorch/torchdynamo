@@ -630,28 +630,3 @@ workflows:
   gpu:
     jobs:
       - unit_test
-      - coverage
-      - aot_eager_hf_inference
-      - aot_eager_hf_training
-      - aot_eager_timm_inference
-      - aot_eager_timm_training
-      - aot_eager_torchbench_training
-      - aot_eager_torchbench_inference
-      - inductor_hf_inference_0
-      - inductor_hf_inference_1
-      - inductor_hf_training_0
-      - inductor_hf_training_1
-      - inductor_hf_training_2
-      - inductor_timm_inference_0
-      - inductor_timm_inference_1
-      - inductor_timm_inference_2
-      - inductor_timm_inference_3
-      - inductor_timm_training_0
-      - inductor_timm_training_1
-      - inductor_timm_training_2
-      - inductor_timm_training_3
-      - inductor_timm_training_4
-      - inductor_timm_training_5
-      - inductor_torchbench_inference
-      - inductor_torchbench_training_0
-      - inductor_torchbench_training_1
