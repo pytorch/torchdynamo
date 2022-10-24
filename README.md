@@ -136,6 +136,12 @@ Some of the most commonly used backends are
 * `dynamo.optimize("onnxrt")` -  Uses ONNXRT for inference on CPU/GPU.  [Read more](https://onnxruntime.ai/)
 * `dynamo.optimize("ipex")` -  Uses IPEX for inference on CPU.  [Read more](https://github.com/intel/intel-extension-for-pytorch)
 
+## Why yet another way of optimizing PyTorch code?
+* `torch.jit.trace()` is silently wrong if it cannot trace e.g: during control flow
+* `torch.jit.script()` requires modifications to user or library code by adding type annotations and removing non PyTorch code
+* `torch.fx.symbolic_trace()` either traces correctly or gives a hard error but it's limited to traceable code so still can't handle control flow
+* `torch._dynamo` works out of the box and produces partial graphs. It still has the option of producing a single graph with `nopython=True` which are needed for [some situations](./documentation/FAQ.md#do-i-still-need-to-export-whole-graphs) but allows a smoother transition where partial graphs can be optimized without code modification
+
 ## Next steps
 * [Troubleshooting](./documentation/TROUBLESHOOTING.md)
 * [FAQ](./documentation/FAQ.md)
