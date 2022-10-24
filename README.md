@@ -9,12 +9,9 @@ For instructions to port PRs over, or more details on the move see
 [issue 1588](https://github.com/pytorch/torchdynamo/issues/1588).
 
 This repository still contains:
-- A snapshot of the code before the move 
-  - This version of the code will not be updated.
-  - We will replace this with an alias to the new location at a future date.
+- An alias to the new location
 - Issues: we will continue using this project for issue tracking
 - Documentation that needs to be ported over/updated
-- Some CI scripts that need to be ported over/updated
 
 
 # TorchDynamo
