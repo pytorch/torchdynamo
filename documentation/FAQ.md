@@ -12,8 +12,23 @@ Torchdynamo supports training, using AotAutograd to capture backwards:
 4. the forward, backward pairs are wrapped in autograd.function modules
 5. usercode calling` .backward()` still triggers eager's autograd engine, which runs each 'compiled backward' graph as if it were one op, also running any non-compiled eager ops' .backward() functions
 
-Current limitations:
-* DDP and FSDP, which rely on autograd 'hooks' firing between backward ops to schedule communications ops, may be pessimized by having all communication ops scheduled _after_ whole compiled regions of backwards ops (WIP to fix this)
+## Do you support Distributed code?
+
+DDP has been tested and works, support for other distributed training libraries is under discussion.
+
+The main reason why Distributed code is challenging with dynamo is because AOTAutograd unrolls both the forward and backward pass and provides 2 graphs for backends to optimize. This is a problem for distributed code because we'd like to ideally overlap the forward and backward pass and a naive application of dynamo would schedule autograd hooks that need to happen between the forward and backward pass after the backward pass.
+
+The basic strategy for deal with distributed code is outlined in https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/distributed.py where the main idea will be to graph break on [DDP bucket boundaries](https://pytorch.org/docs/stable/notes/ddp.html#internal-design).
+
+When each node in DDP needs to synchronize its weights with the other nodes it organizes its gradients and parameters into buckets which reduces communication times and allows a node to broadcast a fraction of its gradients to other waiting nodes. 
+
+Graph breaks in distributed code means you can expect dynamo and its backends to optimize the compute overhead of a distributed program but not its communication overhead. A bad graph break strategy will actually pessimize code (make it slower) so we'll need to tune this strategy to various distributed training libraries
+
+## Do I still need to export whole graphs?
+For the vast majority of models you probably don't and you can use `torch._dynamo()` optimize as is but there are a few situations where full graphs are necessary and you can can ensure a full graph by simply running `torch.dynamo(..., nopython=True)`
+* Large scale training runs, think $250K+ that require pipeline parallelism and other advanced sharding strategies
+* Inference optimizers like https://github.com/pytorch/TensorRT or https://github.com/facebookincubator/AITemplate that rely on fusing much more aggressively than training optimizers
+* Mobile training or inference
 
 ## Why is my code crashing?
 
@@ -88,6 +103,21 @@ mode where prior compiled graphs are used, but no new ones are generated:
 frozen_toy_example = dynamo.run(toy_example)
 frozen_toy_example(torch.randn(10), torch.randn(10))
 ```
+
+## How are you speeding up my code?
+
+There are 3 major ways that PyTorch code can be accelerated
+1. Kernel fusion
+    1. Vertical fusion: fuses sequential operations to avoid excessive read/writes. For example, fuse 2 subsequent cosines means you can can do 1 read 1 write instead 2 reads 2 writes
+    2. Horizontal fusion: the simplest example being batching where a single matrix is multiplied with a batch of examples but the more general scenario is a grouped GEMM where a group of matrix multiplications are scheduled together
+2. Out of order execution: A general optimization for compilers, by looking ahead at the exact data dependencies within a graph we can decide on the most opportune time to execute a node and which buffers can be reused
+3. Automatic work placement: Similar of the out of order execution point, but by matching nodes of a graph to resources like physical hardware or memory we can design an appropriate schedule
+
+The above are general principles for accelerating PyTorch code but different backends will each make different tradeoffs on what to optimize. For example Inductor first takes care of fusing whatever it can and only then generates [Triton](https://openai.com/blog/triton/) kernels. It can also 
+
+Triton in addition offers speedups because of automatic memory coalescing, memory management and scheduling within each Streaming Multiprocessor and has been designed to handle tiled computations.
+
+However, regardless of the backend you use it's best to use a benchmark and see approach so try out the PyTorch profiler, visually inspect the generated kernels and try to see what's going on for yourself.
 
 ## Why am I not seeing speedups?
 
