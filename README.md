@@ -64,16 +64,20 @@ Make sure to have a development version of python installed locally as well.
 
 TorchDynamo is included in the nightly binaries of PyTorch, for reference, https://pytorch.org/get-started/locally/
 
+You may need to install numpy:
+
+`pip install numpy`
+
 ### Install GPU/CUDA version requirements
 
 To use GPU back ends (and in particular Triton), please make sure that the cuda
 that you have installed locally matches the PyTorch version you are running.
 
-`pip3 install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`
+The following command installs GPU PyTorch+TorchDynamo along with GPU TorchDynamo dependencies (for CUDA 11.7):
 
-For reference, the nightly version of GPU PyTorch, which includes GPU TorchDynamo, can be installed with (the command below requires CUDA 11.7)
+`pip3 install --pre torch[dynamo] --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
 
-`pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
+Note that the above command installs PyTorch, so either ensure that your environment does not have PyTorch installed, or include the `--upgrade` flag in the above command.
 
 ### CPU requirements
 
@@ -87,12 +91,14 @@ Build PyTorch from source: https://github.com/pytorch/pytorch#from-source, which
 
 ### Verify Installation
 
-You can run the following commands (from the PyTorch repo root directory) that run minimal examples to check that TorchDynamo is installed correctly:
+If you built PyTorch from source, then you can run the following commands (from the PyTorch repo root directory) that run minimal examples to check that TorchDynamo is installed correctly:
 
 ```shell
 cd tools/dynamo
 python verify_dynamo.py
 ```
+
+If you do not have the PyTorch source locally, you can alternatively copy the script (`tools/dynamo/verify_dynamo.py`) from the PyTorch repo and run it locally.
 
 ## Getting started
 
