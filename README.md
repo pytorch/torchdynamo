@@ -64,10 +64,6 @@ Make sure to have a development version of python installed locally as well.
 
 TorchDynamo is included in the nightly binaries of PyTorch, for reference, https://pytorch.org/get-started/locally/
 
-You may need to install numpy:
-
-`pip install numpy`
-
 ### Install GPU/CUDA version requirements
 
 To use GPU back ends (and in particular Triton), please make sure that the cuda
@@ -75,9 +71,8 @@ that you have installed locally matches the PyTorch version you are running.
 
 The following command installs GPU PyTorch+TorchDynamo along with GPU TorchDynamo dependencies (for CUDA 11.7):
 
-`pip3 install --pre torch[dynamo] --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
+`pip3 install numpy --pre torch[dynamo] --force-reinstall --extra-index-url https://download.pytorch.org/whl/nightly/cu117`
 
-Note that the above command installs PyTorch, so either ensure that your environment does not have PyTorch installed, or include the `--upgrade` flag in the above command.
 
 ### CPU requirements
 
