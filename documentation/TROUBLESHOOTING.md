@@ -431,7 +431,7 @@ print(prof.report())
 ```
 
 # Accuracy Debugging
-TBD
+Accuracy issues can also be minified if you set the environment variable `TORCHDYNAMO_REPRO_LEVEL=4`, it operates with a similar git bisect model and a full repro might be something like `TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4` the reason we need this is downstream compilers will codegen code whether it's Triton code or the C++ backend, the numerics from those downstream compilers can be different in subtle ways yet have dramatic impact on your training stability. So the accuracy debugger is very useful for us to detect bugs in our codegen or with a backend compiler. 
 
 # File an Issue
 You should feel encouraged to [file a github issue](https://github.com/pytorch/torchdynamo/issues) and expect a timely response.
