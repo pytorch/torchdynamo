@@ -195,7 +195,7 @@ Before we introduce how this works, there's a lot of terminology we first need t
 * SymInt: Either a Python or C++ SymInt which helps represent shapes in a symbolic manner instead of materializing specific concrete values that would trigger recompilations
 
 ## Why am I getting incorrect results?
-Accuracy issues can also be minified if you set the environment variable `TORCHDYNAMO_REPRO_LEVEL=4`, it operates with a similar git bisect model and a full repro might be something like `TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4` the reason we need this is downstream compilers will codegen code whether it's Triton code or the C++ backend, the numerics from those downstream compilers can be different in subtle ways yet have dramatic impact on your training stability. So the accuracy debugger is very useful for us to detect bugs in our codegen or with a backend compiler. 
+Accuracy issues can also be minified if you set the environment variable `TORCHDYNAMO_REPRO_LEVEL=4`, it operates with a similar git bisect model and a full repro might be something like `TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4` the reason we need this is downstream compilers will codegen code whether it's Triton code or the C++ backend, the numerics from those downstream compilers can be different in subtle ways yet have dramatic impact on your training stability. So the accuracy debugger is very useful for us to detect bugs in our codegen or with a backend compiler. 
 
 ## Why am I getting OOMs?
 Dynamo is still an alpha product so there's a few sources of OOMs and if you're seeing an OOM try disabling the following configurations in this order and then open an issue on Github so we can solve the root problem
