@@ -185,8 +185,17 @@ def toy_example(a, b):
    ...
 ```
 
+## Why didn't my code recompile when I changed it?
+
+If you went ahead and enabled dynamic shapes via `env TORCHDYNAMO_DYNAMIC_SHAPES=1 python model.py`
+then your code won't recompile on shape changes. We've added support for dynamic shapes which avoids recompilations in the case when shapes vary by less than a factor of 2. This is especially useful in scenarios like varying image sizes in CV or variable sequence length in NLP. In inference scenarios it's often not possible to know what a batch size will be beforehand because you take what you can get from different client apps.
+
+In general torchdynamo tries very hard not to recompile things unnecessarily so if for example torchdynamo finds 3 graphs and your change only modified one graph then only that graph will recompile. So another tip to avoid potentially slow compilation times is to warmup a model by compiling it once after which subsequent compilations will be much faster. Cold start compile times is still a metric we track visibly.
+
 ## Why am I getting incorrect results?
-TBD: Accuracy minifier
+Accuracy issues can also be minified if you set the environment variable `TORCHDYNAMO_REPRO_LEVEL=4`, it operates with a similar git bisect model and a full repro might be something like `TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4` the reason we need this is downstream compilers will codegen code whether it's Triton code or the C++ backend, the numerics from those downstream compilers can be different in subtle ways yet have dramatic impact on your training stability. So the accuracy debugger is very useful for us to detect bugs in our codegen or with a backend compiler. 
 
 ## Why am I getting OOMs?
-TBD: Memory debugger, fake tensor, reinplacing etc..
+Dynamo is still an alpha product so there's a few sources of OOMs and if you're seeing an OOM try disabling the following configurations in this order and then open an issue on Github so we can solve the root problem
+1. If you're using dynamic shapes try disabling them, we've disabled them by default: `env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py`
+2. CUDA graphs with Triton are enabled by default in inductor but removing them may alleviate some OOM issues: `torch._inductor.config = False` 

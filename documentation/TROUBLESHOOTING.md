@@ -28,6 +28,7 @@ We're also actively developing debug tools, profilers, and improving our errors/
 | Debug logging                       | View detailed steps of compilation (print every instruction traced)                                                          | `torch._dynamo.config.log_level = logging.DEBUG` and `torch._dynamo.config.verbose = True` |
 | Minifier for any backend            | Find smallest subgraph which reproduces errors for any backend                                                               | set environment variable TORCHDYNAMO_REPRO_AFTER="dynamo"                |
 | Minifier for TorchInductor          | If the error is known to occur after AOTAutograd find smallest subgraph wich reproduces errors during TorchInductor lowering | set environment variable TORCHDYNAMO_REPRO_AFTER="aot"                       |
+| Accuracy minifier | Finds the smallest subgraph which reproduces an accuracy issue between an eager model model and optimized model | `TORCHDYNAMO_REPRO_AFTER=<"aot"/"dynamo"> TORCHDYNAMO_REPRO_LEVEL=4` |
 | `torch._dynamo.explain`               | Find graph breaks and display reasoning for them                                                                             | `torch._dynamo.explain(fn, *inputs)`                                           |
 | Record/Replay         | Record and replay frames which to reproduce errors during graph capture                                                      | `torch._dynamo.config.replay_record_enabled = True`                            |
 | TorchDynamo function name filtering | only compile functions with the given name to reduce noise when debugging an issue                                           | set environment variable TORCHDYNAMO_DEBUG_FUNCTION=\<name\>                 |
@@ -431,7 +432,7 @@ print(prof.report())
 ```
 
 # Accuracy Debugging
-TBD
+Accuracy issues can also be minified if you set the environment variable `TORCHDYNAMO_REPRO_LEVEL=4`, it operates with a similar git bisect model and a full repro might be something like `TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4` the reason we need this is downstream compilers will codegen code whether it's Triton code or the C++ backend, the numerics from those downstream compilers can be different in subtle ways yet have dramatic impact on your training stability. So the accuracy debugger is very useful for us to detect bugs in our codegen or with a backend compiler. 
 
 # File an Issue
 You should feel encouraged to [file a github issue](https://github.com/pytorch/torchdynamo/issues) and expect a timely response.
