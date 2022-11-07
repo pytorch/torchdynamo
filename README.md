@@ -84,7 +84,7 @@ There are no additional requirements for CPU TorchDynamo. CPU TorchDynamo is inc
 
 Build PyTorch from source: https://github.com/pytorch/pytorch#from-source, which has TorchDynamo included.
 
-To install GPU TorchDynamo dependencies, run `make triton`.
+To install GPU TorchDynamo dependencies, run `make triton` in the PyTorch repo root directory.
 
 ### Verify Installation
 
