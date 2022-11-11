@@ -52,13 +52,13 @@ And this
 ```python
 import timm
 import torch._dynamo as dynamo
-model = timm.create_model('resnext101_32x8d', pretrained=True, num_classes=NUM_FINETUNE_CLASSES)
+model = timm.create_model('resnext101_32x8d', pretrained=True, num_classes=2)
 dynamo.optimize("inductor")(model)
 ```
 
 And pretty much any Python code which leverages PyTorch in any way.
 
-Dynamo is the highest coverage compiler we know of and you can just use it as is on most models and libraries you're used to using without modifying your code. If it doesn't work then please open an issue and we'll fix it. We also compare the performance of various compiler backends for dynamo in our [nightly benchmarks](https://github.com/pytorch/torchdynamo/issues/681)
+Dynamo is the highest coverage compiler we know of and you can just use it as is on most models and libraries you're used to using without modifying your code. If it doesn't work then please open an issue and we'll fix it. We also compare the performance of various compiler backends for dynamo in our [nightly benchmarks](https://github.com/pytorch/torchdynamo/issues/681).
 
 
 TorchDynamo is a Python-level JIT compiler designed to make unmodified
