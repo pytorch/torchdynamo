@@ -26,7 +26,8 @@ So this works
 import torch
 import torch._dynamo as dynamo
 model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet50', pretrained=True)
-dynamo.optimize("inductor")(model) # Leverage the inductor training compiler
+opt_model = dynamo.optimize("inductor")(model) # Leverage the inductor training compiler
+opt_model(torch.randn()) # TODO: test this
 ```
 
 Also this
@@ -53,7 +54,8 @@ And this
 import timm
 import torch._dynamo as dynamo
 model = timm.create_model('resnext101_32x8d', pretrained=True, num_classes=2)
-dynamo.optimize("inductor")(model)
+opt_model = dynamo.optimize("inductor")(model)
+opt_model(torch.randn()) # TODO: test this
 ```
 
 And pretty much any Python code which leverages PyTorch in any way.
@@ -161,7 +163,7 @@ dynamo_optimize("inductor")(fn)
 
 # And in longer form you can the above as
 inductor_compiler = dynamo.optimize("inductor")
-inductor_compiler(fn)
+inductor_compiler(fn)(torch.randn(1), torch.randn(1))
 ```
 
 If you're using dynamo as a function you can pass in either another function or a `nn.Module` so you can also potentially run
@@ -179,7 +181,8 @@ class ToyModel(nn.Module):
 
 
 mod = ToyModel()
-dynamo.optimize("inductor")(mod)
+opt_mod = dynamo.optimize("inductor")(mod)
+opt_mod(torch.randn(10,10))
 ```
 
 But one of the things that makes dynamo unique is that you don't need to instrument your PyTorch specific code in fact this is fully supported
@@ -190,6 +193,18 @@ def training_loop(model, batch):
     # Super complicated python and pytorch code
 
 ```
+
+Even this
+
+```python
+@dynamo.optimize("inductor")
+def main():
+  # Some python code
+  # Some pytorch code
+  # Some more python code
+
+if __name__ == "__main__":
+  main()
 
 ### Existing Backends
 
