@@ -105,7 +105,7 @@ We also provide all the required dependencies in the PyTorch nightly binaries wh
 
 And for ad hoc experiments just make sure that your container has access to all your GPUs
 
-`docker run --rm --gpus all -it pytorch-nightly /bin/bash`
+`docker run --gpus all -it pytorch-nightly /bin/bash`
 
 
 ## Getting started
