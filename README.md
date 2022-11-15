@@ -97,6 +97,16 @@ python verify_dynamo.py
 
 If you do not have the PyTorch source locally, you can alternatively copy the script (`tools/dynamo/verify_dynamo.py`) from the PyTorch repo and run it locally.
 
+## Docker installation
+
+We also provide all the required dependencies in the PyTorch nightly binaries which you can download with
+
+`docker pull ghcr.io/pytorch/pytorch-nightly`
+
+And for ad hoc experiments just make sure that your container has access to all your GPUs
+
+`docker run --gpus all -it ghcr.io/pytorch/pytorch-nightly:latest /bin/bash`
+
 ## Getting started
 
 Here is a basic example of how to use TorchDynamo. You can decorate a function
