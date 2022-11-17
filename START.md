@@ -55,7 +55,7 @@ opt_model = dynamo.optimize("inductor")(model)
 model(torch.randn(1,3,64,64))
 ```
 
-And that's not the only available backend, you can run in a REPL `dynamo.list_backends()` to see all the available ones. Try out the `aot_cudagraphs` next as inspiration.
+And that's not the only available backend, you can run in a REPL `dynamo.list_backends()` to see all the available ones. Try out the `aot_cudagraphs` or `nvfuser` next as inspiration.
 
 Let's do something a bit more interesting now, our community frequently uses pretrained models from [transformers](https://github.com/huggingface/transformers) or [TIMM](https://github.com/rwightman/pytorch-image-models) and one of our design goals is for dynamo and inductor to work out of the box with any model that people would like to author.
 
