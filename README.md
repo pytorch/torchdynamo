@@ -9,5 +9,4 @@ This repository still contains:
 - An alias to the new location
 - Issues: we will continue using this project for issue tracking
 
-For Documentation: https://pytorch.org/docs/master/dynamo.html
-For Tutorials and Advanced content: https://pytorch.org/tutorials/dynamo/home.html 
+For Documentation: https://pytorch.org/docs/master
