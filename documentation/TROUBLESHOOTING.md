@@ -358,6 +358,8 @@ Torchdynamo will attempt to compile all of the torch/tensor operations within so
 Some graph break reasons are insurmountable to TorchDynamo, and can't be easily fixed.
 - calling into a C extension other than torch is invisible to torchdynamo, and could do arbitrary things without TorchDynamo being able to introduce necessary [guards](./GuardsOverviewPt1.md) to ensure that the compiled program would be safe to reuse. Graph breaks can hinder performance if the resulting fragments are small. To maximize performance, it's important to have as few graph breaks as possible.
 
+Avoiding graph breaks can also help avoid bugs in TorchDynamo itself; the machinery for making a graph break and restoring all of the relevant Python state is considerably more intricate than just compiling several operators together--so if you have a program that has a lot of graph breaks, it's more likely to trigger bugs. If you can reduce the number of graph breaks, that can also help make problems go away! (But please also file bug reports for graph break related issues.)
+
 ### Identifying the cause of a graph break
 
 To identify all graph breaks in a program and the associated reasons for the breaks, `torch._dynamo.explain` can be used. This tool runs TorchDynamo on the supplied function and aggregates the graph breaks that are encountered. Here is an example usage:
