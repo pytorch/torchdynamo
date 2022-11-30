@@ -436,6 +436,12 @@ print(prof.report())
 # Accuracy Debugging
 Accuracy issues can also be minified if you set the environment variable `TORCHDYNAMO_REPRO_LEVEL=4`, it operates with a similar git bisect model and a full repro might be something like `TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4` the reason we need this is downstream compilers will codegen code whether it's Triton code or the C++ backend, the numerics from those downstream compilers can be different in subtle ways yet have dramatic impact on your training stability. So the accuracy debugger is very useful for us to detect bugs in our codegen or with a backend compiler. 
 
+It's worth noting that the accuracy minifier is not bug free, and may not be able to figure out what's wrong with your program.  It's low cost to try out, so you should try it out, but if it doesn't work, don't be surprised.  Common reasons it doesn't work:
+
+- The graph has an empty() call and the accuracy minifier removed the mutation that fills it with data
+- The graph has randomness in it that isn't properly reseeded; you're comparing the Inductor RNG to eager RNG (which gives different results)
+- There is an unstable operation (e.g., batch norm on a small batch size) which results in the difference measure being exceeded, even though it doesn't matter
+
 # File an Issue
 You should feel encouraged to [file a github issue](https://github.com/pytorch/torchdynamo/issues) and expect a timely response.
 
