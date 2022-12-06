@@ -10,3 +10,7 @@ This repository still contains:
 - Issues: we will continue using this project for issue tracking
 
 For Documentation: https://pytorch.org/docs/master/dynamo/
+
+## License
+
+TorchDynamo has a BSD-style license, as found in the LICENSE file.
