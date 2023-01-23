@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: torch.compile and torchdynamo bug reports
+    url: https://github.com/pytorch/pytorch/issues/new/choose
+    about: Report bugs and request features for torch.compile
