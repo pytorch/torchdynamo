@@ -6,7 +6,7 @@ We have moved TorchDynamo to
 - `import torchdynamo` is now `import torch._dynamo`
 - `import torchinductor` is now `import torch._inductor`
 
-For Documentation: https://pytorch.org/docs/stable/dynamo/index.html
+For Documentation: https://pytorch.org/docs/stable/torch.compiler.html
 
 ## License
 
